@@ -10,5 +10,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/WorkerDock.IntegrationTests/WorkerDock.IntegrationTests.csproj" />
     <Project Path="tests/WorkerDock.TestHost/WorkerDock.TestHost.csproj" />
+    <Project Path="tests/WorkerDock.UnitTests/WorkerDock.UnitTests.csproj" />
   </Folder>
 </Solution>

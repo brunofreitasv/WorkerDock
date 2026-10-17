@@ -61,3 +61,21 @@ The mutation requires the server antiforgery header, a same-origin `Origin`, and
 `InMemoryTenantSettingsService` implements the same `ITenantSettingsService` port as SQL. It exercises version checks and atomic settings/audit behavior but is disposable, single-process and available only in Development. Restart loses settings/audit. `/health/live` reports liveness; `/health/ready` verifies the selected tenant settings adapter. Operational dashboard/monitoring/audit routes currently report `available:false`; later stages provide their data projections. The shell displays that limitation instead of fabricated results.
 
 Real SQL setup/tests are in [database.md](database.md). Memory and OIDC fixture results do not establish SQL durability, migration correctness, security isolation or Quartz clustering. Running the full unfiltered integration suite without `WORKERDOCK_TEST_SQL` produces explicit `SQL_TEST_BLOCKED` failures for live SQL cases; report them separately, never as passes.
+
+## Schedule policy tests without SQL
+
+The evaluator and memory Quartz tests use the same application scheduling port
+and native Quartz policy calendar as SQL projections. Run from the repository
+root; no SQL variables are needed:
+
+```powershell
+dotnet test tests/WorkerDock.UnitTests -c Release
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter '(FullyQualifiedName~CalendarPersistenceTests|FullyQualifiedName~CalendarExecutionTests)&Store!=Sql'
+```
+
+These prove filtering, one-time conversion, bounded enumeration, in-process JSON
+serialization, stored memory trigger calculations and actual memory job dispatch
+with an injected clock. They do not prove SQL calendar blobs survive restart.
+The browser memory host still exposes settings only; the schedule editor and its
+preview endpoint arrive in the scheduling UI stage. See
+[quartz-integration.md](quartz-integration.md) for the five-field and DST policy.

@@ -72,7 +72,7 @@ public sealed class QuartzTopology(QuartzConnections connections) : IAsyncDispos
                     var settings = new SqlConnectionStringBuilder(connections.ConnectionString);
                     settings.ConnectTimeout = Math.Clamp(settings.ConnectTimeout, 1, 10);
                     store.UseSqlServer(SqlClientFactory.Instance, settings.ConnectionString);
-                    store.UseSystemTextJsonSerializer();
+                    store.UseSystemTextJsonSerializer(json => json.AddCalendarSerializer(new Scheduling.WorkerDockPolicyCalendarSerializer()));
                     store.UseClustering();
                     store.ConfigureStore(settings =>
                     {

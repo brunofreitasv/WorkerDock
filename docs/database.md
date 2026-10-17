@@ -74,3 +74,21 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifie
 ```
 
 For the independent in-memory instance and exact mock test commands, see [development.md](development.md). For Production/IIS, require HTTPS, the SQL runtime adapter and the protected data-protection key directory in [authentication.md](authentication.md). Configure the appropriate IIS hosting identity and directory ACLs during deployment, not through application database grants. Real SQL verification remains pending until an authorized disposable instance is supplied and those SQL tests pass. Memory tests do not prove durability, SQL locking/migrations, multi-process security isolation or Quartz clustering.
+
+## Calendar persistence verification
+
+After supplying the disposable `WORKERDOCK_TEST_SQL` connection as above, run:
+
+```powershell
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~CalendarPersistenceTests&Store=Sql'
+```
+
+The seven restart fixtures create their own disposable database, apply both
+numbered migrations, store a native trigger and versioned policy calendar via
+`IScheduler`, shut down the first handle, open a new handle, and compare stored
+filtered occurrences. These serializer/restart cases use the fixture provisioner;
+the separate Quartz process suite above remains the required restricted-login and
+cluster proof. No new schema objects, runtime grants or migration scripts are
+introduced by the calendar payload. These SQL cases remain explicitly pending
+until the configured instance runs them successfully. JSON and RAMJobStore passes
+are recorded separately.
