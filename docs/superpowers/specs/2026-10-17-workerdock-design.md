@@ -2,7 +2,7 @@
 
 Date: 2026-10-17 (America/Sao_Paulo)
 
-Status: Revised at the user's request to use Quartz.NET with SQL Server for scheduling and dispatch. Consolidated written specification awaiting user approval. No implementation is authorized by this document's creation. After written-spec approval, prepare and review the implementation plan and select its execution method before implementation.
+Status: Revised to use Quartz.NET with SQL Server for scheduling and dispatch and approved by the user on 2026-10-17. Implementation planning is authorized; implementation remains gated on plan review and execution-method selection.
 
 ## 1. Purpose and agreed scope
 
@@ -419,7 +419,7 @@ The user subsequently requested Quartz.NET with SQL Server as the scheduling and
 
 Inline self-review checks requirements, consistency, placeholders and ambiguity. These details remain reviewable at this written-spec gate. No source implementation, scaffold, dependency installation, migration execution or implementation plan is part of this change.
 
-Next required action: user review and approval of this written file. Only then invoke the writing-plans skill, prepare the implementation plan, obtain its review and execution-method selection, and begin the authorized implementation stages.
+The user approved this revised written specification on 2026-10-17 and explicitly requested the writing-plans step. Next gate: review the implementation plans and select an execution method before implementation begins.
 
 ## References
 
