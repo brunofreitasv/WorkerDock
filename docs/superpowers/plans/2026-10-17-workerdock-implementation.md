@@ -30,6 +30,7 @@ The following requirements apply to every stage; quoted sentences retain the spe
 - Secrets resolve at execution time; never persist their values or emit raw driver errors/bodies. Anonymous read/manage mode and optional Entra management-role protection must match spec section 7 exactly.
 - Infinite timeout remains renewable/stoppable. A 10-second application heartbeat, 60-second lease and 30-second cancellation grace are the initial defaults; shutdown/startup/network setup remain bounded.
 - WorkerDock uses MIT; preserve Apache-2.0 and other dependency notices. Do not reuse Milvaion code, branding or UI.
+- During development, provide an explicit in-memory testing instance through the same application ports. It is disposable and single-process; it must never be presented as proof of SQL Server durability, Quartz clustering, security isolation or migration correctness. Real SQL Server remains the required production store. Keep all SQL schema changes in paired forward/rollback scripts and keep `docs/development.md`/`docs/database.md` current with exact mock and real local setup/test commands.
 
 ## Review Focus
 
@@ -56,7 +57,7 @@ This is the review index, not an extra implementation task. Execute the linked p
 
 Within each task, write the specified behavioral test, observe its relevant failure, implement the stated interface, verify and commit. Test snippets pin assertions rather than provide whole test fixtures. Arrange their named inputs in the listed test class; fixture methods are test-local unless an interface is explicitly exported. Never count a missing SDK/database or an unrelated compile failure as the expected red test. Do not write tests that merely assert scaffolding/file existence.
 
-At every stage exit, report changes, decisions, commands/results and limitations before continuing under the approved execution method. A failure of the approved architecture's required proof pauses dependent work for a concrete design correction, not an unapproved switch to a custom engine or broker.
+At every stage exit, report changes, decisions, commands/results and limitations before continuing under the approved execution method. The user's later in-memory testing directive allows development to advance while local SQL access is unavailable; carry missing real-SQL proofs as explicit unresolved acceptance items and never relabel mock evidence as production proof. A failure observed on real SQL/Quartz requires a concrete design correction, not an unapproved switch to a custom engine or broker.
 
 ## File structure and shared conventions
 
@@ -141,11 +142,11 @@ Planning-only artifacts: six stage plans contain 24 tasks and 120 task steps, in
 | Health refresh exception conflicted with management-mutation wording | Read access only for observational refresh; configuration stays management-only, Task 20 |
 | Phase dependencies postponed required migration grants and test bootstrap | Ownership rules above and explicit baseline schemas/fixtures |
 
-Readiness verdict: sufficiently specified to begin Task 01 after user plan approval/execution-method selection and environment preflight. This is not evidence that the distributed runtime already works. Real SQL/Quartz capacity, restart and calendar proofs in Tasks 03–04 remain blocking exit criteria before Stage 02. .NET 10 installation/location and a disposable SQL Server test connection are unresolved environment prerequisites; neither was changed or verified by this document review.
+Readiness verdict at plan approval: sufficiently specified to begin Task 01. The user subsequently directed an in-memory testing instance first, with SQL Server adapters and complete setup/migration scripts retained for later real database use. In-memory tests permit staged development but cannot validate SQL locks, migrations, Quartz clustering or durability; label these checks pending, not passed. Production/release readiness still requires the real SQL/Windows proofs described in the task and stage exits. .NET 10.0.402 was observed at execution preflight; local SQL Server rejected the Windows login.
 
-Recommended method: **Subagent-driven**, because isolated process control, SQL/Quartz race boundaries and authorization deserve review at each task boundary. Native execution is supported as the lower-overhead alternative, with one independent whole-branch review at the end. No execution method has been selected yet. The user-requested managed worktree already exists and contains this reviewed plan set; reuse it for implementation after approval.
+Selected method: **Subagent-driven** by explicit user invocation. The managed worktree is active. Each task gets an independent review; deferred SQL evidence must be closed before a production release claim.
 
 - [x] User reviews and approves these six stage plans (2026-10-17: "go ahead").
 - [x] User selects Subagent-driven execution (explicit skill invocation, 2026-10-17).
 - [x] Reuse the user-requested managed worktree prepared with the plan set; verified detached linked worktree at 9339d87 with only reviewed plan edits and no implementation baseline to test.
-- [ ] Execute task 01 only after those gates; continue in dependency order with stage reports.
+- [x] Began Task 01 after approval on 2026-10-17; continue in dependency order with per-task review and separate unresolved real-SQL evidence.
