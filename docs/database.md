@@ -8,13 +8,22 @@ For tests, set `WORKERDOCK_TEST_SQL` to a connection string for that disposable 
 
 ```powershell
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~MigrationTests|FullyQualifiedName~TenantSettingsTests'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzCapacityTests|FullyQualifiedName~QuartzSqlTopologyTests'
 ```
 
-For local manual setup, create an empty tenant database at compatibility level 160. Supply a deployment-only migrator connection string in `WORKERDOCK_SQL` and a newly generated, stable GUID in `WORKERDOCK_INSTANCE_ID`; the GUID binds this database to one tenant context. Run `dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0001_bootstrap`. The migrator checks both script checksums before connecting, records them in `SchemaHistory`, and verifies the stored instance ID on later runs. Only the migrator login needs DDL rights. Add the runtime database user to `WorkerDockRuntime`, which grants settings read/update and audit append rights. Configure `Tenant__ConnectionString` and `Tenant__InstanceId` for the web host from deployment secrets/configuration, never a browser selector.
+For local manual setup, create an empty tenant database at compatibility level 160. Supply a deployment-only migrator connection string in `WORKERDOCK_SQL` and a newly generated, stable GUID in `WORKERDOCK_INSTANCE_ID`; the GUID binds this database to one tenant context. Run `dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0002_quartz`. The migrator applies `0001_bootstrap` first, checks both script checksums before connecting, records them in `SchemaHistory`, and verifies the stored instance ID on later runs. Only the migrator login needs DDL rights. Add the runtime database user to `WorkerDockRuntime`, which grants settings/audit rights plus DML on both Quartz table sets. Configure `Tenant__ConnectionString` and `Tenant__InstanceId` for the web host from deployment secrets/configuration, never a browser selector.
 
 Before any migration DDL, the runner reads the connected server's major version and the connected database's compatibility level. It requires SQL Server major version 16 or later and compatibility level exactly 160, returning `UnsupportedSqlServerVersion` or `UnsupportedCompatibilityLevel` otherwise. This check and the scripts still require live verification on the disposable SQL test instance.
 
 Rollback requires a backup and an empty audit/outbox, default settings, and no runtime role members. Run `dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0001_bootstrap` only for an empty disposable database. Populated rollback returns `UnsafeRollback`; preserve the backup for restore instead. The migration uses a transaction and SQL application lock. `SchemaHistory` checksums are immutable once applied; add a new numbered pair to change a released schema.
+
+For Quartz rollback, stop all scheduler, worker and publisher processes and
+confirm both Quartz stores contain no work. Back up the database, then run
+`dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0002_quartz`.
+Its paired script refuses populated store tables and removes both table sets
+transactionally. An idle process that could submit work must also be stopped;
+the empty-table guard cannot prevent future writes by a process that remains
+running.
 
 The migration script is checked into `database/tenant` with its SHA-256 values in `manifest.json`. Central database migrations begin in Task 20. SQL integration outcomes must be reported separately from memory tests.
 
@@ -30,6 +39,7 @@ For a newly provisioned, dedicated empty local tenant database, run these exact 
 $env:WORKERDOCK_INSTANCE_ID='<new-stable-instance-guid>'
 $env:WORKERDOCK_SQL='<dedicated-local-tenant-migrator-connection-string>'
 dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0001_bootstrap
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0002_quartz
 $env:Tenant__Adapter='SqlServer'
 $env:Tenant__InstanceId=$env:WORKERDOCK_INSTANCE_ID
 $env:Tenant__ConnectionString='<dedicated-local-tenant-runtime-connection-string>'
@@ -45,6 +55,7 @@ In a separate test shell, only against the disposable test SQL instance provisio
 ```powershell
 $env:WORKERDOCK_TEST_SQL='<dedicated-disposable-sql-instance-connection-string>'
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~WorkerDock.IntegrationTests.MigrationTests|FullyQualifiedName~WorkerDock.IntegrationTests.TenantSettingsTests'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzCapacityTests|FullyQualifiedName~QuartzSqlTopologyTests'
 ```
 
 For the independent in-memory instance and exact mock test commands, see [development.md](development.md). For Production/IIS, require HTTPS, the SQL runtime adapter and the protected data-protection key directory in [authentication.md](authentication.md). Configure the appropriate IIS hosting identity and directory ACLs during deployment, not through application database grants. Real SQL verification remains pending until an authorized disposable instance is supplied and those SQL tests pass. Memory tests do not prove durability, SQL locking/migrations, multi-process security isolation or Quartz clustering.

@@ -11,6 +11,21 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifie
 dotnet build WorkerDock.slnx -c Release
 ```
 
+Quartz memory tests use the same `QuartzTopology` creation methods as the SQL
+adapter, with a disposable single-process RAM store. Run them separately so a
+missing SQL Server is never counted as a Quartz pass:
+
+```powershell
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzTopologyTests'
+```
+
+`QuartzTopology.CreateMemory(instanceId, "Development")` is selected by the
+composition root when a local Quartz host is added. The current browser memory
+instance exercises tenant settings and policy ports; it does not start a
+Quartz scheduler or expose a job submission route. See
+[quartz-integration.md](quartz-integration.md) for the scheduler port and its
+memory/SQL behavior.
+
 If npm fails with `UNABLE_TO_VERIFY_LEAF_SIGNATURE` on a machine whose corporate CA is in the Windows trust store, use `$env:NODE_OPTIONS='--use-system-ca'` in that restore shell, then repeat `npm.cmd --prefix frontend ci`. Do not disable TLS verification. This is a local restore workaround, not an application runtime requirement.
 
 ## Disposable memory instance

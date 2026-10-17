@@ -4,9 +4,11 @@
     <Project Path="src/WorkerDock.DatabaseMigrator/WorkerDock.DatabaseMigrator.csproj" />
     <Project Path="src/WorkerDock.Domain/WorkerDock.Domain.csproj" />
     <Project Path="src/WorkerDock.Infrastructure/WorkerDock.Infrastructure.csproj" />
+    <Project Path="src/WorkerDock.Quartz/WorkerDock.Quartz.csproj" />
     <Project Path="src/WorkerDock.Web/WorkerDock.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WorkerDock.IntegrationTests/WorkerDock.IntegrationTests.csproj" />
+    <Project Path="tests/WorkerDock.TestHost/WorkerDock.TestHost.csproj" />
   </Folder>
 </Solution>

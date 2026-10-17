@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Quartz" />
+    <PackageReference Include="Microsoft.Data.SqlClient" />
+    <ProjectReference Include="../WorkerDock.Infrastructure/WorkerDock.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
