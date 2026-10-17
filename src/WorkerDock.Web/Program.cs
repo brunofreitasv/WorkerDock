@@ -18,6 +18,15 @@ ITenantSettingsService? ResolveSettings()
         ? new TenantSettingsService(new(connection, id)) : null;
 }
 
+static IResult SafeProblem(int status, string code, string field = "") =>
+    Results.Problem(statusCode: status, extensions: new Dictionary<string, object?>
+    {
+        ["code"] = code,
+        ["field"] = field
+    });
+
+static string ETag(byte[] version) => '"' + Convert.ToBase64String(version) + '"';
+
 app.MapGet("/health/live", () => Results.Json(new { status = "live" }));
 app.MapGet("/health/ready", async (CancellationToken ct) =>
 {
@@ -34,38 +43,47 @@ app.MapGet("/health/ready", async (CancellationToken ct) =>
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapGet("/_test/settings", async (CancellationToken ct) =>
+    app.MapGet("/_test/settings", async (HttpResponse response, CancellationToken ct) =>
     {
         var service = ResolveSettings();
         if (service is null)
-            return Results.StatusCode(503);
+            return SafeProblem(503, "PersistenceUnavailable");
         try
         {
             var settings = await service.GetAsync(ct);
+            response.Headers.ETag = ETag(settings.Version);
             return Results.Ok(new { settings.DisplayName, settings.DisplayTimeZone, Version = Convert.ToBase64String(settings.Version) });
         }
-        catch { return Results.StatusCode(503); }
+        catch { return SafeProblem(503, "PersistenceUnavailable"); }
     });
 
     app.MapPut("/_test/settings", async (HttpRequest request, TestSettingsUpdate input, CancellationToken ct) =>
     {
-        if (request.Headers["X-WorkerDock-CSRF"] != "development") return Results.StatusCode(403);
+        if (request.Headers["X-WorkerDock-CSRF"] != "development")
+            return SafeProblem(403, "Forbidden", "headers.xWorkerDockCsrf");
         var service = ResolveSettings();
-        if (service is null) return Results.StatusCode(503);
-        if (!request.Headers.TryGetValue("If-Match", out var etag)) return Results.StatusCode(412);
+        if (service is null) return SafeProblem(503, "PersistenceUnavailable");
+        if (!request.Headers.TryGetValue("If-Match", out var etag))
+            return SafeProblem(412, "InvalidIfMatch", "headers.ifMatch");
         byte[] expected;
-        try { expected = Convert.FromBase64String(etag.ToString().Trim('"')); }
-        catch (FormatException) { return Results.StatusCode(412); }
+        var tag = etag.ToString();
+        if (tag.Length < 3 || tag[0] != '"' || tag[^1] != '"')
+            return SafeProblem(412, "InvalidIfMatch", "headers.ifMatch");
+        try { expected = Convert.FromBase64String(tag[1..^1]); }
+        catch (FormatException) { return SafeProblem(412, "InvalidIfMatch", "headers.ifMatch"); }
         try
         {
             var current = await service.GetAsync(ct);
             var updated = await service.UpdateAsync(current with { DisplayName = input.DisplayName, DisplayTimeZone = input.DisplayTimeZone },
                 expected, testActor with { CorrelationId = Guid.NewGuid() }, ct);
+            request.HttpContext.Response.Headers.ETag = ETag(updated.Version);
             return Results.Ok(new { updated.DisplayName, updated.DisplayTimeZone, Version = Convert.ToBase64String(updated.Version) });
         }
-        catch (WorkerDockException error) when (error.Code == "StaleVersion") { return Results.StatusCode(412); }
-        catch (WorkerDockException error) when (error.Code == "ValidationFailed") { return Results.BadRequest(new { code = error.Code, field = error.Field }); }
-        catch { return Results.StatusCode(503); }
+        catch (WorkerDockException error) when (error.Code == "StaleVersion")
+        { return SafeProblem(412, error.Code, "headers.ifMatch"); }
+        catch (WorkerDockException error) when (error.Code == "ValidationFailed")
+        { return SafeProblem(400, error.Code, error.Field ?? ""); }
+        catch { return SafeProblem(503, "PersistenceUnavailable"); }
     });
 }
 

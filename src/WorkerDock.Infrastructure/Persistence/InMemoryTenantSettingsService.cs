@@ -1,20 +1,25 @@
+using System.Collections.Immutable;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Tenants;
 using WorkerDock.Domain.Tenants;
 
 namespace WorkerDock.Infrastructure.Persistence;
 
-public sealed class InMemoryTenantSettingsService(Guid instanceId, Func<ActorContext, CancellationToken, ValueTask>? appendAudit = null) : ITenantSettingsService
+public sealed class InMemoryTenantSettingsService(Guid instanceId, Func<CancellationToken, ValueTask>? beforeAuditCommit = null) : ITenantSettingsService
 {
     private readonly SemaphoreSlim gate = new(1, 1);
-    private TenantSettings current = new(instanceId, "WorkerDock", "UTC", BitConverter.GetBytes(1L));
-    private int auditEventCount;
-    public int AuditEventCount => Volatile.Read(ref auditEventCount);
+    private MemoryState state = new(new(instanceId, "WorkerDock", "UTC", BitConverter.GetBytes(1L)), []);
+    public int AuditEventCount => Volatile.Read(ref state).AuditEvents.Length;
+    public ImmutableArray<TenantAuditEvent> AuditEvents => Volatile.Read(ref state).AuditEvents;
 
     public async ValueTask<TenantSettings> GetAsync(CancellationToken ct)
     {
         await gate.WaitAsync(ct);
-        try { return current with { Version = (byte[])current.Version.Clone() }; }
+        try
+        {
+            var current = state.Settings;
+            return current with { Version = (byte[])current.Version.Clone() };
+        }
         finally { gate.Release(); }
     }
 
@@ -24,18 +29,27 @@ public sealed class InMemoryTenantSettingsService(Guid instanceId, Func<ActorCon
         await gate.WaitAsync(ct);
         try
         {
+            var snapshot = state;
+            var current = snapshot.Settings;
             if (!current.Version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
             var next = desired with { Version = BitConverter.GetBytes(BitConverter.ToInt64(current.Version) + 1) };
             try
             {
-                if (appendAudit is not null) await appendAudit(actor, ct);
+                if (beforeAuditCommit is not null) await beforeAuditCommit(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch { throw new WorkerDockException("PersistenceUnavailable"); }
-            current = next;
-            Interlocked.Increment(ref auditEventCount);
+            ct.ThrowIfCancellationRequested();
+            var audit = new TenantAuditEvent(Guid.NewGuid(), "TenantSettingsUpdated", actor.Subject,
+                actor.AuthenticationMode, actor.CorrelationId, DateTimeOffset.UtcNow);
+            Volatile.Write(ref state, new MemoryState(next, snapshot.AuditEvents.Add(audit)));
             return next with { Version = (byte[])next.Version.Clone() };
         }
         finally { gate.Release(); }
     }
+
+    private sealed record MemoryState(TenantSettings Settings, ImmutableArray<TenantAuditEvent> AuditEvents);
 }
+
+public sealed record TenantAuditEvent(Guid EventId, string EventType, string ActorSubject,
+    string AuthenticationMode, Guid CorrelationId, DateTimeOffset OccurredAtUtc);

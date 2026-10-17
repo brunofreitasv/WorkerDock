@@ -37,6 +37,7 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
         {
             await using var connection = new SqlConnection(connectionString);
             await connection.OpenAsync(ct);
+            await CheckPrerequisitesAsync(connection, ct);
             if (rollback)
                 await RollbackOneAsync(connection, directory, entries[index], ct);
             else
@@ -44,6 +45,15 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
         }
         catch (SqlException error) when (error.Number == 51002) { throw new WorkerDockException("UnsafeRollback"); }
         catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
+    }
+
+    private static async Task CheckPrerequisitesAsync(SqlConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT CONVERT(int, SERVERPROPERTY(N'ProductMajorVersion')), CONVERT(int, compatibility_level) FROM sys.databases WHERE name = DB_NAME()";
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) throw new WorkerDockException("UnsupportedCompatibilityLevel");
+        SqlServerPrerequisites.Validate(reader.GetInt32(0), reader.GetInt32(1));
     }
 
     private async Task ApplyOneAsync(SqlConnection connection, string directory, MigrationEntry entry, CancellationToken ct)

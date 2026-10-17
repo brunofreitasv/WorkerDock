@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -19,8 +20,10 @@ public sealed class WebHostTests
                 })));
         using var client = factory.CreateClient();
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
-        var original = await client.GetFromJsonAsync<SettingsResponse>("/_test/settings");
+        using var getOriginal = await client.GetAsync("/_test/settings");
+        var original = await getOriginal.Content.ReadFromJsonAsync<SettingsResponse>();
         Assert.NotNull(original);
+        Assert.Equal('"' + original.Version + '"', getOriginal.Headers.ETag?.ToString());
         using var update = new HttpRequestMessage(HttpMethod.Put, "/_test/settings")
         {
             Content = JsonContent.Create(new { displayName = "Equipe", displayTimeZone = "America/Sao_Paulo" })
@@ -29,9 +32,35 @@ public sealed class WebHostTests
         update.Headers.TryAddWithoutValidation("X-WorkerDock-CSRF", "development");
         using var response = await client.SendAsync(update);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(response.Headers.ETag);
         var changed = await client.GetFromJsonAsync<SettingsResponse>("/_test/settings");
         Assert.Equal("Equipe", changed?.DisplayName);
         Assert.NotEqual(original.Version, changed?.Version);
+        using var stale = new HttpRequestMessage(HttpMethod.Put, "/_test/settings")
+        {
+            Content = JsonContent.Create(new { displayName = "Stale", displayTimeZone = "UTC" })
+        };
+        stale.Headers.TryAddWithoutValidation("If-Match", '"' + original.Version + '"');
+        stale.Headers.TryAddWithoutValidation("X-WorkerDock-CSRF", "development");
+        using var staleResponse = await client.SendAsync(stale);
+        Assert.Equal(HttpStatusCode.PreconditionFailed, staleResponse.StatusCode);
+        Assert.Equal("application/problem+json", staleResponse.Content.Headers.ContentType?.MediaType);
+        using var problem = JsonDocument.Parse(await staleResponse.Content.ReadAsStringAsync());
+        Assert.Equal("StaleVersion", problem.RootElement.GetProperty("code").GetString());
+        Assert.Equal("headers.ifMatch", problem.RootElement.GetProperty("field").GetString());
+
+        using var invalid = new HttpRequestMessage(HttpMethod.Put, "/_test/settings")
+        {
+            Content = JsonContent.Create(new { displayName = "", displayTimeZone = "UTC" })
+        };
+        invalid.Headers.TryAddWithoutValidation("If-Match", '"' + changed!.Version + '"');
+        invalid.Headers.TryAddWithoutValidation("X-WorkerDock-CSRF", "development");
+        using var invalidResponse = await client.SendAsync(invalid);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidResponse.StatusCode);
+        Assert.Equal("application/problem+json", invalidResponse.Content.Headers.ContentType?.MediaType);
+        using var validation = JsonDocument.Parse(await invalidResponse.Content.ReadAsStringAsync());
+        Assert.Equal("ValidationFailed", validation.RootElement.GetProperty("code").GetString());
+        Assert.Equal("displayName", validation.RootElement.GetProperty("field").GetString());
     }
 
     [Fact]
