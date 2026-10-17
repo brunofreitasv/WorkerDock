@@ -2,7 +2,7 @@
 
 Date: 2026-10-17 (America/Sao_Paulo)
 
-Status: Design sections approved in conversation; consolidated written specification awaiting user approval. No implementation is authorized by this document's creation. After written-spec approval, prepare and review the implementation plan and select its execution method before implementation.
+Status: Revised at the user's request to use Quartz.NET with SQL Server for scheduling and dispatch. Consolidated written specification awaiting user approval. No implementation is authorized by this document's creation. After written-spec approval, prepare and review the implementation plan and select its execution method before implementation.
 
 ## 1. Purpose and agreed scope
 
@@ -14,7 +14,7 @@ Initial design and load-test target: up to 10 independent tenants, 100 configure
 
 Built-in templates are SQL Server and HTTP. Job creation, edits, schedules, connection profiles, and concurrency changes are database operations: they do not install Windows services, deploy code, or restart workers. New worker-service installations add host capacity; installing or updating custom template code requires a controlled worker deployment.
 
-Milvaion informs the separation of scheduling from execution, reusable worker contracts, operator monitoring, and observability. WorkerDock uses its own implementation, branding, and UI. Its SQL Server coordination design replaces the external messaging infrastructure described by Milvaion [R1].
+Milvaion informs the separation of scheduling from execution, reusable worker contracts, operator monitoring, and observability. WorkerDock uses its own implementation, branding, and UI. Quartz.NET's SQL Server persistent store provides durable scheduling and worker dispatch without the external messaging infrastructure described by Milvaion [R1, R19]. WorkerDock adds product policies and execution supervision around Quartz rather than implementing a competing scheduling engine or worker queue.
 
 ## 2. Architecture and deployment boundaries
 
@@ -39,12 +39,16 @@ The center's health credential authorizes only a minimal tenant health endpoint.
 | Component | Responsibility | Allowed operational dependencies |
 | --- | --- | --- |
 | Tenant web application | React assets, management APIs, read APIs, OIDC sessions, schema validation, configuration and audit transactions | Tenant SQL Server, configured identity provider; no execution of job handlers |
-| Tenant scheduler service | Scheduled occurrence creation, retry promotion, abandoned-attempt recovery, alert evaluation/delivery, retention | Tenant SQL Server; alert vault credentials and approved webhook/archive destinations |
-| Tenant worker service | Capability registration, admission, execution supervision, leases, stop requests, sanitized results | Tenant SQL Server and local execution host |
+| Tenant scheduler service | Runs the Quartz schedule/control scheduler; projects configuration and dispatch intents into Quartz; applies occurrence/recovery policies and operational maintenance | Tenant SQL Server; alert vault credentials and approved webhook/archive destinations |
+| Tenant worker service | Runs a node of the Quartz execution cluster; supervises isolated attempts, ownership fencing, stop requests and sanitized results | Tenant SQL Server and local execution host |
 | Execution child process | One attempt or diagnostic execution, template validation, secret resolution, SQL/HTTP/custom handler execution | Tenant vault and explicitly permitted job destinations |
 | Central web application | Tenant registry, central audit, minimal health probes, navigation | Central SQL Server, its identity provider/vault, registered approved health URLs |
 
 Each execution runs in a child process started from installed WorkerDock binaries. It is not a new Windows service or deployment. The worker supervises children and remains responsive when a handler hangs. Long-running scheduling/execution lives outside IIS because its process lifecycle includes recycling and idle termination [R2].
+
+Each tenant has two logical Quartz schedulers in its existing database: `WorkerDock.Schedule` uses `WDS_QRTZ_` tables for short schedule/control jobs; `WorkerDock.Execute` uses `WDE_QRTZ_` tables for execution dispatch. These are table sets, not extra databases or services. Only scheduler services start the first scheduler; only worker services start the second. This prevents a scheduler node from acquiring a long-running worker job and separates maintenance capacity from job capacity. Each cluster uses a stable scheduler name and unique node/boot identities; multiple scheduler instances are possible for resilience, although one is sufficient initially.
+
+The scheduler service publishes execution triggers through a second, write-only Quartz scheduler handle configured with `ZeroSizeThreadPool`; that handle is never started. Quartz documents this write-only use [R19]. The web application writes WorkerDock commands and audit records, not Quartz tables. No Quartz dashboard, HTTP management endpoint, remote agent or additional inbound worker port is required. All user access remains through WorkerDock's policies.
 
 ### 2.3 Code organization
 
@@ -55,23 +59,25 @@ Names below define project responsibilities; folders within Infrastructure and R
 | WorkerDock.Domain | Job policies, execution states, scheduling and lifecycle invariants; no database or hosting dependencies |
 | WorkerDock.Contracts | Template metadata/handler contracts, execution context, secret facade, safe logging and alert-sink interfaces |
 | WorkerDock.Application | Use cases and persistence/coordination interfaces; depends on Domain and Contracts |
-| WorkerDock.Infrastructure | SQL Server persistence/coordination, secret adapters, outbound policy, audit storage, authentication integration and telemetry adapters |
-| WorkerDock.Runtime | Scheduler loops, worker supervision, restricted IPC and Windows process containment using application interfaces |
+| WorkerDock.Infrastructure | WorkerDock SQL Server persistence and business-state transactions, secret adapters, outbound policy, audit, authentication and telemetry adapters |
+| WorkerDock.Quartz | Quartz configuration, SQL stores, schedule/calendar adapter, idempotent projection, dispatch wrapper and lifecycle integration; depends on Application/Contracts |
+| WorkerDock.Runtime | Worker supervision, attempt ownership, restricted IPC and Windows process containment using application interfaces |
 | WorkerDock.Templates.SqlServer | SQL template schema, validation, connection builder, handler and result classification |
 | WorkerDock.Templates.Http | HTTP template schema, validation, substitution, destination policy integration and handler |
 | WorkerDock.Web | Tenant IIS composition root and tenant read/management endpoints |
-| WorkerDock.Scheduler | Windows-service/foreground composition root for scheduler and operational loops |
-| WorkerDock.Worker | Windows-service/foreground composition root for worker supervision |
+| WorkerDock.Scheduler | Windows-service/foreground composition root for schedule/control Quartz jobs and the execution-store publisher |
+| WorkerDock.Worker | Windows-service/foreground composition root for the Quartz execution node and worker supervision |
 | WorkerDock.Executor | Child-process composition root loading installed, explicitly registered trusted templates |
 | WorkerDock.ControlCenter | Central registry, central read/management APIs and health-probe composition root |
 | WorkerDock.DatabaseMigrator | Explicit installation/upgrade tool for versioned SQL scripts using migration credentials |
 | Frontend workspace | Separate tenant and central React entry points with shared UI, localization and API utilities |
 
-Templates depend on Contracts and their client libraries, not scheduler implementation. Hosts compose modules through dependency injection. The central application does not acquire a tenant persistence dependency or reuse tenant authorization as a bypass. EF Core implements ordinary reads and configuration persistence; explicit parameterized SQL/stored procedures implement atomic coordination. Versioned SQL scripts are the authoritative schema migration source; there is no competing automatic EF schema-creation path.
+Templates depend on Contracts and their client libraries, not Quartz or scheduler implementation. Hosts compose modules through dependency injection. The central application does not acquire a tenant persistence dependency or reuse tenant authorization as a bypass. EF Core implements ordinary WorkerDock reads/configuration persistence; parameterized SQL/stored procedures implement business-state invariants. Quartz owns its store's acquisition, locking and cluster bookkeeping. Use public `IScheduler` APIs, not direct edits to Quartz rows, a replacement `IJobStore`, or a fork of Quartz. Versioned SQL scripts are the authoritative schema migration source; there is no competing automatic EF or Quartz schema-creation path.
 
 ## 3. Platform baseline
 
 - .NET 10 LTS, ASP.NET Core, C#, with compatible pinned stable package versions and current security patches [R3].
+- Quartz.NET 4.5.1 is the researched baseline as of this revision, with SQL Server ADO.NET persistence, clustering and cluster-scoped execution groups. Pin matching package versions and validate their APIs/schema against the chosen release before implementation; upgrades require the same regression checks [R20-R22]. Quartz retains its Apache-2.0 license and notices [R23].
 - SQL Server 2022 minimum; default schema compatibility target 160 [R4].
 - Windows Server 2022 or newer, x64, IIS and the appropriate ASP.NET Core Hosting Bundle. Windows 11 supports local development. Validate the supported OS/package matrix during implementation planning.
 - React, TypeScript, Vite, Material UI and TanStack Query. Production serves compiled assets from ASP.NET Core/IIS and does not require Node.js [R5-R7].
@@ -87,15 +93,17 @@ Every tenant database stores one tenant context. Tenant selection is deployment 
 | --- | --- |
 | Tenant settings | Stable instance identity, nonsecret settings, provider references, operational policies |
 | Template catalog | Identifier/version, metadata/schema, descriptor digest, compatibility and enablement; registered by trusted worker packages |
-| Template policies | Live concurrency limit per template identifier, shared across its installed versions |
+| Template policies | Tenant-wide limit per template identifier across versions; desired/effective policy revision and node acknowledgements |
 | Jobs | Name, current revision, enable/archive state and live per-job concurrency limit |
 | Job revisions | Immutable template/version, configuration, profile identifier, timeout, retry/recovery and overlap policies |
-| Schedules | One-time/cron definition, zone, schedule revision, pause state, next due instant, last evaluated cursor, missed-work policy |
+| Schedules | Original cron text/dialect, zone, schedule revision, pause state, occurrence cursor, missed-work policy and Quartz projection revision; next-run display derived through the schedule adapter |
 | Executions | Job revision, resolved profile revision, trigger kind, scheduled instant, request/occurrence key, idempotency key, status, availability time and correlation ID |
 | Attempts | Attempt number, worker identity, ownership generation, lease expiry, start/deadline/end, result/error classification and stop state |
 | Workers/capabilities | Service installation identity, current boot identity, heartbeat, local capacity and exact supported template versions |
 | Service health | Scheduler/service boot identity, heartbeat and safe readiness observations |
-| Reservations | Logical job permits and attempt-level template/worker capacity reservations; ownership linked to execution/attempt |
+| Job permits | Logical per-job admission/ordering permits retained across retry waiting and review holds; no duplicate template-capacity ledger |
+| Projection outbox | Durable schedule/dispatch/control intents, entity revision, deterministic Quartz keys, payload digest, publication/reconciliation state and bounded retry time |
+| Quartz-owned scheduling data | Separate schedule/control and execution table sets for jobs, triggers, calendars, fired triggers, locks and cluster check-ins; upstream schema and lifecycle |
 | Connection-profile revisions | Nonsecret server/catalog/authentication options and credential references; no password or full connection string |
 | Execution events/logs | Ordered status events and safe structured logs with sequence IDs, size limits and retention timestamps |
 | Audit events | Actor, UTC time, action, target, correlation, safe before/after projection and outcome |
@@ -111,42 +119,74 @@ Uniqueness includes scheduled occurrence `(ScheduleId, ScheduleRevision, Schedul
 
 Logical execution states are Queued, Running, RetryWaiting, NeedsReview, Succeeded, Failed, Stopped, TimedOut and Skipped. Held by disablement, waiting for capacity and missing capability are reasons attached to a nonterminal state, not successful outcomes. Attempts separately record Claimed/Starting, Running and a final success/failure/timeout/stop/abandonment outcome. Skipped executions have no attempt. Terminal execution state and remote-effect certainty are separate fields; NeedsReview remains nonterminal until reconciled.
 
-Index due/available work by state, eligibility time and priority; index active leases by expiry and all history by parent identity/time. Monitoring queries use pagination and time-window limits. Foreign keys and retention ordering protect active work and the revisions it references.
+Index WorkerDock's outstanding projection intents, per-job admission backlog, active ownership expiry and history by parent identity/time. Quartz owns indexes for trigger acquisition. Monitoring queries use pagination and time-window limits. Foreign keys within WorkerDock and retention ordering protect active work and referenced revisions; do not create cross-schema foreign keys into Quartz internals. Store only opaque identifiers, revision/generation numbers and safe correlation data as string-valued Quartz job data. Job configuration, secret references, SQL text and request bodies remain outside Quartz data and diagnostics.
 
 ## 5. Coordination and delivery guarantees
 
-### 5.1 Atomic scheduling and claiming
+### 5.1 Ownership of scheduling and dispatch
 
-The first implementation favors a single short transaction-owned coordination application lock per tenant database for state transitions that affect schedules, admission, capacity, stop/disable decisions or recovery. This intentionally serializes small metadata changes for the agreed workload. It does not serialize job execution. Independent tenant databases have independent locks. SQL Server transaction-owned application locks release on commit/rollback [R9].
+| Concern | Owner |
+| --- | --- |
+| Persistent timers, trigger acquisition, database scheduling locks, execution-group capacity and cluster failover | Quartz SQL Server stores |
+| Cron parsing and candidate calculation | Quartz, with the explicit WorkerDock policy calendar in section 6.1 |
+| Job configuration/revisions, occurrence identity, missed-work policy, logical execution history and audit | WorkerDock application transactions |
+| Per-job ordering across retries, retry safety decisions and uncertain-outcome review | WorkerDock business policies |
+| Child lifetime, durable operator stop and stale-result rejection | WorkerDock supervisor and attempt ownership fence |
+| Transfer of committed business intent into Quartz | WorkerDock transactional outbox and idempotent `IScheduler` projection |
 
-All coordinating writers, including the API, scheduler and workers, use the same protocol. Acquire the coordination lock before mutable coordination rows, use bounded lock timeouts, check every lock return code, and roll back on failure before retrying with jitter. Heartbeat renewals use conditional row updates and do not revive expired ownership. No network call or handler runs inside a coordination transaction. Migration scripts include the required routines and permissions.
+Workers do not poll a WorkerDock work table and perform their own queue-claim algorithm. Quartz selects a persisted dispatch trigger and invokes a generic `ExecuteTemplateJob` wrapper. The wrapper validates the referenced execution and attempt authorization, starts its isolated child and stays awaited until that child's exit and outcome handling. Returning immediately after spawning a child would release Quartz capacity too early and is prohibited. Configure bounded acquisition with no application prefetch.
 
-Scheduling transaction: recheck job/schedule state, apply the occurrence policy, insert executions/events, and advance the cursor atomically. An edit increments schedule revision under the same protocol and computes a new next occurrence; already created executions remain unchanged. The unique key is a final duplicate-insertion guard.
+The schedule/control cluster runs short occurrence-dispatch, projection/reconciliation, recovery-review, alert and retention jobs. Give maintenance jobs bounded batches and execution times; never put user handlers on this cluster. Quartz job keys and trigger keys identify immutable WorkerDock entities/revisions rather than display names. Enable clustering on every started node sharing a store and use the same compatible configuration/schema [R21].
 
-Claim transaction: select eligible work supported by the worker, recheck enabled/archive/stop state, verify live limits and local capacity, acquire permits, create an attempt and lease, and commit. Only then start the child. Do not prefetch more attempts than can start. A crash between commit and startup leaves a recoverable leased attempt. Missing template capability appears as a blocked reason on queued work, not a stream of failed attempts.
+### 5.2 Atomic intent and idempotent publication
 
-Normal database isolation and explicit locking must be tested under both READ_COMMITTED_SNAPSHOT settings. Do not assume READPAST alone guarantees correctness or skips page locks [R10]. Bounded application retries handle coordination deadlocks; they do not replay external job effects.
+A management command commits its WorkerDock mutation, audit event and projection intent together. It returns Accepted with a command/execution ID and visible pending/applied/failed state. Quartz API calls happen afterward. Sharing a SQL database does not make an application transaction and a Quartz store transaction atomic; the design does not depend on ambient distributed transactions.
 
-### 5.2 Concurrency and ordering
+The publisher processes durable intents through `IScheduler`, using deterministic job/trigger keys, immutable identity payloads and a payload digest. After publication it records acknowledgement in WorkerDock. A crash before publication leaves an intent to retry; a crash after publication leaves a replay that recognizes the same key. A mismatched existing payload is an integrity error, never silently overwritten. Schedule edits project in entity-revision order and recheck current desired state, so an old command cannot restore a disabled or replaced schedule. Old-revision triggers are removed through Quartz APIs and rejected by the dispatcher even before cleanup completes.
 
-- Template limits apply across the tenant, all worker instances and template versions. Installing another worker does not multiply the configured limit.
-- Per-worker capacity bounds local children. The worker's boot identity and database registration prevent a restarted process from inheriting previous ownership.
-- A per-job permit is allocated when an execution first starts and retained through retry waiting. Default queue overlap therefore prevents a later execution from overtaking a retrying execution. Attempt-level template/worker capacity is released between confirmed attempts.
-- Queue/skip executions use an exclusive job permit; allow executions use shared permits up to the live per-job limit. Shared permits cannot bypass an existing exclusive permit, and exclusive permits wait for all other permits to finish. Overlap skip records a skipped occurrence when the job already has an outstanding nonterminal execution. Queue mode has a configurable backlog bound; overflow is recorded as skipped with a reason and alert eligibility.
-- Capacity updates use the coordination transaction. Increases permit additional claims immediately. Template/worker decreases block new attempts until usage permits them; job-limit decreases block new logical executions while existing permit holders can finish their retries, still respecting attempt-level template/worker limits. This avoids deadlocking retry-waiting executions after a limit reduction. No decrease kills running work. A zero template/worker capacity means admission paused.
-- Eligible attempts use priority plus bounded aging; ties use oldest availability time and stable ID. Aging reduces starvation but cannot guarantee latency during sustained overload. Within a serialized job, retain execution order.
+An occurrence dispatcher commits the schedule cursor, deduplicated execution records, safe events and dispatch intents in one WorkerDock transaction. The uniqueness key `(ScheduleId, ScheduleRevision, ScheduledForUtc)` makes repeated/recovered dispatcher calls harmless. Execution publication uses a stable delivery identity tied to the execution and authorized attempt ordinal. A consumed trigger may already be absent when its publication acknowledgement is retried: reconcile the WorkerDock attempt/terminal state first rather than interpreting absence as proof that the work never ran.
 
-### 5.3 Leases and ownership
+The execution wrapper atomically checks the current authorization, enabled/archive/stop state, compatible capability, policy revision and ownership generation before creating an attempt. Duplicate deliveries cannot start the same authorized attempt twice. A completed attempt is a no-op; a live owner prevents a second launch; an expired owner follows section 5.5 and is never silently restarted as a fresh attempt. A crash after authorization but before launch remains an uncertain starting attempt unless the supervisor can prove no handler ran.
 
-Proposed defaults are a 10-second heartbeat and 60-second attempt lease, configurable with validation that leaves room for cancellation and shutdown. SQL Server time is authoritative for due times and lease comparisons. Renew attempt ownership and its reservations together using worker boot identity, generation, active state and an unexpired lease predicate. A late heartbeat cannot resurrect a recovered attempt.
+Use a short transaction-owned application lock for WorkerDock business transitions at the initial workload, acquired before mutable business rows [R9]. It is not Quartz's trigger-acquisition lock. Never call Quartz, a vault, a network endpoint or a child inside that transaction, and never acquire application locks while directly manipulating Quartz rows. Use bounded timeouts, checked lock results and deadlock retry without replaying external effects. Conditional heartbeat updates cannot revive expired ownership. Validate application transactions and Quartz integration under the supported SQL isolation settings [R10].
 
-The supervisor maintains a conservative monotonic local deadline based on the acknowledged renewal and request elapsed time. If it cannot renew before its safety margin, it stops admission, requests cancellation and terminates contained children before the last known lease deadline where the OS is responsive. Infinite execution timeout never disables this ownership deadline. A hung/suspended host can still outlive it; the recovery guarantees below apply.
+A bounded Quartz control job retries outbox publication and reconciles incomplete publication/recovery states after startup and periodically. It checks Quartz through public APIs and WorkerDock execution state, repairs missing eligible dispatches and exposes stale/error projections. It does not replace Quartz acquisition with a second due-work polling engine. Durable business state is authoritative for whether an external attempt is authorized; Quartz state is authoritative for trigger acquisition. Listeners supply diagnostics/wake-up hints, not the only durable record of completion.
 
-Completion uses an ownership-checked transaction to persist the outcome/events, release attempt capacity, and either schedule retry or finalize the execution/release its job permit. Retried completion submissions are idempotent. Expired or replaced owners cannot overwrite the authoritative outcome. Child-process completion is not reported as durable success until that transaction commits.
+### 5.3 Concurrency, capability and ordering
 
-### 5.4 Recovery and the external-effects boundary
+Use one Quartz execution group per template identifier, shared by all versions, with `ExecutionLimitScope.Cluster`. Configure `AcquireTriggersWithinLock = true` explicitly: Quartz's default SQL acquisition permits transient overshoot, whereas locked acquisition serializes capacity admission. Quartz owns the fired-trigger reservation ledger and releases it on wrapper completion or cluster recovery [R22]. There is no second WorkerDock template-slot table. A configured SQL-template limit of 1 remains one across all worker services; increasing it to N needs no new service deployment.
 
-The scheduler atomically marks expired attempts abandoned and releases their attempt reservations. If the job explicitly permits replay of uncertain outcomes, it schedules a bounded retry with the same execution idempotency key. Otherwise the execution becomes NeedsReview, retains its logical job permit and prevents accidental overlapping work under queue policy. A manager can reconcile the result, cancel it, or explicitly authorize retry; each action is audited.
+Each worker's Quartz pool has a configured installation ceiling for local children, plus a live WorkerDock admission limit no higher than that ceiling. Live changes within the ceiling require no restart; increasing the process's installed ceiling is a host configuration change. The supervisor cannot start a child over its current local limit. Deferred wrappers return promptly without consuming a business attempt, and the publisher issues a new delivery only after the relevant hold clears. Worker heartbeats/control polling remain responsive outside the Quartz execution pool even when every slot runs an infinite-timeout job.
+
+Template-limit changes store desired and effective revisions. Close the affected template's application start gate transactionally, ask active worker nodes to enter acquisition standby, apply the new Quartz limit snapshot and acknowledge the revision, then reopen the gate and resume acquisition. Standby does not terminate existing children. Wrappers recheck the gate before launch; nodes joining/rejoining must load the effective revision before starting acquisition. An unavailable node cannot be counted as updated: keep the change visibly pending until it acknowledges or its ownership is fenced and Quartz has recovered its reservations. No restart is required, but policy propagation is not instantaneous. On a decrease, existing work drains; no new attempt starts until capacity is below the new limit. Zero pauses admission. The gate protects the interval in which node configurations differ.
+
+The first release uses a common installed template/version capability set across a tenant's execution cluster. Only nodes matching the approved catalog digest enter acquisition. Both built-in templates are installed in the generic worker. A custom package update drains/updates the affected pool before activating the new catalog; adding jobs never changes that catalog. Heterogeneous specialized worker pools and routing are deferred, avoiding unsupported-template acquisitions masquerading as failed jobs.
+
+WorkerDock keeps logical per-job permits because Quartz's per-job nonconcurrency attribute alone does not express a configurable N or ownership across separate retry triggers. Allocate a permit when a logical execution is admitted for dispatch, retain it while waiting for Quartz capacity, retry backoff or NeedsReview, and release it only on finalization/reconciliation. Executions waiting behind the permit remain a visible bounded policy backlog; they are published when the predecessor releases admission. Workers never claim this backlog directly.
+
+Queue/skip policies use an exclusive permit; allow uses shared permits up to the live job limit. An exclusive permit cannot overlap shared holders, and later shared work cannot bypass an earlier exclusive waiter. Skip records a skipped occurrence if the job already has outstanding nonterminal work. Backlog overflow records a skipped result. Lowering a job limit blocks new logical admissions but does not block existing holders' retries; they still obey Quartz template and host limits. Retry waiting occupies no Quartz execution slot.
+
+Map execution priority to Quartz trigger priority. Its ordering includes trigger due time, so do not promise a globally strict priority queue. Bounded aging may raise pending priorities through `IScheduler` on a maintenance cadence, without moving future retry deadlines earlier. Per-job admission preserves serialized order; across independent jobs there is no strict FIFO or starvation-free latency guarantee. Monitor queue delay and saturation.
+
+### 5.4 Attempt ownership and cancellation
+
+Quartz cluster check-ins detect failed scheduler nodes and reclaim their Quartz reservations. WorkerDock retains a separate attempt ownership fence solely to control child lifetime, durable stop and authoritative outcomes; it is not a second dispatch lease. Proposed application defaults are a 10-second heartbeat and 60-second attempt lease, checked against SQL Server time with generation, boot identity, active state and unexpired-lease predicates.
+
+Quartz timing uses host clocks, so synchronize clocks on scheduler, worker and database hosts; use a supported skew budget and validate clock drift operationally. Configure and test Quartz check-in/recovery timing separately from the application fence. Lease expiry alone must not cause manual deletion of a Quartz reservation or imply that cluster recovery has completed.
+
+The supervisor maintains a conservative monotonic local deadline based on acknowledged renewal and request elapsed time. Before losing ownership, it stops admission, requests cancellation and terminates children within the last acknowledged lease where the OS remains responsive. Infinite execution timeout does not disable ownership deadlines. An unresponsive host can outlive them, as described below.
+
+Completion commits the sanitized outcome/events and either a retry dispatch intent or finalization/job-permit release using an ownership-checked transaction. Repeated completion submissions are idempotent; stale owners cannot overwrite authoritative state. The wrapper then finishes and Quartz releases its execution reservation. A crash after the business commit but before Quartz completion produces a harmless wrapper replay. If outcome persistence fails after effects, report uncertainty rather than confirmed success.
+
+Quartz interruption is a cooperative signal, not remote rollback or process termination [R24]. The persisted WorkerDock stop request and supervisor protocol remain authoritative; an interrupt of the local wrapper can accelerate cancellation. Stop handling does not depend on an HTTP call to a particular worker or on the scheduler service being available.
+
+### 5.5 Recovery, retries and the external-effects boundary
+
+Enable Quartz recovery for idempotent occurrence/control dispatchers and the guarded execution wrapper. A recovered Quartz invocation is infrastructure redelivery, not authorization to repeat a SQL/HTTP side effect. The wrapper always reads WorkerDock's attempt generation and outcome before acting. A recovery observation of an expired attempt routes through the same transaction as the periodic recovery reviewer, so only one can classify it.
+
+WorkerDock owns business retry classification, total-attempt budget, backoff/jitter, stop suppression and uncertain-outcome review. Set `RetryPolicy.None` explicitly on execution dispatch triggers and do not request immediate refire from the wrapper; schedule explicit one-shot dispatch triggers for approved future attempts instead [R25]. Publication retries and recovered wrapper calls do not consume a business attempt unless a new attempt is authorized and started. Do not sleep inside a Quartz job during backoff. Execution dispatch triggers retain overdue work rather than skipping it; use explicit ignore-misfire behavior and rely on WorkerDock state guards to reject obsolete deliveries.
+
+Recovery marks an expired attempt abandoned without editing Quartz tables. If the job explicitly permits replay of uncertain outcomes, create a bounded retry intent with the same execution idempotency key; dispatch still waits for Quartz capacity. Otherwise the execution becomes NeedsReview, retains its logical job permit and prevents accidental overlap under queue policy. A manager can reconcile, cancel or explicitly authorize retry; every decision is audited. Missing/errored Quartz triggers without a corresponding completed attempt are visible reconciliation failures, never silently counted as success or discarded.
 
 A durable operator stop always suppresses automatic replay, including during lease recovery. If termination cannot be confirmed, retain NeedsReview with the stop-request marker until reconciliation; do not label a still-unconfirmed process terminated. Releasing an unresolved job permit requires an audited management decision acknowledging possible external overlap.
 
@@ -160,11 +200,15 @@ When SQL Server is unavailable, stop new admission and scheduling. Existing supe
 
 ### 6.1 Time and cron
 
-Support one-time schedules and five-field cron at minute precision: minute, hour, day of month, month and day of week. The initial supported grammar includes numeric fields, lists, ranges and steps. If day of month and day of week are both restricted, both must match; explain this in the editor. Reject unsupported extensions rather than interpreting them differently across components.
+Support one-time schedules and five-field cron at minute precision: minute, hour, day of month, month and day of week. The initial supported grammar includes numeric fields, lists, ranges and steps; Sunday is 0 or 7. If day of month and day of week are both restricted, both must match; explain this in the editor. Reject unsupported extensions rather than interpreting them differently across components. Keep the original expression and explicit WorkerDock dialect with each schedule revision; never infer a dialect from an arbitrary pasted string.
 
 Persist a canonical IANA zone ID; the backend validates/resolves it on Windows and supplies the available-zone list. Persist instants in UTC. One-time input in a nonexistent local time is rejected; ambiguous input requires selecting an offset. For recurring schedules, nonexistent local occurrences are skipped, and repeated local occurrences run once at the earlier UTC instant. This applies to interval expressions too.
 
-Use one backend schedule evaluator for validation, next-run preview and scheduling. Cronos is the proposed parsing/calendar-candidate library, behind a WorkerDock timezone adapter. Its built-in timezone behavior differs from the agreed DST rules [R11]; do not directly use that behavior. Enumerate nominal local calendar matches, discard invalid wall times, resolve ambiguous matches to the earliest instant and filter against the UTC cursor. Keep evaluation bounded, reject impossible schedules and test DST gaps, repeated hours, leap days and non-hour transitions. Browser summaries are explanatory only; server occurrence previews are authoritative. Record/refresh calculation state after time-zone rule updates without rewriting historical instants.
+Use Quartz's `CronExpression` with explicit five-field `CronFormat.Unix` parsing and a native `CronTrigger` for each recurring schedule revision. One-time schedules use native simple triggers. Quartz 4.x combines restricted day fields by union, shifts missing fixed wall times to the gap end and can fire interval schedules through both repeated hours [R11]. Those defaults do not override the approved WorkerDock semantics.
+
+A versioned WorkerDock policy calendar attached to the cron trigger filters Quartz candidates: require both restricted day fields to match, reject gap-shifted instants that do not match a nominal wall-clock occurrence, and reject the later offset of an ambiguous wall-clock time. Reuse Quartz expression matching on nominal local calendar values and separate day-field expressions to apply the intersection; do not implement another cron parser. The calendar's next-included calculation must advance strictly using bounded Quartz candidate searches, not an unbounded minute scan. A real gap-end match remains eligible even if a nonexistent earlier occurrence mapped there. Register its versioned nonsecret data with Quartz's System.Text.Json calendar serializer extension [R26].
+
+Validation, preview, dispatch and bounded catch-up enumeration use the same filtered Quartz trigger calculation. Persisted calendar round-trip and DST/AND fixtures are mandatory early integration tests, including interval expressions and non-hour transitions. Reject impossible/out-of-range schedules with a useful message instead of spinning. Browser summaries are explanatory only; server previews are authoritative. Refresh future trigger/calendar projections after time-zone rule updates without rewriting historical instants. This adapter is a compatibility policy around Quartz, not a separate timer or acquisition engine.
 
 ### 6.2 Missed work and controls
 
@@ -179,7 +223,11 @@ Use one backend schedule evaluator for validation, next-run preview and scheduli
 | Edit/duplicate | Edit creates a revision. Duplicate creates a new disabled job with copied nonsecret configuration/references for review; it does not copy execution history |
 | Delete | Confirm and archive the job, suppress triggers and cancel unstarted work; running attempts finish without scheduling further retries. Retain audit/history according to policy |
 
-Normal short polling delay is not a missed occurrence: a configurable lateness tolerance, initially 60 seconds, distinguishes it from downtime. Age/count bounds are required for catch-up; work already materialized in the queue is not retroactively dropped by missed-schedule policy. Schedule delay metrics measure both trigger lateness and queue wait separately.
+Normal short trigger delay is not a missed occurrence: a configurable lateness tolerance, initially 60 seconds, distinguishes it from downtime. Age/count bounds are required for catch-up; already materialized work is not retroactively dropped by missed-schedule policy. Schedule delay metrics measure both trigger lateness and execution-capacity wait separately.
+
+Use explicit `FireAndProceed` misfire handling on recurring cron schedule triggers and `FireNow` on one-time schedule triggers to wake the occurrence dispatcher after delay [R27-R28]. A misfire wake-up is not itself a scheduled occurrence: the durable WorkerDock cursor applies skip/coalesce/bounded catch-up to the filtered occurrence sequence. Native Quartz misfire behavior alone cannot express that full policy. Bound enumeration by time range, count and evaluation cost; record skipped ranges without allocating unbounded execution rows. Recovery/startup reconciliation closes a cursor gap if a trigger was consumed before the dispatcher committed. The cursor starts at schedule activation, not at eventual projection time, so delayed publication also obeys missed-work policy.
+
+Pause, disable, resume and schedule edits commit their business state/cursor boundary and projection intent atomically. Apply Quartz pause/resume/reschedule through the publisher; guard dispatch and child admission against the committed state while projection is pending. Resume deliberately advances past the paused interval. Queued executions already accepted remain governed by the table above. A stale trigger cannot bypass disablement simply because its cleanup has not reached Quartz yet.
 
 Retry policy contains maximum total attempts, exponential base delay, maximum delay, jitter and retryable outcome classification. Automatic retry and replay of uncertain effects require explicit job policy. Configuration/validation errors are permanent. Backoff does not occupy a template/worker execution slot. A manager-authorized retry retains the execution's revision and idempotency key; run-now is a new execution and key.
 
@@ -229,7 +277,7 @@ Contracts expose a small asynchronous resolve-only secret facade accepting a log
 
 Only nonsecret provider options, identifiers and secret references enter SQL Server. Bootstrap database access should use the Windows service identity where possible; any required bootstrap credential comes from protected deployment configuration, never the application database. Full secret-bearing connection strings are neither job data nor API input/output. Production vault bootstrap authentication is external to job configuration.
 
-Execution children resolve needed job secrets directly. Supervisors and web APIs do not expose a resolve-secret endpoint. The scheduler's alert loop has a separately scoped identity/reference set for sink credentials; the central application resolves only its registered health credentials. Local process environments and file permissions are isolated per tenant; development environment secrets are not a substitute for a production vault.
+Execution children resolve needed job secrets directly. Supervisors and web APIs do not expose a resolve-secret endpoint. The scheduler's alert delivery jobs have a separately scoped identity/reference set for sink credentials; the central application resolves only its registered health credentials. Local process environments and file permissions are isolated per tenant; development environment secrets are not a substitute for a production vault.
 
 Log/audit/telemetry contracts use safe field projections, event codes and bounded values. Redact known resolved secret values as defense in depth; do not rely on regex or redaction alone. Never persist raw driver exceptions, resolved runtime request/response bodies, connection strings, authorization headers or arbitrary child stdout/stderr in diagnostics. Authored nonsecret request-body templates are job configuration and may be stored in protected revisions; secret substitutions resolve only at runtime. Safe error codes map to useful messages and correlation IDs. Custom trusted handlers must honor this contract; third-party code is reviewed and tested before deployment, not treated as untrusted code that the platform can prove harmless.
 
@@ -279,7 +327,7 @@ Use React/TypeScript, Vite, Material UI with WorkerDock-specific theming, and Ta
 | Creation wizard | Template, configuration, schedule, execution policy, review; sensible defaults, examples, field descriptions and server validation |
 | Schedule editor | Guided controls and cron text, plain-language explanation, server next-run preview and time-zone selection |
 | Execution detail | Status timeline, duration, attempts, sanitized logs, retry reasons, stop requests, correlation and remote-outcome certainty |
-| Workers/templates | Capabilities, heartbeat, version availability, local capacity and tenant-wide concurrency; distinguish services from job definitions |
+| Workers/templates | Capabilities, heartbeat, version availability, local capacity and tenant-wide concurrency; show desired/effective limits and pending propagation; distinguish services from job definitions |
 | Management settings | Profiles, nonsecret vault configuration, destination policies, alert rules and retention with appropriate protected reads |
 | Audit | Searchable safe actor/action/target/time history for all allowed viewers; no configuration-secret leakage |
 
@@ -299,15 +347,17 @@ Dashboard metrics derive from tenant records and bounded aggregates: executions,
 
 Alert rules cover repeated failures, exhausted retries, timeout, long-running jobs (including infinite-timeout jobs), missed work and unavailable workers. Persist evaluation cursors/incidents and create delivery records atomically to survive scheduler restart. Distinguish a condition that is clear from one that is unknown because data is unavailable. Use grace periods and recovery events to avoid flapping.
 
-A bounded independent loop in the scheduler delivers through IAlertSink; webhook is built in and email/other sinks remain extensions. Deduplicate by rule/subject/incident, use configurable reminder intervals, stable delivery IDs, retry/backoff/jitter and a maximum delivery attempt count. Receiver acknowledgement can be lost, so duplicate delivery remains possible. Exhausted deliveries are visible and manager-retryable. Alert credentials resolve only at delivery and obey outbound policy. The platform cannot deliver an alert from a fully stopped scheduler or unavailable database; document external monitoring of readiness for that failure case without making it required infrastructure.
+A bounded Quartz control job delivers through IAlertSink; webhook is built in and email/other sinks remain extensions. Deduplicate by rule/subject/incident, use configurable reminder intervals, stable delivery IDs, retry/backoff/jitter and a maximum delivery attempt count. Persist the next delivery time and project a Quartz trigger; avoid a second timer loop or hidden sink retries. Receiver acknowledgement can be lost, so duplicate delivery remains possible. Exhausted deliveries are visible and manager-retryable. Alert credentials resolve only at delivery and obey outbound policy. The platform cannot deliver an alert from a fully stopped scheduler or unavailable database; document external monitoring of readiness for that failure case without making it required infrastructure.
 
 Defaults: safe execution logs 30 days, execution history 90 days, audit 365 days. Rules are independently configurable. Never purge active/nonterminal executions, needed revisions, open incidents, active delivery attempts or valid deduplication keys. Aggregation before purge keeps explicitly documented historical summaries without implying raw history remains available.
+
+Retain unresolved projection intents and compact execution/delivery deduplication records until associated Quartz work is confirmed retired and its replay window has closed. Remove obsolete jobs/triggers/calendars through `IScheduler`; ordinary retention never deletes Quartz rows directly. Do not infer that business history is safe to purge solely because a trigger is currently absent. Quartz's internal operational records do not substitute for WorkerDock's retained execution history or audit.
 
 Optional archive-before-delete writes compressed safe records to an administrator-configured tenant root with restrictive ACLs, a batch manifest/checksum and atomic finalization. Verify the durable archive before batched SQL deletion. If archiving fails or storage fills, retain source data and report the retention failure. Archive retries reuse batch identity and avoid duplicate logical export. Audit purge uses a restricted routine and records a purge summary. Archives have a separately configured retention period and are not a database backup or disaster-recovery substitute.
 
 ## 12. Health, deployment, migrations and upgrades
 
-Provide minimal liveness and readiness endpoints with separate authorization/exposure settings. Tenant readiness reports web/database/schema health and stored scheduler/worker availability; no compatible capacity is degraded, not falsely healthy. Public/central projections contain only instance identity, overall component states and observation timestamps, never jobs, connection details, exception text or secrets. The health credential supports controlled rotation through vault references and never satisfies user authentication or a management-role check. Anonymous read/management endpoints remain open by definition; the health credential gives no additional rights there.
+Provide minimal liveness and readiness endpoints with separate authorization/exposure settings. Tenant readiness reports web/database/schema health, both Quartz stores' availability, stored scheduler/worker availability, catalog/policy compatibility and overdue projection intents; no compatible capacity is degraded, not falsely healthy. Public/central projections contain only instance identity, overall component states and observation timestamps, never jobs, connection details, exception text or secrets. The health credential supports controlled rotation through vault references and never satisfies user authentication or a management-role check. Anonymous read/management endpoints remain open by definition; the health credential gives no additional rights there.
 
 Central health probes run with bounded deadlines while the central IIS process is active, and on a rate-limited refresh request. Probes are advisory; IIS idling or central downtime stops them. Persist last observed/attempt times and show stale/unknown rather than declaring an old success current. Central monitoring does not promise continuous outage alerting and does not require a new Windows service.
 
@@ -315,7 +365,11 @@ Ship deployment packages and documented PowerShell installation/configuration pr
 
 Every SQL object change has a numbered forward script and paired rollback script, checksums, schema-history entry, prerequisites and transactional boundaries. The migrator takes an exclusive migration lock and refuses incompatible/modified history. Services check schema compatibility at startup/readiness and do not automatically migrate it. Schema and data changes include rollback/restore implications; irreversible data transformations require backup/restore instructions and explicit maintenance approval rather than a fictitious lossless down script.
 
-Upgrade procedure: block new admission/triggers, drain with a bounded timeout (explicitly stop infinite jobs when necessary), stop affected services/apps, back up, apply reviewed migrations, deploy compatible binaries, restart and verify readiness/capabilities. Roll back only within the tested schema/application compatibility window; otherwise restore the documented backup. Service scripts support repeatable installation/upgrade without silently deleting tenant data. Worker-only template updates preserve version metadata and keep work for unavailable versions visibly blocked.
+Include the selected Quartz release's upstream SQL Server schema for both configured prefixes, with source version/license attribution and checksums. Wrap installation/upgrades in WorkerDock's numbered forward/rollback workflow; preserve upstream columns, indexes and constraints. Test both table sets with the pinned Quartz package, string job data and custom calendar serialization. Back up Quartz and WorkerDock tables together. A rollback that destroys pending triggers or cannot read a newer serialized calendar requires the documented backup restore, not an advertised nondestructive downgrade. Never use runtime startup to silently install/upgrade Quartz schemas.
+
+The web database principal has no Quartz-table permissions. Scheduler principals have schedule-store access and the execution-store access required by the write-only publisher. Worker principals have execution-store access and their WorkerDock execution/control routines. Grant the DML/select permissions Quartz actually requires on its own table sets, but no schema-change rights. Control-center and execution-target credentials remain separate. Verify these grants with integration tests rather than assuming Quartz can run using only WorkerDock stored-procedure permissions.
+
+Upgrade procedure: block new admission/triggers, place affected Quartz nodes in standby, drain with a bounded timeout (explicitly stop infinite jobs when necessary), stop affected services/apps, back up, apply reviewed migrations, deploy compatible binaries, restart and verify readiness/capabilities and projection reconciliation. Do not wait indefinitely for Quartz shutdown while an infinite job runs. Roll back only within the tested schema/application compatibility window; otherwise restore the documented backup. Service scripts support repeatable installation/upgrade without silently deleting tenant data. Worker-only template updates preserve version metadata and keep work for unavailable versions visibly blocked. Do not mix incompatible Quartz versions/schema or capability digests within an execution cluster.
 
 ## 13. Delivery stages and validation
 
@@ -323,10 +377,10 @@ This is a design-stage delivery outline, not the implementation plan. Written-sp
 
 | Stage | Reviewable outcome | Required evidence |
 | --- | --- | --- |
-| 1. Foundation | Project boundaries, configuration, tenant schema/up/down scripts, read/manage auth policies, atomic audit and React shell | Build checks, schema round trip on disposable SQL Server, full access-policy matrix, no embedded credentials |
-| 2. Execution engine | Durable claiming, limits, ownership, recovery, isolated children, finite/infinite timeouts and stop controls | Real SQL/process race and fault tests; no duplicate authorized claim or stale-owner completion |
+| 1. Foundation | Project boundaries, configuration, WorkerDock and both Quartz schemas/up/down scripts, read/manage auth policies, atomic audit and React shell | Build/schema round trip, pinned Quartz integration proof for write-only publication, clustered limits and policy-calendar serialization, full access-policy matrix, no embedded credentials |
+| 2. Execution engine | Quartz execution wrapper, transactional outbox/reconciliation, cluster limits and live policy propagation, attempt ownership, recovery, isolated children and stop controls | Real SQL/process race and fault tests across publication/acquisition/completion boundaries; no duplicate authorized attempt or stale-owner completion |
 | 3. Built-in templates | Vault adapter seam, SQL/HTTP handlers, profiles, egress enforcement, metadata forms and manual execution | Real target database/local test server, secret-sentinel tests, parameter/response bounds, SSRF and idempotency scenarios |
-| 4. Scheduling/operator UI | Cron/zones, missed/overlap/retry policies, lifecycle, wizard and monitoring, English/pt-BR | Preview/dispatch equivalence across DST, interaction tests, access tests and keyboard checks |
+| 4. Scheduling/operator UI | Quartz schedule/control integration, cron policy calendar, missed/overlap/retry policies, lifecycle, wizard and monitoring, English/pt-BR | Persisted preview/dispatch equivalence across DST, cursor recovery and bounded catch-up, interaction/access tests and keyboard checks |
 | 5. Operations/control center | Tenant registry/health, metrics, alerts, retention/archive and optional exports | Independent-tenant isolation tests, central-outage continuity, webhook retry/dedup and archive-before-delete tests |
 | 6. Release readiness | Install/upgrade packages, complete docs, accessibility/security review and measured workload results | Windows/IIS deployment and rollback exercise, all required regression checks, documented limitations and workload report |
 
@@ -334,32 +388,36 @@ The detailed plan splits these outcomes into small dependent changes. No phase i
 
 Acceptance evidence must cover:
 
-1. Simultaneous schedulers materialize one occurrence, and competing workers admit no more than configured capacity.
-2. Template limits span versions/services; decreases drain without killing work; retry waiting preserves default per-job serialization.
-3. Process crashes before launch, after external effects and before commit produce the documented retry/review behavior.
-4. Expired workers cannot renew/complete; SQL disconnect and host restart do not report false success.
+1. Simultaneous scheduler nodes materialize one occurrence. Competing Quartz worker nodes with locked acquisition admit no more than the configured template capacity; demonstrate this on SQL Server, not an in-memory store.
+2. Limits span versions/services; desired/effective updates, standby/rejoin and unreachable nodes cannot bypass the start gate. Decreases drain, retry waiting preserves per-job serialization, and full execution pools do not block control heartbeats/stops.
+3. Faults before/after business commit, Quartz publication, publication acknowledgement, child launch, external effects and outcome commit produce durable recovery without duplicate authorized attempts. A trigger consumed before acknowledgement is not blindly republished as fresh work.
+4. Expired owners cannot renew/complete; SQL disconnect, clock skew, host restart and Quartz recovery do not report false success. Recovering a wrapper never bypasses NeedsReview, a stop marker or a completed attempt.
 5. Infinite jobs remain renewable/stoppable; a noncooperative handler can be force-stopped without stopping sibling jobs; no child escapes containment on supervisor exit.
 6. Stop/completion and disable/claim races obey their transactional ordering; operator stops suppress automatic retry.
-7. Schedule previews equal dispatch for gaps, repeated hours, non-hour changes, leap days, pauses, catch-up limits and edits.
+7. Schedule previews equal persisted Quartz dispatch for gaps, repeated hours including interval expressions, non-hour changes, leap days, both day fields restricted, pauses, bounded catch-up and edits. Verify the custom calendar survives SQL serialization/restart and always advances its search.
 8. Read-only authenticated users can view dashboard/monitoring/audit but cannot mutate or read protected configuration when a management role is configured. No-role and anonymous modes match the matrix exactly.
 9. Tenant A service credentials/database principals cannot access tenant B. With Entra enabled, central health credentials cannot satisfy user read/management policies. Anonymous mode remains deliberately public under its documented rules. Incorrect issuers/audiences, CSRF and direct endpoint bypass attempts fail where the corresponding protection is configured.
 10. Synthetic secrets never appear in database job/history/audit records, API responses, safe logs, child arguments or telemetry; raw error/body leakage is tested.
 11. Outbound tests include private allowlists, mixed DNS answers, rebinding, IPv4/IPv6 forms, redirects, metadata/loopback/link-local, proxies and TLS host validation.
-12. Forward/rollback migrations and least-privilege service access work; archive failure cannot delete unarchived records; retained active work remains referentially intact.
+12. Forward/rollback migrations for WorkerDock and both Quartz stores, backup restore and least-privilege service access work; archive failure cannot delete unarchived records; active work, publication intents and request-deduplication records remain protected.
 13. The center can be stopped while tenant scheduling/execution/direct access continue; stale health stays clearly stale.
 14. Report results for the agreed 10-tenant/100-job/10-concurrent target and distinguish configuration scale from measured throughput and latency.
+15. Restart with dispatch triggers older than the misfire threshold preserves accepted work; retries release Quartz slots during backoff; disabled jobs and superseded schedule revisions cannot execute through stale triggers. Reconciliation surfaces errored/missing projections and repairs only currently authorized work.
+16. New job creation and live template-limit changes require no process deployment. A mismatched template catalog prevents a node from acquiring work; a controlled catalog upgrade preserves pinned execution versions and safe blocked states.
 
 ## 14. Documentation deliverables
 
-Ship architecture/project boundaries; Windows local setup and IIS/service deployment; SQL Server setup, permissions, forward/rollback migrations and backup/restore; Entra shared/independent configuration, role mapping and anonymous mode; secret-facade replacement; SQL/HTTP template guides; custom package authoring/versioning; scheduling/DST/retries/concurrency/delivery guarantees; stop/force-stop and uncertain-outcome runbooks; safe logs/audit/metrics/alert sinks; retention/archive; upgrades and troubleshooting. Include runnable examples only when implementation is approved, with synthetic values and placeholders for all secrets.
+Ship architecture/project boundaries; Windows local setup and IIS/service deployment; SQL Server setup, permissions, forward/rollback migrations and backup/restore; Entra shared/independent configuration, role mapping and anonymous mode; secret-facade replacement; SQL/HTTP template guides; custom package authoring/versioning; scheduling/DST/retries/concurrency/delivery guarantees; stop/force-stop and uncertain-outcome runbooks; safe logs/audit/metrics/alert sinks; retention/archive; upgrades and troubleshooting. Document Quartz ownership, the two stores, pinned version/schema, outbox reconciliation, policy-calendar behavior, trigger misfires versus business missed-work policy, capacity propagation, catalog upgrades, clock synchronization and recovery versus retry. Include runnable examples only when implementation is approved, with synthetic values and placeholders for all secrets.
 
-Release limitations are explicit: minute cron precision; trusted installed code only; local force-stop cannot promise remote rollback; physical host/DB administrators remain trusted; no central automated provisioning; advisory central health; external telemetry and optional sinks are not needed for core operation. Requirements such as anonymous access and infinite timeouts are intentional supported modes, with their effects shown in the UI and documentation.
+Release limitations are explicit: minute cron precision; trusted installed code only; a common template capability set within each tenant execution cluster; asynchronous Quartz projection and capacity propagation; no strict global priority/FIFO guarantee; local force-stop cannot promise remote rollback; physical host/DB administrators remain trusted; no central automated provisioning; advisory central health; external telemetry and optional sinks are not needed for core operation. Requirements such as anonymous access and infinite timeouts are intentional supported modes, with their effects shown in the UI and documentation.
 
 ## 15. Review record and next gate
 
 The user approved the conversational architecture, data model, coordination, schedule semantics (amended to infinite timeout/manual stop), isolated runtime, corrected read-versus-management authorization, secret handling, templates/outbound policy, React approach, operations/retention, and platform/staged-delivery outline.
 
-The written specification consolidates those approvals and makes coordination races, profile/version pinning, cron semantics, health staleness, retention safeguards and upgrade boundaries explicit. Inline self-review checks requirements, consistency, placeholders and ambiguity. These details remain reviewable at this written-spec gate. No source implementation, scaffold, dependency installation, migration execution or implementation plan is part of this change.
+The user subsequently requested Quartz.NET with SQL Server as the scheduling and dispatch foundation. This revision replaces the custom timer/worker-claim design and Cronos dependency with Quartz stores, native triggers, cluster execution groups and a guarded execution wrapper. WorkerDock retains business policies, audit, outbox publication and child supervision. Two table sets preserve separate scheduler/worker services; an explicit policy calendar preserves the previously agreed cron/DST semantics. These integration choices and their required proofs are part of this written-spec review.
+
+Inline self-review checks requirements, consistency, placeholders and ambiguity. These details remain reviewable at this written-spec gate. No source implementation, scaffold, dependency installation, migration execution or implementation plan is part of this change.
 
 Next required action: user review and approval of this written file. Only then invoke the writing-plans skill, prepare the implementation plan, obtain its review and execution-method selection, and begin the authorized implementation stages.
 
@@ -375,7 +433,7 @@ Next required action: user review and approval of this written file. Only then i
 - [R8: MIT license](https://opensource.org/license/mit).
 - [R9: SQL Server sp_getapplock](https://learn.microsoft.com/en-us/sql/relational-databases/system-stored-procedures/sp-getapplock-transact-sql?view=sql-server-ver17).
 - [R10: SQL Server table hints](https://learn.microsoft.com/en-us/sql/t-sql/queries/hints-transact-sql-table?view=sql-server-ver17).
-- [R11: Cronos parsing and DST behavior](https://github.com/HangfireIO/Cronos).
+- [R11: Quartz cron formats and DST behavior](https://www.quartz-scheduler.net/documentation/quartz-4.x/cron-expressions.html).
 - [R12: Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
 - [R13: .NET cooperative cancellation](https://learn.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads).
 - [R14: ASP.NET Core OIDC](https://learn.microsoft.com/aspnet/core/security/authentication/configure-oidc-web-authentication).
@@ -383,3 +441,13 @@ Next required action: user review and approval of this written file. Only then i
 - [R16: Microsoft.Data.SqlClient security practices](https://learn.microsoft.com/en-us/sql/connect/ado-net/sql/application-security-scenarios-sql-server?view=sql-server-ver17).
 - [R17: OWASP SSRF prevention](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html).
 - [R18: OpenTelemetry .NET](https://opentelemetry.io/docs/languages/dotnet/).
+- [R19: Quartz configuration, SQL store and write-only scheduler](https://www.quartz-scheduler.net/documentation/quartz-4.x/configuration/reference.html).
+- [R20: Quartz.NET 4.5.1 release](https://github.com/quartznet/quartznet/releases/tag/v4.5.1).
+- [R21: Quartz clustering and recovery](https://www.quartz-scheduler.net/documentation/quartz-4.x/tutorial/advanced-enterprise-features.html).
+- [R22: Quartz execution groups, cluster limits and acquisition locking](https://www.quartz-scheduler.net/documentation/quartz-4.x/tutorial/execution-groups).
+- [R23: Quartz.NET Apache-2.0 license](https://www.quartz-scheduler.net/license.html).
+- [R24: Quartz interruption and cancellation](https://www.quartz-scheduler.net/documentation/faq.html#how-do-i-stop-a-job-that-is-currently-executing).
+- [R25: Quartz retry behavior](https://www.quartz-scheduler.net/documentation/quartz-4.x/how-tos/retrying-failed-jobs).
+- [R26: Quartz custom calendar serialization](https://www.quartz-scheduler.net/apidoc/4.x/api/Quartz.Serialization.SystemTextJson.Calendars.CalendarSerializer-1.html).
+- [R27: Quartz cron triggers and misfires](https://www.quartz-scheduler.net/documentation/quartz-4.x/tutorial/crontriggers.html).
+- [R28: Quartz simple triggers and misfires](https://www.quartz-scheduler.net/documentation/quartz-4.x/tutorial/simpletriggers.html).
