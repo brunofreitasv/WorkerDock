@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WorkerDock.Application/WorkerDock.Application.csproj" />
+    <Project Path="src/WorkerDock.DatabaseMigrator/WorkerDock.DatabaseMigrator.csproj" />
+    <Project Path="src/WorkerDock.Domain/WorkerDock.Domain.csproj" />
+    <Project Path="src/WorkerDock.Infrastructure/WorkerDock.Infrastructure.csproj" />
+    <Project Path="src/WorkerDock.Web/WorkerDock.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WorkerDock.IntegrationTests/WorkerDock.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

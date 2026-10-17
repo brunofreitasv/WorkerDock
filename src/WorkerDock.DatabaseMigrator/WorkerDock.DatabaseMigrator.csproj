@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><ProjectReference Include="../WorkerDock.Infrastructure/WorkerDock.Infrastructure.csproj" /></ItemGroup><ItemGroup><Content Include="../../database/**/*" Link="database/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" /></ItemGroup></Project>

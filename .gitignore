@@ -1,0 +1,8 @@
+**/bin/
+**/obj/
+.vs/
+TestResults/
+.superpowers/
+*.user
+*.suo
+.env

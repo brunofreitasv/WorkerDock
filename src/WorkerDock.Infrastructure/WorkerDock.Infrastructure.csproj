@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../WorkerDock.Application/WorkerDock.Application.csproj" /><PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" /><PackageReference Include="Microsoft.Data.SqlClient" /><PackageReference Include="System.Security.Cryptography.Pkcs" /></ItemGroup></Project>
