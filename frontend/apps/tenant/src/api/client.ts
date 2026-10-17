@@ -51,7 +51,8 @@ export async function mutate<T>(
     ? (undefined as T)
     : ((await response.json()) as T);
 }
-// The server invokes framework cookie/OIDC sign-out and returns its provider logout URL.
+// Navigate the server-generated logout URL unchanged: its protected state restores
+// the framework callback's local return URI. Do not rebuild or strip its query.
 export async function signOut(): Promise<void> {
   const { data } = await read<{ requestToken: string }>("/api/antiforgery");
   const response = await fetch("/auth/signout", {

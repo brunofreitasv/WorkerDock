@@ -199,6 +199,22 @@ public sealed class AccessPolicyTests
         Assert.False((await client.GetFromJsonAsync<SessionView>("/api/session"))!.Authenticated);
     }
 
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("POST")]
+    public async Task Unsolicited_remote_logout_cannot_terminate_a_session(string method)
+    {
+        using var issuer = new LocalOidcIssuer("Manager"); await using var host = new AccessHost(issuer); using var client = host.Client();
+        await issuer.SignIn(client);
+        using var remoteLogout = new HttpRequestMessage(new HttpMethod(method), "/signout-oidc");
+        remoteLogout.Headers.Add("Origin", "https://attacker.example");
+        remoteLogout.Headers.Add("Sec-Fetch-Site", "cross-site");
+        using var response = await client.SendAsync(remoteLogout);
+        Assert.True((await client.GetFromJsonAsync<SessionView>("/api/session"))!.Authenticated);
+        if (response.Headers.TryGetValues("Set-Cookie", out var cookies))
+            Assert.DoesNotContain(cookies, cookie => cookie.StartsWith("__Host-WorkerDock.Auth=", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task Session_cookies_are_secure_host_scoped_and_logout_is_csrf_protected()
     {
@@ -219,7 +235,15 @@ public sealed class AccessPolicyTests
         Assert.Equal(HttpStatusCode.OK, loggedOut.StatusCode);
         var logoutBody = await loggedOut.Content.ReadAsStringAsync();
         using var logoutJson = JsonDocument.Parse(logoutBody);
-        Assert.StartsWith("https://issuer.example/logout?", logoutJson.RootElement.GetProperty("redirectUrl").GetString());
+        var providerLogout = new Uri(logoutJson.RootElement.GetProperty("redirectUrl").GetString()!);
+        Assert.StartsWith("https://issuer.example/logout?", providerLogout.AbsoluteUri);
+        var logoutQuery = QueryHelpers.ParseQuery(providerLogout.Query);
+        Assert.True(logoutQuery.TryGetValue("state", out var state) && !string.IsNullOrWhiteSpace(state), "Provider logout must carry protected return state.");
+        var callback = logoutQuery["post_logout_redirect_uri"].ToString();
+        Assert.Equal("https://localhost/signout-callback-oidc", callback);
+        using var returned = await client.GetAsync(QueryHelpers.AddQueryString(callback, "state", state.ToString()));
+        Assert.Equal(HttpStatusCode.Redirect, returned.StatusCode);
+        Assert.Equal("/", returned.Headers.Location?.OriginalString);
         Assert.DoesNotContain("id_token", logoutBody, StringComparison.OrdinalIgnoreCase);
         Assert.False((await client.GetFromJsonAsync<SessionView>("/api/session"))!.Authenticated);
     }

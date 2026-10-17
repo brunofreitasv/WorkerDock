@@ -65,6 +65,7 @@ public static class AccessPolicies
             o.SignInScheme = "cookie"; o.Authority = options.Authority; o.ClientId = options.ClientId; o.ClientSecret = Environment.GetEnvironmentVariable("WORKERDOCK_BOOTSTRAP_" + options.ClientSecretReference);
             o.ResponseType = OpenIdConnectResponseType.Code; o.ResponseMode = OpenIdConnectResponseMode.Query; o.UsePkce = true;
             o.SaveTokens = false; o.MapInboundClaims = false; o.RequireHttpsMetadata = true;
+            o.RemoteSignOutPath = PathString.Empty;
             o.Scope.Clear(); o.Scope.Add("openid"); o.Scope.Add("profile");
             o.TokenValidationParameters = new TokenValidationParameters
             {
@@ -89,6 +90,9 @@ public static class AccessPolicies
             };
             o.Events.OnRedirectToIdentityProviderForSignOut = c =>
             {
+                // HandleResponse bypasses the handler's normal state serialization. Preserve the
+                // same protected properties so its signed-out callback restores our local return URI.
+                c.ProtocolMessage.State = c.Options.StateDataFormat.Protect(c.Properties);
                 c.HandleResponse(); c.Response.StatusCode = 200; c.Response.Headers.Remove("Location");
                 return c.Response.WriteAsJsonAsync(new { redirectUrl = c.ProtocolMessage.CreateLogoutRequestUrl() });
             };
