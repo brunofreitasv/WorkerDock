@@ -17,3 +17,34 @@ Before any migration DDL, the runner reads the connected server's major version 
 Rollback requires a backup and an empty audit/outbox, default settings, and no runtime role members. Run `dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0001_bootstrap` only for an empty disposable database. Populated rollback returns `UnsafeRollback`; preserve the backup for restore instead. The migration uses a transaction and SQL application lock. `SchemaHistory` checksums are immutable once applied; add a new numbered pair to change a released schema.
 
 The migration script is checked into `database/tenant` with its SHA-256 values in `manifest.json`. Central database migrations begin in Task 20. SQL integration outcomes must be reported separately from memory tests.
+
+
+## Same application ports with real SQL
+
+The memory instance and SQL deployment both use `ITenantSettingsService` and the same `/api/session`, `/api/settings` and antiforgery/policy routes. The React build is the same. No Task02 schema change or grant change is required. Do not reuse the disposable memory GUID for an existing tenant database: use that database's provisioned instance ID.
+
+For a newly provisioned, dedicated empty local tenant database, run these exact steps with values supplied through deployment configuration; keep credentials out of source and shell history:
+
+```powershell
+# The dedicated database and migrator/runtime identities must already be provisioned.
+$env:WORKERDOCK_INSTANCE_ID='<new-stable-instance-guid>'
+$env:WORKERDOCK_SQL='<dedicated-local-tenant-migrator-connection-string>'
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0001_bootstrap
+$env:Tenant__Adapter='SqlServer'
+$env:Tenant__InstanceId=$env:WORKERDOCK_INSTANCE_ID
+$env:Tenant__ConnectionString='<dedicated-local-tenant-runtime-connection-string>'
+$env:ASPNETCORE_ENVIRONMENT='Development'
+npm.cmd --prefix frontend ci
+npm.cmd --prefix frontend run build
+dotnet dev-certs https --trust
+dotnet run --project src/WorkerDock.Web --urls https://localhost:5001
+```
+
+In a separate test shell, only against the disposable test SQL instance provisioned above:
+
+```powershell
+$env:WORKERDOCK_TEST_SQL='<dedicated-disposable-sql-instance-connection-string>'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~WorkerDock.IntegrationTests.MigrationTests|FullyQualifiedName~WorkerDock.IntegrationTests.TenantSettingsTests'
+```
+
+For the independent in-memory instance and exact mock test commands, see [development.md](development.md). For Production/IIS, require HTTPS, the SQL runtime adapter and the protected data-protection key directory in [authentication.md](authentication.md). Configure the appropriate IIS hosting identity and directory ACLs during deployment, not through application database grants. Real SQL verification remains pending until an authorized disposable instance is supplied and those SQL tests pass. Memory tests do not prove durability, SQL locking/migrations, multi-process security isolation or Quartz clustering.
