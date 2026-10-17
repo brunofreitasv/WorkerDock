@@ -6,6 +6,20 @@ On Windows, install a local SQL Server 2022 Developer or Express instance, start
 
 For tests, set `WORKERDOCK_TEST_SQL` to a connection string for that disposable instance. Do not include a database name that should be preserved: the fixture overrides Initial Catalog with `master` and its generated test database. Then run:
 
+Quartz process tests also require `WORKERDOCK_TEST_SQL_RUNTIME`, a connection
+string for a separate, pre-provisioned SQL-authentication login on the same
+server. An administrator creates that server login on the disposable test
+instance ahead of time; the fixture creates its database user, adds it to
+`WorkerDockRuntime`, and installs/removes paired `quartz-probe.up.sql` /
+`quartz-probe.down.sql` objects only inside its generated database. The
+runtime login must not be the provisioner, a server administrator, or a
+database owner. The fixture rejects a missing or reused login and verifies
+`WorkerDockRuntime` membership plus absence of `CREATE TABLE` permission.
+Store both connection strings in a local secret source or scoped environment;
+do not put passwords in source, command arguments, or test logs. The runtime
+string's `Initial Catalog` is replaced with the generated test database.
+Both strings must use the same `Server` value.
+
 ```powershell
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~MigrationTests|FullyQualifiedName~TenantSettingsTests'
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzCapacityTests|FullyQualifiedName~QuartzSqlTopologyTests'
@@ -54,6 +68,7 @@ In a separate test shell, only against the disposable test SQL instance provisio
 
 ```powershell
 $env:WORKERDOCK_TEST_SQL='<dedicated-disposable-sql-instance-connection-string>'
+$env:WORKERDOCK_TEST_SQL_RUNTIME='<same-server-distinct-restricted-sql-login-connection-string>'
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~WorkerDock.IntegrationTests.MigrationTests|FullyQualifiedName~WorkerDock.IntegrationTests.TenantSettingsTests'
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzCapacityTests|FullyQualifiedName~QuartzSqlTopologyTests'
 ```

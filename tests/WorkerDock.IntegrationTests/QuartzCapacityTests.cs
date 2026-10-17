@@ -16,17 +16,35 @@ public sealed class QuartzCapacityTests
         await fixture.CreateAsync(snapshot);
         var publisher = await fixture.StartAsync("publisher");
         var workers = new[] { await fixture.StartAsync("execution"), await fixture.StartAsync("execution"), await fixture.StartAsync("execution") };
+        await Task.WhenAll(workers.Select(fixture.ArmAsync));
+        Assert.Equal(3, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.WDE_QRTZ_SCHEDULER_STATE WHERE SCHED_NAME = 'WorkerDock.Execute'"));
         var deliveries = Enumerable.Range(0, 6).Select(_ => Guid.NewGuid().ToString("N")).ToArray();
         foreach (var delivery in deliveries) await fixture.PublishAsync(publisher, delivery);
-        foreach (var delivery in deliveries)
+        for (var index = 0; index < deliveries.Length; index++)
         {
             var started = await fixture.NextStartedAsync();
             Assert.Contains(started.Delivery, deliveries);
-            Assert.Equal(1, fixture.Active);
+            var held = await fixture.ProbeStateAsync();
+            Assert.Equal(1, held.Active);
+            Assert.Equal(1, held.MaximumActive);
+            if (index == 0)
+            {
+                var before = await fixture.ClusterCheckinsAsync();
+                Assert.Equal(3, before.Count);
+                await fixture.WaitForClusterCycleAsync(before);
+            }
+            await Task.WhenAll(workers.Select(fixture.PingAsync));
+            Assert.Equal(1, (await fixture.ProbeStateAsync()).Active);
+            if (index < 2) await fixture.StandbyAsync(started.Process);
             await fixture.ReleaseAsync(started);
             await fixture.NextCompletedAsync();
         }
-        Assert.Equal(1, fixture.MaximumActive);
+        var final = await fixture.ProbeStateAsync();
+        Assert.Equal(0, final.Active);
+        Assert.Equal(1, final.MaximumActive);
+        Assert.Equal(3, await fixture.DistinctWorkersAsync());
+        Assert.Equal(6, await fixture.StartedRowsAsync());
+        Assert.Equal(6, await fixture.EndedRowsAsync());
         Assert.Equal(6, fixture.Deliveries.Count);
         Assert.All(fixture.Deliveries.Values, count => Assert.Equal(1, count));
         Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.WDS_QRTZ_JOB_DETAILS"));
@@ -54,6 +72,7 @@ public sealed class QuartzSqlTopologyTests
         var restarted = await fixture.StartAsync("publisher");
         var worker1 = await fixture.StartAsync("execution");
         var worker2 = await fixture.StartAsync("execution");
+        await Task.WhenAll(fixture.ArmAsync(worker1), fixture.ArmAsync(worker2));
         var started = await fixture.NextStartedAsync();
         Assert.Equal(delivery, started.Delivery);
         await fixture.ReleaseAsync(started);
@@ -63,6 +82,8 @@ public sealed class QuartzSqlTopologyTests
         await fixture.StopAsync(restarted);
         Assert.Single(fixture.Deliveries);
         Assert.Equal(1, fixture.Deliveries[delivery]);
+        Assert.Equal(1, await fixture.StartedRowsAsync());
+        Assert.Equal(1, await fixture.EndedRowsAsync());
         Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.WDE_QRTZ_TRIGGERS"));
     }
 
@@ -70,20 +91,23 @@ public sealed class QuartzSqlTopologyTests
     [InlineData(false)]
     [InlineData(true)]
     [Trait("Store", "Sql")]
-    public async Task Schema_round_trip_and_runtime_DML_are_available_without_DDL(bool snapshot)
+    public async Task Schema_round_trip_and_runtime_scheduler_starts_without_DDL(bool snapshot)
     {
         await using var fixture = new QuartzProcessFixture();
         await fixture.CreateAsync(snapshot);
         Assert.Equal(30, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE name LIKE 'WD[SE][_]QRTZ[_]%'"));
-        await fixture.Database.ExecuteAsync("CREATE USER QuartzRuntimeProbe WITHOUT LOGIN; ALTER ROLE WorkerDockRuntime ADD MEMBER QuartzRuntimeProbe;");
-        foreach (var prefix in new[] { "WDS_QRTZ_", "WDE_QRTZ_" })
-            await fixture.Database.ExecuteAsync($"EXECUTE AS USER = 'QuartzRuntimeProbe'; INSERT dbo.{prefix}LOCKS(SCHED_NAME,LOCK_NAME) VALUES ('permission-probe','probe'); UPDATE dbo.{prefix}LOCKS SET LOCK_NAME='changed' WHERE SCHED_NAME='permission-probe'; SELECT * FROM dbo.{prefix}LOCKS; DELETE dbo.{prefix}LOCKS WHERE SCHED_NAME='permission-probe'; IF HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','CREATE TABLE')<>0 THROW 51004,'Unexpected DDL permission',1; REVERT;");
-        await fixture.Database.ExecuteAsync("ALTER ROLE WorkerDockRuntime DROP MEMBER QuartzRuntimeProbe; DROP USER QuartzRuntimeProbe;");
         await fixture.Runner.RollbackAsync("tenant", "0002_quartz", default);
         Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE name LIKE 'WD[SE][_]QRTZ[_]%'"));
         await fixture.Runner.ApplyAsync("tenant", "0002_quartz", default);
-        await using var topology = new QuartzTopology(new(fixture.Database.ConnectionString, fixture.Database.InstanceId));
-        var scheduler = await topology.CreateExecutionAsync(new(fixture.Database.InstanceId, Guid.NewGuid().ToString("N"), 1), default);
-        Assert.Equal(SchedulerStatus.Created, scheduler.Status);
+        await using var topology = new QuartzTopology(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
+        var options = new QuartzNodeOptions(fixture.Database.InstanceId, Guid.NewGuid().ToString("N"), 1);
+        var schedule = await topology.CreateScheduleAsync(options, default);
+        var execution = await topology.CreateExecutionAsync(options, default);
+        await schedule.Start();
+        await execution.Start();
+        Assert.Equal(SchedulerStatus.Running, schedule.Status);
+        Assert.Equal(SchedulerStatus.Running, execution.Status);
+        await schedule.Shutdown();
+        await execution.Shutdown();
     }
 }

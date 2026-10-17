@@ -8,6 +8,28 @@ namespace WorkerDock.IntegrationTests;
 public sealed class QuartzTopologyTests
 {
     [Fact]
+    public void TestHost_output_preserves_native_SNI_assets()
+    {
+        var host = Path.Combine(AppContext.BaseDirectory, "testhost");
+        Assert.True(File.Exists(Path.Combine(host, "WorkerDock.TestHost.deps.json")));
+        Assert.True(File.Exists(Path.Combine(host, "runtimes", "win-x64", "native", "Microsoft.Data.SqlClient.SNI.dll")));
+        Assert.True(File.Exists(Path.Combine(AppContext.BaseDirectory, "Sql", "quartz-probe.up.sql")));
+        Assert.True(File.Exists(Path.Combine(AppContext.BaseDirectory, "Sql", "quartz-probe.down.sql")));
+    }
+
+    [Fact]
+    public void Quartz_runtime_connection_requires_a_distinct_sql_login()
+    {
+        const string owner = "Server=localhost;Initial Catalog=WorkerDock_Test_abc;User ID=provisioner;Password=owner-secret;Encrypt=true";
+        Assert.Throws<InvalidOperationException>(() => QuartzRuntimeConnection.ForDatabase(null, owner));
+        Assert.Throws<InvalidOperationException>(() => QuartzRuntimeConnection.ForDatabase(owner, owner));
+        var runtime = QuartzRuntimeConnection.ForDatabase(
+            "Server=localhost;User ID=worker;Password=runtime-secret;Encrypt=true", owner);
+        Assert.Equal("worker", runtime.UserID);
+        Assert.Equal("WorkerDock_Test_abc", runtime.InitialCatalog);
+    }
+
+    [Fact]
     public async Task Memory_publisher_delivers_to_execution_only_and_cannot_start()
     {
         var id = Guid.NewGuid();

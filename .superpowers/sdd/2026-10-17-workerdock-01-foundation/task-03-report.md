@@ -65,3 +65,25 @@ against pinned public Quartz 4.5.1 APIs, but the actual SQL behavior and
 least-privilege grants still require the gated live run. An empty-table
 rollback guard cannot prevent a stopped-and-restarted external writer;
 operators must stop all related processes before downgrade.
+
+## FIX round 1 — independent review
+
+Addressed the three Important review findings:
+
+1. `TestHost_output_preserves_native_SNI_assets` failed red with `Assert.True() Failure` because the copied TestHost omitted `runtimes/win-x64/native/Microsoft.Data.SqlClient.SNI.dll`. The integration test project now recursively copies the complete TestHost output with relative paths. The same filtered command passed green (1 passed), and the check also covers the paired probe scripts.
+2. `Quartz_runtime_connection_requires_a_distinct_sql_login` failed red with `NotImplementedException` after a test helper stub was introduced, then passed green (1 passed). `WORKERDOCK_TEST_SQL_RUNTIME` must identify a separate SQL-authentication login on the same disposable server. The fixture maps it only in the generated database, adds it to `WorkerDockRuntime`, verifies that it lacks database-owner/CREATE TABLE rights, and supplies that connection to every spawned publisher/worker. The fixture-owned `Sql/quartz-probe.up.sql` and `.down.sql` pair creates/removes the restricted database user and probe objects. The test operator must provision the separate server login; no existing SQL permission was changed here.
+3. `Locked_acquisition_does_not_multiply_capacity` now arms all three worker processes and waits for each cluster registration before publishing. While the first job is held, it waits for another database check-in from each node. Probe jobs update a single SQL state row transactionally on start/end and write events with their boot IDs; assertions use the SQL maximum active count, start/end rows, and participation by three distinct nodes. Two workers enter standby while their held jobs run to force the remaining nodes to take later work. The real behavior is still SQL-gated, so no pass is claimed.
+
+Verification commands and outcomes after these edits:
+
+- Red: `dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~TestHost_output_preserves_native_SNI_assets' --no-restore` → 1 failed, missing native asset. Green: same command → 1 passed.
+- Red: `dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~Quartz_runtime_connection_requires_a_distinct_sql_login' --no-restore` → 1 failed, expected `InvalidOperationException`, received `NotImplementedException`. Green: same command → 1 passed.
+- `dotnet build WorkerDock.slnx -c Release --no-restore` → succeeded, 0 warnings, 0 errors.
+- `dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzTopologyTests' --no-build --no-restore` → 8 passed, 0 failed.
+- `dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzCapacityTests|FullyQualifiedName~QuartzSqlTopologyTests' --no-build --no-restore --logger 'console;verbosity=quiet'` → 6 failed, all blocked before SQL setup by `SQL_TEST_BLOCKED: configure WORKERDOCK_TEST_SQL for a disposable SQL Server 2022+ test instance.` With that variable supplied, the separate runtime login variable is also required.
+- `dotnet test tests/WorkerDock.IntegrationTests -c Release --no-build --no-restore --logger 'console;verbosity=quiet'` → 53 passed, 14 SQL fixture cases blocked, 0 skipped.
+
+The SQL registration barrier, restricted principal, publisher write, execution,
+cluster overlap, restart, and paired fixture scripts still require a live run
+against an authorized disposable SQL Server. The minor mutable caller-owned
+`TemplateLimits` dictionary concern is deferred to final-branch triage.

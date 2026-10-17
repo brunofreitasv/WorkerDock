@@ -13,9 +13,10 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="../../database/**/*" Link="database/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Sql/*.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="CopyQuartzTestHost" AfterTargets="Build">
-    <ItemGroup><TestHostFiles Include="../WorkerDock.TestHost/bin/$(Configuration)/$(TargetFramework)/*" /></ItemGroup>
-    <Copy SourceFiles="@(TestHostFiles)" DestinationFolder="$(OutDir)testhost" SkipUnchangedFiles="true" />
+    <ItemGroup><TestHostFiles Include="../WorkerDock.TestHost/bin/$(Configuration)/$(TargetFramework)/**/*" /></ItemGroup>
+    <Copy SourceFiles="@(TestHostFiles)" DestinationFiles="@(TestHostFiles->'$(OutDir)testhost/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 </Project>

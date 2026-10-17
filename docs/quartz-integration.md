@@ -38,9 +38,15 @@ script is retained for attribution and must not be run directly because its
 default drops existing Quartz tables. See [database.md](database.md) for exact
 local setup and [development.md](development.md) for memory commands.
 
-The SQL integration suite is gated by `WORKERDOCK_TEST_SQL`. It runs the two
+The SQL integration suite is gated by `WORKERDOCK_TEST_SQL` and a distinct
+restricted SQL login in `WORKERDOCK_TEST_SQL_RUNTIME`. It runs the two
 isolation settings, a separate non-started publisher process, process restart,
-two or three worker processes, barrier-held jobs, group capacity, runtime DML,
-and up/down/up schema checks. Until that suite passes on a disposable SQL
+two or three worker processes, armed-node and cluster-check-in barriers while
+the first probe is held, database-recorded probe overlap and distinct node
+participation, group capacity, runtime scheduler writes, and up/down/up schema
+checks.
+The test fixture's paired SQL scripts create and remove a probe state/event
+table and the restricted user inside only its generated database. Until that
+suite passes on a disposable SQL
 Server 2022+ instance, SQL clustering/capacity/restart and migration behavior
 remain unverified.
