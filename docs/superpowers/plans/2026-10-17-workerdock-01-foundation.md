@@ -31,7 +31,7 @@ Task 01 owns initial solution/build files, tenant schema/migrator and transactio
 
 **Interfaces:**
 - Consumes: deployment-only database connection configuration and expected instance ID.
-- Produces `ActorContext(string Subject, string AuthenticationMode, Guid CorrelationId)`; anonymous subject uses a session-scoped opaque ID; audit display may be Anonymous.
+- Produces `ActorContext(string Subject, string AuthenticationMode, Guid CorrelationId)`; authenticated Subject is a stable issuer-qualified subject identifier constructed server-side, never display name/email. Anonymous subject uses a session-scoped opaque ID; audit display may be Anonymous.
 - Produces `TenantSettings(Guid InstanceId, string DisplayName, string DisplayTimeZone, byte[] Version)`; `ITenantSettingsService.GetAsync(CancellationToken ct) -> ValueTask<TenantSettings>` and `UpdateAsync(TenantSettings desired, byte[] expectedVersion, ActorContext actor, CancellationToken ct) -> ValueTask<TenantSettings>`.
 - Produces `MigrationRunner.ApplyAsync(string databaseKind, string targetMigration, CancellationToken ct) -> ValueTask` and `RollbackAsync(string databaseKind, string targetMigration, CancellationToken ct) -> ValueTask`. Database kind is allowlisted `tenant`/`central`; central scripts arrive in Task 20.
 - Internal `BusinessTransaction.RunAsync<T>(Func<DbConnection, DbTransaction, CancellationToken, ValueTask<T>> action, CancellationToken ct) -> ValueTask<T>` obtains the tenant application lock before mutable business rows. Callers append their mandatory audit event using that connection/transaction.
@@ -73,13 +73,15 @@ Assert.True(noRoleSession.CanManage);
 ```
 
 - [ ] **Step 2 — Verify red.** `dotnet test tests/WorkerDock.IntegrationTests --filter FullyQualifiedName~AccessPolicyTests` and `npm.cmd --prefix frontend run test -- --run SessionProvider`; expect failing policy/shell assertions.
-- [ ] **Step 3 — Implement.** Code the exact spec access matrix, secure host-scoped cookies/code+PKCE, allowed authority/audience, configurable role claim and protected key directory. Separate safe reads from protected settings/configuration. Render a responsive MUI shell with keyboard focus, translated mode/status and local language/zone preferences. Configure Vite static output and same-origin API use; bundle fonts/assets locally. Avoid paid components, React auth as a security boundary, broad CORS or a central membership check.
+- [ ] **Step 3 — Implement.** Code the exact spec access matrix, secure host-scoped cookies/code+PKCE, allowed authority/audience, configurable role claim and protected key directory. Set OIDC `SaveTokens = false`: the app needs sign-in claims, not retained access/refresh tokens; cookies contain no identity-provider token. Sign-out is a CSRF-protected POST. Resolve bootstrap credential references through deployment-only environment mapping until the shared adapter is available; no job-vault access is needed. Separate safe reads from protected settings/configuration. Render a responsive MUI shell with keyboard focus, translated mode/status and local language/zone preferences. Create the shared UI workspace manifest/TypeScript exports, Vitest setup and root scripts defined in the index; configure Vite static output and same-origin API use and bundle fonts/assets locally. Avoid paid components, React auth as a security boundary, broad CORS or a central membership check.
 - [ ] **Step 4 — Verify green.** Repeat both commands, then frontend production build. Expected PASS and no auth tokens in storage/network DTOs. Read-only and anonymous modes must work without a real external Entra tenant in automated tests; document the live Entra deployment smoke check for Task 21.
 - [ ] **Step 5 — Commit.** Stage task files; `git commit -m "feat: add read and management policies with React shell"`.
 
 ### Task 03: Two SQL-backed Quartz schedulers with strict cluster limits
 
 **Files:** Create `src/WorkerDock.Quartz/WorkerDock.Quartz.csproj`, `Hosting/QuartzTopology.cs`, `Hosting/QuartzNodeOptions.cs`, `Hosting/QuartzConnections.cs`; `database/upstream/quartz-4.5.1/sql-server.sql`, `NOTICE.txt`, `database/tenant/0002_quartz.up.sql`, `0002_quartz.down.sql`; modify tenant manifest; create `tests/WorkerDock.IntegrationTests/QuartzTopologyTests.cs`, `QuartzCapacityTests.cs`; `docs/quartz-integration.md`.
+
+Also create `tests/WorkerDock.TestHost/WorkerDock.TestHost.csproj`, `Program.cs`, `ProbeJob.cs` and `tests/WorkerDock.IntegrationTests/QuartzProcessFixture.cs`. Each cluster node runs in its own TestHost process with the same scheduler name and database, distinct boot ID and barrier-driven test control. Credentials are supplied via scoped environment/configuration, never command-line arguments. Fixture teardown owns only its spawned processes/database.
 
 **Interfaces:**
 - Consumes Task 01 database identity/manifest and disposable SQL fixture.
@@ -97,7 +99,7 @@ Assert.Empty(jobDataKeys.Except(new[] { "ExecutionId", "DeliveryId", "AttemptOrd
 ```
 
 - [ ] **Step 2 — Verify red.** `dotnet test tests/WorkerDock.IntegrationTests --filter "FullyQualifiedName~QuartzTopologyTests|FullyQualifiedName~QuartzCapacityTests"`; expect missing topology/persistence/capacity behavior.
-- [ ] **Step 3 — Implement.** Use Quartz 4.5.1 core and SQL Server store APIs, its System.Text.Json serializer, string job data, clustering/unique boot IDs, `AcquireTriggersWithinLock = true` and cluster-scoped template groups. Never start the `ZeroSizeThreadPool` publisher. Wrap attributed upstream scripts for both prefixes without changing Quartz's schema contract. Make downgrade refuse active/pending work. Record the exact public APIs proven; if the pinned release cannot supply these semantics, stop dependent tasks and return a concrete spec correction rather than inventing a queue.
+- [ ] **Step 3 — Implement.** Use Quartz 4.5.1 core and SQL Server store APIs with an explicit Microsoft.Data.SqlClient package reference, System.Text.Json serializer, string job data, clustering/unique boot IDs, `AcquireTriggersWithinLock = true` and cluster-scoped template groups. Never start the `ZeroSizeThreadPool` publisher. Wrap attributed upstream scripts for both prefixes without changing Quartz's schema contract; include runtime role grants now so the proof does not run only as a database owner. Make downgrade refuse active/pending work. Record the exact public APIs proven; if the pinned release cannot supply these semantics, stop dependent tasks and return a concrete spec correction rather than inventing a queue.
 - [ ] **Step 4 — Verify green.** Repeat filtered tests and schema up/down/up under both supported isolation settings. Expected PASS with three real Quartz nodes and persisted restart evidence; SQLite/in-memory does not count.
 - [ ] **Step 5 — Commit.** Stage task files; `git commit -m "feat: integrate clustered Quartz SQL Server stores"`.
 
@@ -108,6 +110,7 @@ Assert.Empty(jobDataKeys.Except(new[] { "ExecutionId", "DeliveryId", "AttemptOrd
 **Interfaces:**
 - Produces `ScheduleDefinition(Guid ScheduleId, long Revision, string Kind, string? Cron, string ZoneId, DateTimeOffset? OneTimeUtc, DateTimeOffset ActivatedUtc)`; Kind is `Once`/`Cron`, dialect is explicitly WorkerDock five-field numeric grammar.
 - `IScheduleEvaluator.Validate(ScheduleDefinition schedule) -> IReadOnlyList<string>` and `Next(ScheduleDefinition schedule, DateTimeOffset afterExclusiveUtc, int count) -> IReadOnlyList<DateTimeOffset>`; count 1–100, bounded candidate evaluations with safe `ScheduleSearchLimit` error rather than hanging. No result is an impossible/exhausted schedule.
+- `ResolveLocalOnce(DateTime localUnspecified, string zoneId, TimeSpan? selectedOffset) -> DateTimeOffset` belongs to IScheduleEvaluator. Reject non-Unspecified input, nonexistent local time, or an offset not valid in that zone at that instant; require selectedOffset when ambiguous. This is the authoritative conversion used by Task 14's editor API, not a browser-only check.
 - Calendar and serializer implement the pinned Quartz public contracts; calendar payload holds only schema version, expression, zone and policy, no execution configuration.
 
 - [ ] **Step 1 — Write fixtures.** `ScheduleEvaluatorTests.Dst_gap_skips_and_overlap_uses_earlier_offset` uses `30 2 * * *`, America/New_York after 2026-03-08 05:00Z → March 9 06:30Z, and `30 1 * * *` after 2026-11-01 04:00Z → November 1 05:30Z then November 2 06:30Z. Add every-minute repeated-hour, Australia/Lord_Howe half-hour transition, leap day, Sunday 0/7 and DOM/DOW AND fixtures. For `0 0 13 * 5` after 2026-10-01 00:00Z in UTC, first match is November 13, not October 2/13. Test invalid/impossible input and bounded advancement. `CalendarPersistenceTests.Restart_preserves_filtered_occurrences` compares before/after SQL round trip.
@@ -118,6 +121,8 @@ Assert.Equal(DateTimeOffset.Parse("2026-11-01T05:30:00Z"), fallNext[0]);
 Assert.Equal(DateTimeOffset.Parse("2026-11-02T06:30:00Z"), fallNext[1]);
 Assert.Equal(DateTimeOffset.Parse("2026-11-13T00:00:00Z"), bothDays.Single());
 Assert.Equal(beforeRestart, afterRestart);
+Assert.Equal("AmbiguousLocalTime", missingOverlapOffset.Code);
+Assert.Equal("InvalidLocalOffset", forgedOffset.Code);
 ```
 
 - [ ] **Step 2 — Verify red.** `dotnet test tests/WorkerDock.UnitTests --filter FullyQualifiedName~ScheduleEvaluatorTests` and `dotnet test tests/WorkerDock.IntegrationTests --filter FullyQualifiedName~CalendarPersistenceTests`; expect policy/calendar failures.

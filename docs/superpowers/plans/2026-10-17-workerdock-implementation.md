@@ -49,7 +49,7 @@ This is the review index, not an extra implementation task. Execute the linked p
 | --- | --- | --- |
 | [01 Foundation](2026-10-17-workerdock-01-foundation.md) | 01–04 | Audited tenant settings API, access-controlled React shell, disposable SQL migrations and proven Quartz stores/calendar |
 | [02 Execution](2026-10-17-workerdock-02-execution.md) | 05–09 | Manual executions through Quartz and isolated test handlers, durable stop/recovery and tenant-wide capacity |
-| [03 Templates](2026-10-17-workerdock-03-templates.md) | 10–13 | Usable SQL/HTTP templates, vault adapter, profile diagnostics and metadata forms |
+| [03 Templates](2026-10-17-workerdock-03-templates.md) | 10–12, 12A, 13 | Usable SQL/HTTP templates, vault adapter, protected integration settings, profile diagnostics and metadata forms |
 | [04 Scheduling and UI](2026-10-17-workerdock-04-scheduling-ui.md) | 14–16 | Scheduled jobs, complete operator workflow and monitoring in English/pt-BR |
 | [05 Operations and center](2026-10-17-workerdock-05-operations-center.md) | 17–20 | Durable observability, alerts, retention/archive and independent central registry |
 | [06 Release](2026-10-17-workerdock-06-release.md) | 21–23 | Repeatable Windows deployment, release evidence and complete OSS documentation |
@@ -60,7 +60,7 @@ At every stage exit, report changes, decisions, commands/results and limitations
 
 ## File structure and shared conventions
 
-Paths below and in stage plans are repository-relative. `src/<Project>/<Project>.csproj` is created when that project's first deliverable is implemented, targeting `net10.0`; Windows-only Runtime/Executor tests target `net10.0-windows`. The solution is `WorkerDock.slnx`. Use `Directory.Build.props`, `Directory.Packages.props`, `global.json`, package lock files and `frontend/package-lock.json`; commit exact resolved versions at first setup, without floating package references. Do not create empty projects just to match this map.
+Paths below and in stage plans are repository-relative. `src/<Project>/<Project>.csproj` is created when that project's first deliverable is implemented. Use `net10.0` for Domain, Contracts, Application, Infrastructure, Quartz, templates, Web, ControlCenter, Scheduler, DatabaseMigrator, UnitTests and IntegrationTests. Use `net10.0-windows` for Runtime, Worker, Executor and ProcessTests. Quartz depends on the Application supervisor port, not Windows Runtime; Worker injects Runtime's implementation. Integration tests launch Windows binaries as external fixtures rather than referencing their Windows-only assemblies. This keeps the dependency graph compatible with the [target-framework rules](https://learn.microsoft.com/en-us/dotnet/standard/frameworks). TestHost and TestTemplates use `net10.0`; Windows-only containment fixtures live in ProcessTests. The solution is `WorkerDock.slnx`. Use `Directory.Build.props`, `Directory.Packages.props`, `global.json`, package lock files and `frontend/package-lock.json`; commit exact resolved versions at first setup, without floating package references. Do not create empty projects just to match this map.
 
 | Location | Boundary |
 | --- | --- |
@@ -84,11 +84,17 @@ Use `Guid` for persisted opaque IDs, `DateTimeOffset` normalized to UTC at bound
 
 All command paths require the common `ActorContext` and audit transaction. All runtime policy transitions use the business lock; Quartz calls are outside it. A `CommandReceipt(Guid CommandId, Guid TargetId, string State)` acknowledges durable intent; projection status is queried independently. The stage that introduces a type owns its fields and exported signatures; later stages reference that task, not a second definition.
 
-Migration sequence: tenant `0001_bootstrap`, `0002_quartz`, `0003_execution`, `0004_templates`, `0005_scheduling`, `0006_observability`, `0007_alerts`, `0008_retention`; central `0001_registry`. Every pair is `.up.sql`/`.down.sql` with manifest/checksum entries. Later changes to already committed objects get a new migration rather than editing applied history. Down scripts must refuse unsafe data loss and identify restore prerequisites.
+Use safe RFC ProblemDetails with a stable `code` and field paths: validation 400, unauthenticated API 401, forbidden 403, missing resource 404, conflicting idempotency/policy state 409 and stale ETag 412. No raw exception or submitted value is echoed. IDs/current revisions/actor identity are server-controlled even if a command carries a proposed record; route and body IDs must agree. State-changing commands require CSRF; read-policy diagnostic refresh must not alter configuration.
+
+Each task creates or extends its own schema objects and least-privilege grants in a new paired migration. Task 01 creates the general outbox envelope; Task 05 extends it for execution dispatch instead of creating a second outbox. Task 08 creates minimal attempt status events consumed by Task 16; Task 17 adds optional log/aggregate storage. Test-only ports may be substituted before their production owner task, but never wire a no-op audit, secret or safety implementation into shipping hosts. The three-node Quartz proof in Task 03 uses separate processes; all test projects/fixtures needed by a task are created there, not assumed to exist from a later stage.
+
+Test command convention: use the VSTest-compatible xUnit runner and Microsoft.NET.Test.Sdk, pinned in Task 01, so `dotnet test ... --filter FullyQualifiedName~...` has one documented meaning. Frontend root scripts are defined in Task 02: `test` runs Vitest and `build` builds current app workspaces; Task 12A adds `e2e` and its Playwright config. Arguments after `--` pass through. Missing test infrastructure is a blocker, not an expected red behavior test.
+
+Initial migration sequence: tenant `0001_bootstrap`, `0002_quartz`, `0003_execution`, `0004_templates`, `0004a_integration_settings`, `0005_scheduling`, `0006_observability`, `0007_alerts`, `0008_retention`; central `0001_registry`. Every pair is `.up.sql`/`.down.sql` with manifest/checksum entries. Manifest order is explicit, not an integer parse of migration IDs. Tasks that extend objects after an earlier task's committed migration add an ordered suffix migration (for example `0003a_attempts`), updating the manifest; this initial list is not permission to rewrite applied history. Down scripts must refuse unsafe data loss and identify restore prerequisites.
 
 ## Toolchain and validation prerequisites
 
-Read-only local inspection found .NET SDK **7.0.202 only** and Node **24.15.0**. .NET 10 is required before implementation builds; no SDK or dependency was installed during planning. SQL Server availability and a disposable test login have not been established. Do not infer a usable test database from a local service name.
+Execution preflight on 2026-10-17 found .NET SDK **10.0.402** alongside 7.0.202; Node was previously observed at **24.15.0**. No SDK was installed by this task. Local SQL Server rejects the current Windows login, and WORKERDOCK_TEST_SQL is unset; an approved disposable test connection remains required. Do not infer a usable test database from a local service name.
 
 The [Microsoft Windows support matrix](https://learn.microsoft.com/en-us/dotnet/core/install/windows) supports the selected .NET 10/Windows Server 2022 x64 pairing. The [Quartz 4 quick start](https://www.quartz-scheduler.net/documentation/quartz-4.x/quick-start.html) places DI, hosting and System.Text.Json in core: do not copy a Quartz 3 package recipe. [Vite](https://vite.dev/guide/) requires modern Node; the observed Node 24 meets the documented floor. Choose React 19 with compatible [MUI peer dependencies](https://mui.com/material-ui/getting-started/installation/), then pin resolved packages in Task 02. No CDN assets or hosted fonts are required at runtime.
 
@@ -105,7 +111,7 @@ Use xUnit for .NET, Vitest/Testing Library for frontend units and Playwright for
 | 5 Quartz ownership, atomic intent, capacity, leases, recovery | 03, 05–09, 14, 22 |
 | 6 cron, DST, missed/overlap behavior, finite/infinite execution, stop | 04, 08–09, 14–16 |
 | 7 complete authentication/authorization matrix, API/CSRF parity | 02, 13, 15–16, 20, 22 |
-| 8 secrets, redaction, diagnostics and least privilege | 01–03, 07, 10–12, 17, 20–22 |
+| 8 secrets, redaction, diagnostics and least privilege | 01–03, 07, 10–12, 12A, 17, 20–22 |
 | 9 trusted templates, SQL and HTTP safety | 07, 10–13, 23 |
 | 10 complete operator UX and localization | 02, 13, 15–16, 20, 22 |
 | 11 audit/metrics/logs/alerts/retention/archive | 01, 17–19 |
@@ -117,11 +123,29 @@ Use xUnit for .NET, Vitest/Testing Library for frontend units and Playwright for
 
 ## Review record and execution handoff
 
-Planning-only artifacts: no scaffolding, application code, dependency installation, migrations executed or implementation tests run. Self-review completed: all spec sections and acceptance items map to tasks; task tests pin the five review-focus cases; exported profile/execution contracts and migration numbering are consistent. Structural verification found seven linked documents, 23 unique ordered tasks and 115 task steps, with no unresolved placeholders, completed implementation boxes or broken plan links. The plan set is approximately 12,100 words versus 9,800 in the spec. All implementation checkboxes remain unchecked.
+The full-plan review on 2026-10-17 identified interface and sequencing gaps beyond the initial structural checks. The corrections below belong to the user-requested managed worktree; this is the authoritative plan set for implementation. No product code is part of this review.
 
-Recommended method: **Subagent-driven**, because isolated process control, SQL/Quartz race boundaries and authorization deserve review at each task boundary. Native execution is supported as the lower-overhead alternative, with one independent whole-branch review at the end. No execution method has been selected yet. The user explicitly invoked using-git-worktrees during planning; create a managed worktree from the committed plan set and preserve it for implementation after approval.
+Planning-only artifacts: six stage plans contain 24 tasks and 120 task steps, including new Task 12A. No scaffolding, application code, dependency installation, migrations executed or implementation tests run. The original structural review was insufficient to prove contract readiness. The full review corrected the issues listed below; all implementation checkboxes remain unchecked.
 
-- [ ] User reviews and approves these six stage plans.
-- [ ] User selects Subagent-driven or Native execution.
-- [ ] Reuse the user-requested managed worktree prepared with the plan set; verify its baseline, then invoke the selected execution skill after approval.
+| Finding | Correction and owning task |
+| --- | --- |
+| Quartz integration could be wired to a Windows-only Runtime dependency | Explicit target-framework graph and platform-neutral supervisor port, Tasks 03/07/08 |
+| Three Quartz cluster nodes were not given a reproducible process fixture | Separate TestHost processes, Task 03 |
+| Outbox interface supported only execution payloads | Versioned generic projection envelope with execution/schedule/alert kinds, Task 06 |
+| Child request omitted template identity and mixed runtime services into IPC | Serializable descriptor plus child-local facade context, Task 07 |
+| Completion/retry contract could not convey timeout cause or HTTP Retry-After | Typed completion and bounded retry delay, Tasks 07/08/12 |
+| Edit/profile/preview screens lacked complete server contracts | Protected edit/profile queries and explicit local-time conversion, Tasks 05/11/14 |
+| Vault/egress management had no owned deliverable | Dedicated Task 12A with deployment-bound validation and role tests |
+| New-job wizard could leave a partially scheduled enabled job | Disabled draft and idempotent final activation, Tasks 05/14/15 |
+| Alert delivery and durable log deduplication were underspecified | Delivery ownership/sequence identities and sink CRUD, Tasks 17/18 |
+| Health refresh exception conflicted with management-mutation wording | Read access only for observational refresh; configuration stays management-only, Task 20 |
+| Phase dependencies postponed required migration grants and test bootstrap | Ownership rules above and explicit baseline schemas/fixtures |
+
+Readiness verdict: sufficiently specified to begin Task 01 after user plan approval/execution-method selection and environment preflight. This is not evidence that the distributed runtime already works. Real SQL/Quartz capacity, restart and calendar proofs in Tasks 03–04 remain blocking exit criteria before Stage 02. .NET 10 installation/location and a disposable SQL Server test connection are unresolved environment prerequisites; neither was changed or verified by this document review.
+
+Recommended method: **Subagent-driven**, because isolated process control, SQL/Quartz race boundaries and authorization deserve review at each task boundary. Native execution is supported as the lower-overhead alternative, with one independent whole-branch review at the end. No execution method has been selected yet. The user-requested managed worktree already exists and contains this reviewed plan set; reuse it for implementation after approval.
+
+- [x] User reviews and approves these six stage plans (2026-10-17: "go ahead").
+- [x] User selects Subagent-driven execution (explicit skill invocation, 2026-10-17).
+- [x] Reuse the user-requested managed worktree prepared with the plan set; verified detached linked worktree at 9339d87 with only reviewed plan edits and no implementation baseline to test.
 - [ ] Execute task 01 only after those gates; continue in dependency order with stage reports.
