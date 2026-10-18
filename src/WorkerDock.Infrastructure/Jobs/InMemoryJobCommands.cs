@@ -40,6 +40,7 @@ public sealed class InMemoryJobCommands : IJobCommands
     }
 
     public int AuditCount => Volatile.Read(ref state).Audits.Length;
+    public ImmutableArray<MemoryJobAudit> AuditEvents => Volatile.Read(ref state).Audits;
     public int OutboxCount => Volatile.Read(ref state).Outbox.Length;
     public int ExecutionCount => Volatile.Read(ref state).Executions.Count;
     public MemoryExecution? GetExecution(Guid id) => Volatile.Read(ref state).Executions.GetValueOrDefault(id);
@@ -65,8 +66,9 @@ public sealed class InMemoryJobCommands : IJobCommands
                 exists && editor!.Archived, exists ? editor!.ConcurrencyLimit : 1);
             var receipt = new CommandReceipt(Guid.NewGuid(), proposed.JobId, "Applied");
             await CheckPhaseAsync("Audit", ct);
-            var audit = new MemoryJobAudit(Guid.NewGuid(), "JobRevisionSaved", proposed.JobId, number, actor.Subject,
-                actor.CorrelationId, clock.GetUtcNow());
+            var audit = new MemoryJobAudit(Guid.NewGuid(), "JobRevisionSaved", proposed.JobId,
+                exists ? editor!.Revision.Revision : null, number, "Applied", actor.Subject,
+                actor.AuthenticationMode, actor.CorrelationId, clock.GetUtcNow());
             Volatile.Write(ref state, before with
             {
                 Jobs = before.Jobs.SetItem(proposed.JobId, next),
@@ -107,7 +109,8 @@ public sealed class InMemoryJobCommands : IJobCommands
                 Commands = before.Commands.Add(receipt.CommandId, receipt),
                 Dedup = before.Dedup.SetItem(scope, new(receipt, now.AddHours(24))),
                 Audits = before.Audits.Add(new(Guid.NewGuid(), "ManualRunAccepted", executionId,
-                    editor.Revision.Revision, actor.Subject, actor.CorrelationId, now)),
+                    editor.Revision.Revision, editor.Revision.Revision, "Accepted", actor.Subject,
+                    actor.AuthenticationMode, actor.CorrelationId, now)),
                 Outbox = before.Outbox.Add(new(Guid.NewGuid(), "ExecutionDispatch", executionId,
                     editor.Revision.Revision, digest, now))
             });
@@ -154,8 +157,10 @@ public sealed class InMemoryJobCommands : IJobCommands
         ImmutableArray<MemoryJobAudit> Audits,
         ImmutableArray<MemoryJobOutbox> Outbox);
     private sealed record DedupRecord(CommandReceipt Receipt, DateTimeOffset ExpiresUtc);
-    private sealed record MemoryJobAudit(Guid EventId, string EventType, Guid TargetId, long Revision,
-        string ActorSubject, Guid CorrelationId, DateTimeOffset OccurredAtUtc);
     private sealed record MemoryJobOutbox(Guid EventId, string Kind, Guid EntityId, long Revision,
         string PayloadDigest, DateTimeOffset AvailableUtc);
 }
+
+public sealed record MemoryJobAudit(Guid EventId, string EventType, Guid TargetId,
+    long? BeforeRevision, long AfterRevision, string Outcome, string ActorSubject,
+    string AuthenticationMode, Guid CorrelationId, DateTimeOffset OccurredAtUtc);

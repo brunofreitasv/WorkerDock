@@ -9,6 +9,24 @@ namespace WorkerDock.IntegrationTests;
 
 public sealed class JobSqlIntegrationTests
 {
+    [Fact]
+    public async Task Revision_audit_records_bounded_transition_and_outcome()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
+            .ApplyAsync("tenant", "0003_execution", default);
+        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
+        var job = Job() with { Configuration = JsonDocument.Parse("{\"secret\":\"audit-must-not-copy-this\"}").RootElement.Clone() };
+        var actor = Actor();
+        await commands.SaveAsync(job, null, actor, default);
+        var editor = await commands.GetEditableAsync(job.JobId, default);
+        await commands.SaveAsync(job with { Name = "Second" }, editor.Version, actor, default);
+        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM dbo.AuditEvents WHERE EventType=N'JobRevisionSaved' AND JSON_VALUE(DetailsJson,'$.beforeRevision') IS NULL AND JSON_VALUE(DetailsJson,'$.afterRevision')='1' AND JSON_VALUE(DetailsJson,'$.outcome')='Applied'"));
+        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM dbo.AuditEvents WHERE EventType=N'JobRevisionSaved' AND JSON_VALUE(DetailsJson,'$.beforeRevision')='1' AND JSON_VALUE(DetailsJson,'$.afterRevision')='2' AND JSON_VALUE(DetailsJson,'$.outcome')='Applied'"));
+        Assert.Equal(2, await database.ScalarAsync("SELECT COUNT(*) FROM dbo.AuditEvents WHERE EventType=N'JobRevisionSaved' AND ActorSubject=N'issuer:subject' AND AuthenticationMode=N'Entra' AND CorrelationId IS NOT NULL AND DetailsJson NOT LIKE N'%audit-must-not-copy-this%'"));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -51,6 +69,7 @@ public sealed class JobSqlIntegrationTests
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM dbo.ManualRequestDedup"));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM dbo.Outbox WHERE EventType=N'ExecutionDispatch'"));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM dbo.AuditEvents WHERE EventType=N'ManualRunAccepted'"));
+        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM dbo.AuditEvents WHERE EventType=N'ManualRunAccepted' AND JSON_VALUE(DetailsJson,'$.beforeRevision')='1' AND JSON_VALUE(DetailsJson,'$.afterRevision')='1' AND JSON_VALUE(DetailsJson,'$.outcome')='Accepted'"));
         var unsafeRollback = await Assert.ThrowsAsync<WorkerDockException>(async () =>
             await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
                 .RollbackAsync("tenant", "0003_execution", default));

@@ -34,6 +34,31 @@ public sealed class JobCommandTests
     }
 
     [Fact]
+    public async Task Revision_audit_identifies_transition_and_outcome_without_configuration()
+    {
+        var service = new InMemoryJobCommands(TimeProvider.System);
+        var draft = Job("First") with { Configuration = JsonDocument.Parse("{\"secret\":\"audit-must-not-copy-this\"}").RootElement.Clone() };
+        await service.SaveAsync(draft, null, Actor, default);
+        var editor = await service.GetEditableAsync(draft.JobId, default);
+        await service.SaveAsync(draft with { Name = "Second" }, editor.Version, Actor, default);
+
+        var events = service.AuditEvents;
+        Assert.Equal(2, events.Length);
+        Assert.Null(events[0].BeforeRevision);
+        Assert.Equal(1, events[0].AfterRevision);
+        Assert.Equal(1, events[1].BeforeRevision);
+        Assert.Equal(2, events[1].AfterRevision);
+        Assert.All(events, entry =>
+        {
+            Assert.Equal("Applied", entry.Outcome);
+            Assert.Equal(Actor.Subject, entry.ActorSubject);
+            Assert.Equal(Actor.AuthenticationMode, entry.AuthenticationMode);
+            Assert.Equal(Actor.CorrelationId, entry.CorrelationId);
+        });
+        Assert.DoesNotContain("audit-must-not-copy-this", JsonSerializer.Serialize(events));
+    }
+
+    [Fact]
     public async Task Repeated_manual_key_returns_original_for_24_hours()
     {
         var clock = new MutableClock(new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero));
@@ -44,6 +69,11 @@ public sealed class JobCommandTests
             service.RunNowAsync(job.JobId, "same-key", Actor, default).AsTask());
         Assert.Equal(requests[0], requests[1]);
         Assert.Equal(1, service.ExecutionCount);
+        var audit = Assert.Single(service.AuditEvents);
+        Assert.Equal("Accepted", audit.Outcome);
+        Assert.Equal(1, audit.BeforeRevision);
+        Assert.Equal(1, audit.AfterRevision);
+        Assert.Equal(Actor.AuthenticationMode, audit.AuthenticationMode);
         clock.Advance(TimeSpan.FromHours(23) + TimeSpan.FromMinutes(59));
         Assert.Equal(requests[0], await service.RunNowAsync(job.JobId, "same-key", Actor, default));
         clock.Advance(TimeSpan.FromMinutes(2));

@@ -78,7 +78,8 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 if (await update.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion");
                 var receipt = new CommandReceipt(Guid.NewGuid(), proposed.JobId, "Applied");
                 await InsertCommandAsync(connection, transaction, receipt, "JobSave", token);
-                await InsertAuditAsync(connection, transaction, "JobRevisionSaved", proposed.JobId, actor, token);
+                await InsertAuditAsync(connection, transaction, "JobRevisionSaved", proposed.JobId,
+                    currentRevision, number, "Applied", actor, token);
                 return receipt;
             }, ct);
         }
@@ -175,7 +176,8 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 Add(saveKey, "@state", SqlDbType.NVarChar, receipt.State, 20);
                 Add(saveKey, "@now", SqlDbType.DateTime2, now);
                 await saveKey.ExecuteNonQueryAsync(token);
-                await InsertAuditAsync(connection, transaction, "ManualRunAccepted", executionId, actor, token);
+                await InsertAuditAsync(connection, transaction, "ManualRunAccepted", executionId,
+                    revision, revision, "Accepted", actor, token);
                 var payload = JsonSerializer.Serialize(new { executionId, jobRevision = revision });
                 await using var outbox = Command(connection, transaction,
                     "INSERT INTO dbo.Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState) VALUES (@id,N'ExecutionDispatch',@payload,@now,@now,1,@execution,@revision,@digest,N'Pending')");
@@ -243,7 +245,8 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
     }
 
     private static async ValueTask InsertAuditAsync(DbConnection connection, DbTransaction transaction,
-        string kind, Guid targetId, ActorContext actor, CancellationToken ct)
+        string kind, Guid targetId, long? beforeRevision, long afterRevision, string outcome,
+        ActorContext actor, CancellationToken ct)
     {
         await using var command = Command(connection, transaction,
             "INSERT INTO dbo.AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson) VALUES (@id,@kind,@subject,@mode,@correlation,SYSUTCDATETIME(),@details)");
@@ -252,7 +255,8 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
         Add(command, "@subject", SqlDbType.NVarChar, actor.Subject, 300);
         Add(command, "@mode", SqlDbType.NVarChar, actor.AuthenticationMode, 40);
         Add(command, "@correlation", SqlDbType.UniqueIdentifier, actor.CorrelationId);
-        Add(command, "@details", SqlDbType.NVarChar, JsonSerializer.Serialize(new { targetId }), 4000);
+        Add(command, "@details", SqlDbType.NVarChar,
+            JsonSerializer.Serialize(new { targetId, beforeRevision, afterRevision, outcome }), 4000);
         await command.ExecuteNonQueryAsync(ct);
     }
 
