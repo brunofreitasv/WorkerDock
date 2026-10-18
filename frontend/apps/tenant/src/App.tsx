@@ -22,6 +22,9 @@ import { useSession } from "./auth/SessionProvider";
 import { ApiError, mutate, read, signOut } from "./api/client";
 import { VaultSettingsPage } from "./features/settings/VaultSettingsPage";
 import { OutboundPolicyPage } from "./features/settings/OutboundPolicyPage";
+import { ManualJobEditor } from "./features/jobs/ManualJobEditor";
+import { ProfileEditor } from "./features/profiles/ProfileEditor";
+import { TemplatePicker, type CatalogItem } from "./features/templates/TemplatePicker";
 const theme = createTheme({
   palette: {
     primary: { main: "#0b6c61", dark: "#064f47", light: "#dff2ed" },
@@ -166,6 +169,7 @@ export default function App() {
     () => window.location.hash.slice(2) || "dashboard",
   );
   const [settingsTab, setSettingsTab] = useState("general");
+  const [catalogItem, setCatalogItem] = useState<CatalogItem>();
   const [actionError, setActionError] = useState(false);
   useEffect(() => {
     const change = () =>
@@ -182,6 +186,8 @@ export default function App() {
         { id: "dashboard", label: t.dashboard },
         { id: "monitoring", label: t.monitoring },
         { id: "audit", label: t.audit },
+        { id: "templates", label: t.templates },
+        ...(session.canManage ? [{ id: "jobs", label: t.jobs }] : []),
         ...(session.canManage ? [{ id: "settings", label: t.settings }] : []),
       ]
     : [];
@@ -238,13 +244,25 @@ export default function App() {
                       <Button variant={settingsTab === "general" ? "contained" : "outlined"} onClick={() => setSettingsTab("general")}>{t.settings}</Button>
                       <Button variant={settingsTab === "vault" ? "contained" : "outlined"} onClick={() => setSettingsTab("vault")}>{t.vaultSettings}</Button>
                       <Button variant={settingsTab === "outbound" ? "contained" : "outlined"} onClick={() => setSettingsTab("outbound")}>{t.outboundSettings}</Button>
+                      <Button variant={settingsTab === "profiles" ? "contained" : "outlined"} onClick={() => setSettingsTab("profiles")}>{t.profiles}</Button>
                     </Stack>
-                    {settingsTab === "general" ? <SettingsForm t={t} /> : settingsTab === "vault" ? <VaultSettingsPage t={t} /> : <OutboundPolicyPage t={t} />}
+                    {settingsTab === "general" ? <SettingsForm t={t} /> : settingsTab === "vault" ? <VaultSettingsPage t={t} /> : settingsTab === "outbound" ? <OutboundPolicyPage t={t} /> : <ProfileEditor />}
                   </>
                 ) : (
                   <Alert severity="error">{t.permission}</Alert>
                 )
               ) : (
+                active === "jobs" ? (
+                  session.canManage ? <ManualJobEditor t={t} /> : <Alert severity="error">{t.permission}</Alert>
+                ) : active === "templates" ? (
+                  <Paper variant="outlined" sx={{ p: 3, mb: 3, maxWidth: 900 }}>
+                    <Stack spacing={2}>
+                      <Typography component="h2" variant="h6">{t.templates}</Typography>
+                      <TemplatePicker label={t.template} value={catalogItem} onChange={setCatalogItem} />
+                      {catalogItem && <><Typography>{catalogItem.descriptor.description}</Typography><Typography variant="caption" color="text.secondary">{catalogItem.descriptor.id} · {catalogItem.descriptor.version}{catalogItem.selectable ? "" : " · retired"}</Typography></>}
+                    </Stack>
+                  </Paper>
+                ) : (
                 <Paper
                   variant="outlined"
                   sx={{
@@ -266,6 +284,7 @@ export default function App() {
                     {active === "dashboard" ? t.foundation : t.unavailable}
                   </Typography>
                 </Paper>
+                )
               )}
               <Paper variant="outlined" sx={{ p: 3, mt: 3 }}>
                 <Typography component="h2" variant="h6" sx={{ mb: 1 }}>

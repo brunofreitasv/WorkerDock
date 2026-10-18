@@ -4,12 +4,39 @@ using System.Net.Http.Json;
 using WorkerDock.Application.Common;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Jobs;
+using WorkerDock.Application.Templates;
+using WorkerDock.Infrastructure.Templates;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace WorkerDock.IntegrationTests;
 
 public sealed class JobCommandTests
 {
     private static readonly ActorContext Actor = new("issuer:subject", "Entra", Guid.NewGuid());
+
+    [Fact]
+    public async Task Trusted_registered_template_is_validated_before_save_enable_and_run()
+    {
+        var descriptor=TemplateCatalogTests.Descriptor("""{"type":"object","properties":{"count":{"type":"integer","minimum":1}},"additionalProperties":false}""") with { Id="custom.trusted" };
+        descriptor=WorkerDock.Infrastructure.Templates.TemplateMetadata.WithDigest(descriptor);
+        var catalog=new WorkerDock.Infrastructure.Templates.TemplateCatalog([descriptor]); await catalog.RegisterAsync([descriptor],default);
+        var commands=new InMemoryJobCommands(TimeProvider.System,templateCatalog:catalog);
+        var invalid=Job("invalid") with { TemplateId=descriptor.Id,TemplateVersion=descriptor.Version,Configuration=JsonDocument.Parse("""{"count":0}""").RootElement.Clone() };
+        await commands.SaveAsync(invalid,null,Actor,default);
+        var editor=await commands.GetEditableAsync(invalid.JobId,default);
+        Assert.False(editor.Enabled);
+        var validation=await Assert.ThrowsAsync<WorkerDockException>(async()=>await commands.EnableManualAsync(invalid.JobId,editor.Version,Actor,default));
+        Assert.Equal("ValidationFailed",validation.Code);
+        var stale=await Assert.ThrowsAsync<WorkerDockException>(async()=>await commands.EnableManualAsync(invalid.JobId,BitConverter.GetBytes(9L),Actor,default));
+        Assert.Equal("StaleVersion",stale.Code);
+        var valid=invalid with { Configuration=JsonDocument.Parse("""{"count":2}""").RootElement.Clone() };
+        await commands.SaveAsync(valid,editor.Version,Actor,default);
+        var updated=await commands.GetEditableAsync(valid.JobId,default);
+        await commands.EnableManualAsync(valid.JobId,updated.Version,Actor,default);
+        Assert.True((await commands.GetEditableAsync(valid.JobId,default)).Enabled);
+        var run=await commands.RunNowAsync(valid.JobId,"custom-run",Actor,default);
+        Assert.Equal(valid.JobId,commands.GetExecution(run.TargetId)?.JobId);
+    }
 
     [Fact]
     public async Task Receipt_kind_survives_request_key_expiry_while_execution_is_still_queued()
@@ -248,8 +275,11 @@ public sealed class JobCommandTests
     [Fact]
     public async Task Management_routes_return_safe_receipts_and_stale_edit_problem()
     {
-        await using var host = new AccessHost();
-        using var client = host.Client();
+        var descriptor=WorkerDock.Infrastructure.Templates.TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor("""{"type":"object"}""") with { Id="workerdock.http" });
+        var catalog=new TemplateCatalog([descriptor]); await catalog.RegisterAsync([descriptor],default);
+        await using var baseHost = new AccessHost();
+        await using var host=baseHost.WithWebHostBuilder(builder=>builder.ConfigureServices(services=>services.AddSingleton<ITemplateCatalog>(catalog)));
+        using var client = host.CreateClient(new() { BaseAddress=new("https://localhost"),AllowAutoRedirect=false });
         var token = (await client.GetFromJsonAsync<CsrfView>("/api/antiforgery"))!.RequestToken;
         using var create = new HttpRequestMessage(HttpMethod.Post, "/api/jobs")
         {
@@ -258,7 +288,7 @@ public sealed class JobCommandTests
         create.Headers.Add("Origin", "https://localhost");
         create.Headers.Add("X-WorkerDock-CSRF", token);
         using var created = await client.SendAsync(create);
-        Assert.Equal(HttpStatusCode.Accepted, created.StatusCode);
+        Assert.True(created.StatusCode == HttpStatusCode.Accepted, await created.Content.ReadAsStringAsync());
         var receipt = await created.Content.ReadFromJsonAsync<CommandReceipt>();
         Assert.NotNull(receipt);
         Assert.NotEqual(Guid.Empty, receipt.TargetId);

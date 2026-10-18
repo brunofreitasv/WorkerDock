@@ -18,8 +18,6 @@ public static class JobCommandValidation
         if (revision.JobId == Guid.Empty) throw new WorkerDockException("ValidationFailed", "jobId");
         if (string.IsNullOrWhiteSpace(revision.Name) || revision.Name.Length > 200)
             throw new WorkerDockException("ValidationFailed", "name");
-        if (!((revision.TemplateId, revision.TemplateVersion) is ("workerdock.sql-server", "1.0.0") or ("workerdock.http", "1.0.0")))
-            throw new WorkerDockException("UnknownTemplate", "templateId");
         if (revision.Configuration.ValueKind != System.Text.Json.JsonValueKind.Object ||
             !WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(revision.TemplateId, revision.TemplateVersion, revision.Configuration))
             throw new WorkerDockException("ValidationFailed", "configuration");

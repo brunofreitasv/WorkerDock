@@ -226,8 +226,8 @@ dotnet test tests/WorkerDock.ProcessTests -c Release
 dotnet build WorkerDock.slnx -c Release
 ```
 
-Shared schema fixtures live at `tests/fixtures/template-schemas.json`; server tests consume them now and Task 13 uses the same corpus for forms. The catalog metadata routes require Manage and expose descriptor/schema/hints and selection status only. Installed SQL/HTTP handler references are added by Tasks 11/12; the current roots deliberately register an empty installed package list and cannot activate a pool whose catalog digest differs.
+Shared schema fixtures live at `tests/fixtures/template-schemas.json`; server tests and Task 13's client validator consume the same corpus. `GET /api/templates` and `GET /api/templates/{id}/{version}` require Read and expose descriptor/schema/hints and selection status only. `POST /api/template-validation` requires Manage and returns path/code issues without echoing values. There is no package upload, secret resolution, or execution endpoint in the authoring UI.
 
 Task 10 real-SQL migration/permission/promotion tests are separate in [database.md](database.md#task-10-immutable-template-catalog). Their status remains **SQL_TEST_BLOCKED** without the provisioned disposable SQL logins. Memory and process tests do not prove SQL durability or grant enforcement.
 
-Authoring boundary still pending Task 13: the existing job-save path retains its built-in-only gate and has not yet adopted catalog schema validation. Task 10 validates registration metadata and validates configuration again inside the child before any handler effects. Task 13 must replace that authoring gate with trusted registered-catalog policy and enforce server schema validation before enable/run-now; saving a revision today is not evidence that its template schema has passed.
+Task 13 replaces the built-in-only job authoring gate with the trusted registered catalog. Saving creates a disabled draft; schema validation is enforced by the server before manual activation and again before run-now, while the child still revalidates before handler effects. Saving a draft is not evidence that its template schema has passed.

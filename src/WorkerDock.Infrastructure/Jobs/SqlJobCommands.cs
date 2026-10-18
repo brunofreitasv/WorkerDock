@@ -9,15 +9,18 @@ using WorkerDock.Application.Common;
 using WorkerDock.Application.Jobs;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Persistence;
+using WorkerDock.Application.Templates;
+using WorkerDock.Infrastructure.Templates;
 
 namespace WorkerDock.Infrastructure.Jobs;
 
-public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
+public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatalog? templateCatalog = null) : IJobCommands
 {
     public async ValueTask<CommandReceipt> SaveAsync(JobRevision proposed, byte[]? expectedVersion, ActorContext actor, CancellationToken ct)
     {
         JobCommandValidation.ValidateActor(actor);
         JobCommandValidation.ValidateRevision(proposed);
+        await TemplateJobValidation.RequireRegisteredAsync(templateCatalog, proposed.TemplateId, proposed.TemplateVersion, ct);
         if (expectedVersion is not null && expectedVersion.Length != 8)
             throw new WorkerDockException("ValidationFailed", "version");
         try
@@ -84,6 +87,49 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
             }, ct);
         }
         catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
+    }
+
+    public async ValueTask<CommandReceipt> EnableManualAsync(Guid jobId, byte[] expectedVersion, ActorContext actor, CancellationToken ct)
+    {
+        JobCommandValidation.ValidateActor(actor);
+        if(jobId==Guid.Empty || expectedVersion.Length!=8) throw new WorkerDockException("ValidationFailed","version");
+        try
+        {
+            return await new BusinessTransaction(options).RunAsync<CommandReceipt>(async (connection, transaction, token) =>
+            {
+                await CheckInstanceAsync(connection,transaction,token);
+                await using var read=Command(connection,transaction,"SELECT j.CurrentRevision,j.Version,j.Enabled,j.Archived,r.Name,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.ProfileId,r.PolicyJson FROM [workerdock].Jobs j JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision WHERE j.JobId=@id");
+                Add(read,"@id",SqlDbType.UniqueIdentifier,jobId);
+                await using var row=await read.ExecuteReaderAsync(token);
+                if(!await row.ReadAsync(token)) throw new WorkerDockException("JobNotFound");
+                var version=row.GetFieldValue<byte[]>(1);
+                if(!version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
+                if(row.GetBoolean(3)) throw new WorkerDockException("JobArchived");
+                var isEnabled=row.GetBoolean(2);
+                var revision=new JobRevision(jobId,row.GetInt64(0),row.GetString(4),row.GetString(5),row.GetString(6),JsonDocument.Parse(row.GetString(7)).RootElement.Clone(),row.IsDBNull(8)?null:row.GetGuid(8),JsonSerializer.Deserialize<ExecutionPolicy>(row.GetString(9))!);
+                await row.CloseAsync();
+                await TemplateJobValidation.ValidateAsync(templateCatalog,revision,token);
+                if(revision.ProfileId is { } profileId)
+                {
+                    await using var profile=Command(connection,transaction,"SELECT Retired,CurrentRevisionId FROM [workerdock].ConnectionProfiles WHERE ProfileId=@id");
+                    Add(profile,"@id",SqlDbType.UniqueIdentifier,profileId);
+                    await using var profileRow=await profile.ExecuteReaderAsync(token);
+                    if(!await profileRow.ReadAsync(token) || profileRow.GetBoolean(0) || profileRow.IsDBNull(1)) throw new WorkerDockException("ProfileUnavailable");
+                    await profileRow.CloseAsync();
+                }
+                if(!isEnabled)
+                {
+                    await using var update=Command(connection,transaction,"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId=@id AND Version=@version AND Enabled=0 AND Archived=0");
+                    Add(update,"@id",SqlDbType.UniqueIdentifier,jobId); Add(update,"@version",SqlDbType.Binary,expectedVersion,8);
+                    if(await update.ExecuteNonQueryAsync(token)!=1) throw new WorkerDockException("StaleVersion");
+                    await InsertAuditAsync(connection,transaction,"JobEnabled",jobId,revision.Revision,revision.Revision,"Applied",actor,token);
+                }
+                var receipt=new CommandReceipt(Guid.NewGuid(),jobId,"Applied");
+                await InsertCommandAsync(connection,transaction,receipt,"EnableManual",token);
+                return receipt;
+            },ct);
+        }
+        catch(SqlException){throw new WorkerDockException("PersistenceUnavailable");}
     }
 
     public async ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct)
@@ -163,6 +209,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 using var json = JsonDocument.Parse(pinned.GetString(2));
                 if (!WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(pinned.GetString(0), pinned.GetString(1), json.RootElement))
                     throw new WorkerDockException("ValidationFailed", "configuration");
+                await TemplateJobValidation.ValidateAsync(templateCatalog,pinned.GetString(0),pinned.GetString(1),json.RootElement,token);
                 await pinned.CloseAsync();
 
                 var executionId = Guid.NewGuid();

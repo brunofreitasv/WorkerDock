@@ -9,6 +9,7 @@ using WorkerDock.Infrastructure.Executions;
 using System.Text.Json;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Application.Settings;
+using WorkerDock.Application.Templates;
 
 namespace WorkerDock.Infrastructure.Jobs;
 
@@ -20,6 +21,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
     private readonly TimeProvider clock;
     private readonly IConnectionProfiles? profiles;
     private readonly IIntegrationSettings? integrationSettings;
+    private readonly ITemplateCatalog? templateCatalog;
     private readonly Func<string, CancellationToken, ValueTask>? beforeCommit;
     private readonly SemaphoreSlim gate = new(1, 1);
     private State state = new([], [], [], [], [], [], []);
@@ -27,9 +29,9 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
 
     public InMemoryJobCommands(TimeProvider clock, IEnumerable<JobRevision>? enabledSeeds = null,
         Func<string, CancellationToken, ValueTask>? beforeCommit = null,
-        IEnumerable<JobRevision>? archivedSeeds = null, IConnectionProfiles? profiles = null, IIntegrationSettings? integrationSettings = null)
+        IEnumerable<JobRevision>? archivedSeeds = null, IConnectionProfiles? profiles = null, IIntegrationSettings? integrationSettings = null, ITemplateCatalog? templateCatalog = null)
     {
-        this.clock = clock; this.profiles=profiles; this.integrationSettings=integrationSettings;
+        this.clock = clock; this.profiles=profiles; this.integrationSettings=integrationSettings; this.templateCatalog=templateCatalog;
         this.beforeCommit = beforeCommit;
         foreach (var seed in enabledSeeds ?? []) Seed(seed, false);
         foreach (var seed in archivedSeeds ?? []) Seed(seed, true);
@@ -64,6 +66,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
     {
         JobCommandValidation.ValidateActor(actor);
         JobCommandValidation.ValidateRevision(proposed);
+        await TemplateJobValidation.RequireRegisteredAsync(templateCatalog,proposed.TemplateId,proposed.TemplateVersion,ct);
         if (expectedVersion is not null && expectedVersion.Length != 8)
             throw new WorkerDockException("ValidationFailed", "version");
         await gate.WaitAsync(ct);
@@ -96,6 +99,39 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
         finally { gate.Release(); }
     }
 
+    public async ValueTask<CommandReceipt> EnableManualAsync(Guid jobId,byte[] expectedVersion,ActorContext actor,CancellationToken ct)
+    {
+        JobCommandValidation.ValidateActor(actor);
+        if(jobId==Guid.Empty || expectedVersion.Length!=8) throw new WorkerDockException("ValidationFailed","version");
+        await gate.WaitAsync(ct);
+        try
+        {
+            var before=state;
+            if(!before.Jobs.TryGetValue(jobId,out var editor)) throw new WorkerDockException("JobNotFound");
+            if(!editor.Version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
+            if(editor.Archived) throw new WorkerDockException("JobArchived");
+            await TemplateJobValidation.ValidateAsync(templateCatalog,editor.Revision,ct);
+            if(editor.Revision.ProfileId is { } profileId)
+            {
+                var profile=profiles is null ? throw new WorkerDockException("ProfileUnavailable") : await profiles.GetCurrentAsync(profileId,ct);
+                if(profile.Retired) throw new WorkerDockException("ProfileUnavailable");
+            }
+            var version=BitConverter.GetBytes(BitConverter.ToInt64(editor.Version)+1);
+            var next=editor with { Enabled=true, Version=version };
+            var receipt=new CommandReceipt(Guid.NewGuid(),jobId,"Applied");
+            await CheckPhaseAsync("Audit",ct);
+            ImmutableInterlocked.Update(ref state,current=>before with
+            {
+                Jobs=before.Jobs.SetItem(jobId,next),
+                Commands=current.Commands.Add(receipt.CommandId,receipt),
+                CommandKinds=current.CommandKinds.Add(receipt.CommandId,"EnableManual"),
+                Audits=current.Audits.Add(new(Guid.NewGuid(),"JobEnabled",jobId,editor.Revision.Revision,editor.Revision.Revision,"Applied",actor.Subject,actor.AuthenticationMode,actor.CorrelationId,clock.GetUtcNow()))
+            });
+            return receipt;
+        }
+        finally { gate.Release(); }
+    }
+
     public async ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct)
     {
         JobCommandValidation.ValidateRequestKey(jobId, requestKey, actor);
@@ -110,6 +146,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             if (!before.Jobs.TryGetValue(jobId, out var editor)) throw new WorkerDockException("JobNotFound");
             if (editor.Archived) throw new WorkerDockException("JobArchived");
             if (!editor.Enabled) throw new WorkerDockException("JobDisabled");
+            await TemplateJobValidation.ValidateAsync(templateCatalog,editor.Revision,ct);
             WorkerDock.Contracts.Connections.ConnectionProfileRevision? pinnedProfile=null;
             if(editor.Revision.ProfileId is {} profileId)
                 pinnedProfile=profiles is not null ? (await profiles.GetCurrentAsync(profileId,ct)).Current : throw new WorkerDockException("ProfileUnavailable");

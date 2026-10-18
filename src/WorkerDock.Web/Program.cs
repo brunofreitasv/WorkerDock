@@ -17,20 +17,27 @@ using WorkerDock.Infrastructure.Jobs;
 using WorkerDock.Application.Settings;
 using WorkerDock.Infrastructure.Settings;
 using WorkerDock.Web.Endpoints;
+using WorkerDock.Templates.SqlServer;
+using WorkerDock.Templates.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWorkerDockAccess();
 builder.Services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+var trustedTemplates = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
+{
+    new SqlTemplate().Descriptor,
+    new HttpTemplate(new HttpClient()).Descriptor
+};
 builder.Services.TryAddSingleton<IJobCommands>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
     var environment = provider.GetRequiredService<IHostEnvironment>();
     if (!Guid.TryParse(config["Tenant:InstanceId"], out var instanceId)) return new UnavailableJobCommands();
     if (config["Tenant:Adapter"] == "Memory")
-        return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>(),profiles:provider.GetRequiredService<IConnectionProfiles>(),integrationSettings:provider.GetRequiredService<IIntegrationSettings>()) : new UnavailableJobCommands();
+        return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>(),profiles:provider.GetRequiredService<IConnectionProfiles>(),integrationSettings:provider.GetRequiredService<IIntegrationSettings>(),templateCatalog:provider.GetRequiredService<ITemplateCatalog>()) : new UnavailableJobCommands();
     var connection = config["Tenant:ConnectionString"];
     return !string.IsNullOrWhiteSpace(connection)
-        ? new SqlJobCommands(new(connection, instanceId))
+        ? new SqlJobCommands(new(connection, instanceId),provider.GetRequiredService<ITemplateCatalog>())
         : new UnavailableJobCommands();
 });
 builder.Services.TryAddSingleton<IIntegrationSettings>(provider =>
@@ -76,9 +83,14 @@ builder.Services.TryAddSingleton<ICapacityCommands>(provider =>
 builder.Services.TryAddSingleton<ITemplateCatalog>(provider =>
 {
     var config=provider.GetRequiredService<IConfiguration>();
-    if(config["Tenant:Adapter"]=="Memory" && provider.GetRequiredService<IHostEnvironment>().IsDevelopment()) return new TemplateCatalog([]);
+    if(config["Tenant:Adapter"]=="Memory" && provider.GetRequiredService<IHostEnvironment>().IsDevelopment())
+    {
+        var catalog=new TemplateCatalog(trustedTemplates);
+        catalog.RegisterAsync(trustedTemplates,default).GetAwaiter().GetResult();
+        return catalog;
+    }
     return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlTemplateCatalog(new(config["Tenant:ConnectionString"]!,id),[]) : new UnavailableTemplateCatalog();
+        ? new SqlTemplateCatalog(new(config["Tenant:ConnectionString"]!,id),trustedTemplates) : new UnavailableTemplateCatalog();
 });
 builder.Services.TryAddSingleton<IConnectionProfiles>(provider =>
 {
@@ -183,6 +195,8 @@ internal sealed class UnavailableIntegrationSettings : IIntegrationSettings
 internal sealed class UnavailableJobCommands : IJobCommands
 {
     public ValueTask<CommandReceipt> SaveAsync(WorkerDock.Domain.Jobs.JobRevision proposed, byte[]? expectedVersion, ActorContext actor, CancellationToken ct)
+        => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<CommandReceipt> EnableManualAsync(Guid jobId,byte[] expectedVersion,ActorContext actor,CancellationToken ct)
         => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
     public ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct)
         => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));

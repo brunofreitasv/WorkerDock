@@ -93,7 +93,7 @@ public sealed partial class TemplateCatalogTests
             Assert.Empty(TemplateSchemaValidator.ValidateDescriptor(descriptor));
             var issues=TemplateSchemaValidator.Validate(descriptor,fixture.GetProperty("configuration"));
             Assert.True(fixture.GetProperty("valid").GetBoolean()==(issues.Count==0),fixture.GetProperty("name").GetString());
-            if(fixture.TryGetProperty("code",out var code)) Assert.Contains(issues,x=>x.Code==code.GetString());
+            if(fixture.TryGetProperty("code",out var code)) Assert.Contains(issues,x=>x.Code==code.GetString() && x.Path==fixture.GetProperty("path").GetString());
         }
     }
     [Theory]
