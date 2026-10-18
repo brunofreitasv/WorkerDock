@@ -14,10 +14,10 @@
   <ItemGroup>
     <Content Include="../../database/**/*" Link="database/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../fixtures/template-schemas.json" Link="fixtures/template-schemas.json" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Sql/*.sql" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../sql/*.sql" Link="target-sql/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" /><Content Include="Sql/*.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="CopyQuartzTestHost" AfterTargets="Build">
     <ItemGroup><TestHostFiles Include="../WorkerDock.TestHost/bin/$(Configuration)/$(TargetFramework)/**/*" /></ItemGroup>
     <Copy SourceFiles="@(TestHostFiles)" DestinationFiles="@(TestHostFiles->'$(OutDir)testhost/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
-</Project>
+<ItemGroup><ProjectReference Include="../../src/WorkerDock.Templates.SqlServer/WorkerDock.Templates.SqlServer.csproj" /></ItemGroup></Project>

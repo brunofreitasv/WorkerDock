@@ -104,7 +104,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
                     AND w.LiveLimit>(SELECT COUNT(*) FROM [workerdock].Attempts active WHERE active.WorkerBootId=w.BootId AND active.State=N'Running')
                     AND w.LastHeartbeatUtc>DATEADD(second,-60,SYSUTCDATETIME())
                     AND wc.TemplateId=r.TemplateId AND wc.TemplateVersion=r.TemplateVersion)
-                    AND EXISTS(SELECT 1 FROM [workerdock].JobPermits permit WHERE permit.ExecutionId=e.ExecutionId) THEN 1 ELSE 0 END,COALESCE(p.EffectiveRevision,-1)
+                    AND EXISTS(SELECT 1 FROM [workerdock].JobPermits permit WHERE permit.ExecutionId=e.ExecutionId) THEN 1 ELSE 0 END,COALESCE(p.EffectiveRevision,-1),e.TriggerKind
             FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
                 JOIN [workerdock].Jobs j ON j.JobId=e.JobId
                 LEFT JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
@@ -120,22 +120,32 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
         var policy = JsonSerializer.Deserialize<ExecutionPolicy>(reader.GetString(12)) ?? throw new WorkerDockException("PinnedDescriptorUnavailable");
         var descriptor = new ExecutionDescriptor(id, 1, reader.GetString(9), reader.GetString(10), reader.GetString(2),
             JsonDocument.Parse(reader.GetString(11)).RootElement.Clone(), reader.IsDBNull(6) ? null : reader.GetGuid(6), null,
-            JsonSerializer.SerializeToElement(new { }), null);
+            JsonSerializer.SerializeToElement(new { sqlProfileDiagnostic=reader.GetString(22)=="Diagnostic" }), null);
         using var payload = JsonDocument.Parse(reader.GetString(18));
         var ordinal = payload.RootElement.TryGetProperty("attemptOrdinal", out var number) ? number.GetInt32() : 1;
         var capacityRevision = payload.RootElement.TryGetProperty("capacityRevision", out var epoch) ? epoch.GetInt64() : 0;
         if (reader.GetString(19) != ProjectionEnvelope.ExecutionDigest(id, reader.GetInt64(1), ordinal, capacityRevision))
             throw new WorkerDockException("DispatchIntegrityError");
         var intent = new DispatchIntent(reader.GetGuid(17), id, ordinal, descriptor.TemplateId, Utc(reader.GetDateTime(5)), policy.Priority, reader.GetInt64(1), "", capacityRevision);
+        var jobId=reader.GetGuid(0);var state=reader.GetString(3);
+        var uncertain=reader.GetString(4)=="Unknown";var stop=reader.GetBoolean(7);var force=reader.GetBoolean(8);
+        var gateOpen=reader.GetBoolean(13) && !reader.GetBoolean(14) && !reader.GetBoolean(16) && reader.GetInt32(20)==1;
+        var capacity=reader.GetInt64(21);var available=!reader.IsDBNull(15) && reader.GetBoolean(15);
+        await reader.CloseAsync();
+        if(descriptor.ProfileRevisionId is {} profileRevision)
+        {
+            await using var profile=Command(c,t,"SELECT ConfigurationJson FROM [workerdock].ConnectionProfileRevisions WHERE ProfileRevisionId=@revision");
+            Add(profile,"@revision",SqlDbType.UniqueIdentifier,profileRevision);
+            if(await profile.ExecuteScalarAsync(ct) is string profileJson)
+                descriptor=descriptor with { ProfileConfiguration=JsonDocument.Parse(profileJson).RootElement.Clone() };
+            else available=false;
+        }
         var data = new AttemptLifecycle
         {
-            EffectiveCapacityRevision = reader.GetInt64(21),
-            Descriptor = descriptor, Policy = policy, JobId = reader.GetGuid(0), Intent = intent with { PayloadDigest = intent.ComputeDigest() },
-            State = reader.GetString(3), Uncertain = reader.GetString(4) == "Unknown", StopRequested = reader.GetBoolean(7), Force = reader.GetBoolean(8),
-            GateOpen = reader.GetBoolean(13) && !reader.GetBoolean(14) && !reader.GetBoolean(16) && reader.GetInt32(20) == 1,
-            DescriptorAvailable = !reader.IsDBNull(15) && reader.GetBoolean(15) && reader.IsDBNull(6)
+            EffectiveCapacityRevision=capacity,Descriptor=descriptor,Policy=policy,JobId=jobId,
+            Intent=intent with { PayloadDigest=intent.ComputeDigest() },State=state,Uncertain=uncertain,
+            StopRequested=stop,Force=force,GateOpen=gateOpen,DescriptorAvailable=available
         };
-        await reader.CloseAsync();
         await using var attempt = Command(c, t, "SELECT TOP(1) AttemptId,AttemptNumber,Generation,WorkerBootId,LeaseExpiresUtc,DeadlineUtc,State,LocalExitConfirmed,SafeCode FROM [workerdock].Attempts WHERE ExecutionId=@id ORDER BY AttemptNumber DESC");
         Add(attempt, "@id", SqlDbType.UniqueIdentifier, id);
         await using var ar = await attempt.ExecuteReaderAsync(ct);

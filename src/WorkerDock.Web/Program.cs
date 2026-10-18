@@ -1,3 +1,5 @@
+using WorkerDock.Application.Connections;
+using WorkerDock.Infrastructure.Connections;
 using WorkerDock.Application.Templates;
 using WorkerDock.Infrastructure.Templates;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -23,7 +25,7 @@ builder.Services.TryAddSingleton<IJobCommands>(provider =>
     var environment = provider.GetRequiredService<IHostEnvironment>();
     if (!Guid.TryParse(config["Tenant:InstanceId"], out var instanceId)) return new UnavailableJobCommands();
     if (config["Tenant:Adapter"] == "Memory")
-        return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>()) : new UnavailableJobCommands();
+        return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>(),profiles:provider.GetRequiredService<IConnectionProfiles>()) : new UnavailableJobCommands();
     var connection = config["Tenant:ConnectionString"];
     return !string.IsNullOrWhiteSpace(connection)
         ? new SqlJobCommands(new(connection, instanceId))
@@ -67,11 +69,26 @@ builder.Services.TryAddSingleton<ITemplateCatalog>(provider =>
     return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
         ? new SqlTemplateCatalog(new(config["Tenant:ConnectionString"]!,id),[]) : new UnavailableTemplateCatalog();
 });
+builder.Services.TryAddSingleton<IConnectionProfiles>(provider =>
+{
+    var config=provider.GetRequiredService<IConfiguration>();
+    if(config["Tenant:Adapter"]=="Memory" && provider.GetRequiredService<IHostEnvironment>().IsDevelopment())return new InMemoryConnectionProfiles();
+    return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlConnectionProfiles(new(config["Tenant:ConnectionString"]!,id)) : new UnavailableConnectionProfiles();
+});
+builder.Services.TryAddSingleton<IProfileDiagnostics>(provider =>
+{
+    var config=provider.GetRequiredService<IConfiguration>();
+    return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlProfileDiagnostics(new(config["Tenant:ConnectionString"]!,id)) : new UnavailableProfileDiagnostics();
+});
 var app = builder.Build();
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
     app.Services.GetRequiredService<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>().RemoveScheme("oidc");
-app.UseExceptionHandler(handler => handler.Run(context => SafeProblem(500, "RequestFailed").ExecuteAsync(context)));
+app.UseExceptionHandler(handler => handler.Run(context =>
+    (context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error is BadHttpRequestException
+        ? SafeProblem(400,"RequestInvalid") : SafeProblem(500,"RequestFailed")).ExecuteAsync(context)));
 if (!app.Environment.IsDevelopment()) app.UseHsts();
 app.UseAuthentication();
 app.UseWorkerDockSessions();
@@ -81,6 +98,7 @@ app.MapJobCommands();
 app.MapExecutionControls();
 app.MapCapacity();
 app.MapTemplateCatalog();
+app.MapConnectionProfiles();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 

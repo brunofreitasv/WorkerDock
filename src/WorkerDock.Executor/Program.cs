@@ -6,6 +6,6 @@ internal static class Program
 {
     public static Task<int> Main() => ExecutorHost.RunAsync(
         // Add only explicit references to reviewed installed packages. No discovery from job input.
-        () => [],
+        () => [new WorkerDock.Templates.SqlServer.SqlTemplate()],
         _ => new(SecretVaultRegistration.CreateDevelopment(),new SafeExecutionLog(line => System.Diagnostics.Trace.WriteLine(line))));
 }

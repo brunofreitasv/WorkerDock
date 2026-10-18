@@ -344,7 +344,16 @@
           "Microsoft.Data.SqlClient": "[7.1.1, )",
           "Microsoft.EntityFrameworkCore.SqlServer": "[10.0.13, )",
           "System.Security.Cryptography.Pkcs": "[10.0.13, )",
-          "WorkerDock.Application": "[1.0.0, )"
+          "WorkerDock.Application": "[1.0.0, )",
+          "WorkerDock.Templates.SqlServer": "[1.0.0, )"
+        }
+      },
+      "workerdock.templates.sqlserver": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Data.SqlClient": "[7.1.1, )",
+          "System.Security.Cryptography.Pkcs": "[10.0.13, )",
+          "WorkerDock.Contracts": "[1.0.0, )"
         }
       },
       "Microsoft.AspNetCore.Authentication.OpenIdConnect": {

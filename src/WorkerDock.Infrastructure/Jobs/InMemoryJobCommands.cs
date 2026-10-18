@@ -1,3 +1,4 @@
+using WorkerDock.Application.Connections;
 using System.Collections.Immutable;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Jobs;
@@ -16,6 +17,7 @@ public sealed record MemoryExecution(Guid ExecutionId, Guid JobId, long JobRevis
 public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IProjectionStore
 {
     private readonly TimeProvider clock;
+    private readonly IConnectionProfiles? profiles;
     private readonly Func<string, CancellationToken, ValueTask>? beforeCommit;
     private readonly SemaphoreSlim gate = new(1, 1);
     private State state = new([], [], [], [], [], [], []);
@@ -23,9 +25,9 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
 
     public InMemoryJobCommands(TimeProvider clock, IEnumerable<JobRevision>? enabledSeeds = null,
         Func<string, CancellationToken, ValueTask>? beforeCommit = null,
-        IEnumerable<JobRevision>? archivedSeeds = null)
+        IEnumerable<JobRevision>? archivedSeeds = null, IConnectionProfiles? profiles = null)
     {
-        this.clock = clock;
+        this.clock = clock; this.profiles=profiles;
         this.beforeCommit = beforeCommit;
         foreach (var seed in enabledSeeds ?? []) Seed(seed, false);
         foreach (var seed in archivedSeeds ?? []) Seed(seed, true);
@@ -106,7 +108,9 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             if (!before.Jobs.TryGetValue(jobId, out var editor)) throw new WorkerDockException("JobNotFound");
             if (editor.Archived) throw new WorkerDockException("JobArchived");
             if (!editor.Enabled) throw new WorkerDockException("JobDisabled");
-            if (editor.Revision.ProfileId is not null) throw new WorkerDockException("ProfileUnavailable");
+            WorkerDock.Contracts.Connections.ConnectionProfileRevision? pinnedProfile=null;
+            if(editor.Revision.ProfileId is {} profileId)
+                pinnedProfile=profiles is not null ? (await profiles.GetCurrentAsync(profileId,ct)).Current : throw new WorkerDockException("ProfileUnavailable");
             var executionId = Guid.NewGuid();
             var receipt = new CommandReceipt(Guid.NewGuid(), executionId, "Pending");
             var execution = new MemoryExecution(executionId, jobId, editor.Revision.Revision,
@@ -128,7 +132,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             });
             attemptStores[executionId] = new InMemoryAttemptStore(clock,
                 new ExecutionDescriptor(executionId, 1, editor.Revision.TemplateId, editor.Revision.TemplateVersion,
-                    execution.IdempotencyKey, editor.Revision.Configuration, null, null, JsonSerializer.SerializeToElement(new { }), null), editor.Revision.Policy, committed: snapshot => SettleCommands(executionId, snapshot));
+                    execution.IdempotencyKey, editor.Revision.Configuration, pinnedProfile?.ProfileRevisionId, pinnedProfile is null ? null : JsonSerializer.SerializeToElement(pinnedProfile), JsonSerializer.SerializeToElement(new { }), null), editor.Revision.Policy, committed: snapshot => SettleCommands(executionId, snapshot));
             return receipt;
         }
         finally { gate.Release(); }

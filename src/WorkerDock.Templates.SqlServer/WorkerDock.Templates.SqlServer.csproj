@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../WorkerDock.Contracts/WorkerDock.Contracts.csproj" />
+    <PackageReference Include="Microsoft.Data.SqlClient" /><PackageReference Include="System.Security.Cryptography.Pkcs" />
+  </ItemGroup>
+</Project>

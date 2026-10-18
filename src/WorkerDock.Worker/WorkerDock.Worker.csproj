@@ -5,4 +5,4 @@
     <ProjectReference Include="../WorkerDock.Quartz/WorkerDock.Quartz.csproj" />
     <ProjectReference Include="../WorkerDock.Runtime/WorkerDock.Runtime.csproj" />
   </ItemGroup>
-</Project>
+<ItemGroup><ProjectReference Include="../WorkerDock.Templates.SqlServer/WorkerDock.Templates.SqlServer.csproj" /></ItemGroup></Project>

@@ -180,6 +180,14 @@
       },
       "workerdock.domain": {
         "type": "Project"
+      },
+      "workerdock.templates.sqlserver": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Data.SqlClient": "[7.1.1, )",
+          "System.Security.Cryptography.Pkcs": "[10.0.13, )",
+          "WorkerDock.Contracts": "[1.0.0, )"
+        }
       }
     }
   }

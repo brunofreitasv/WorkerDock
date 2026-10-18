@@ -146,8 +146,15 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                     "SELECT ProfileId FROM [workerdock].JobRevisions WHERE JobId=@job AND Revision=@rev");
                 Add(profile, "@job", SqlDbType.UniqueIdentifier, jobId);
                 Add(profile, "@rev", SqlDbType.BigInt, revision);
-                if (await profile.ExecuteScalarAsync(token) is Guid)
-                    throw new WorkerDockException("ProfileUnavailable");
+                Guid? profileRevisionId=null;
+                if (await profile.ExecuteScalarAsync(token) is Guid profileId)
+                {
+                    await using var pinnedProfile=Command(connection,transaction,"SELECT CurrentRevisionId FROM [workerdock].ConnectionProfiles WHERE ProfileId=@id AND Retired=0");
+                    Add(pinnedProfile,"@id",SqlDbType.UniqueIdentifier,profileId);
+                    profileRevisionId=await pinnedProfile.ExecuteScalarAsync(token) as Guid?;
+                    if(profileRevisionId is null)
+                        throw new WorkerDockException("ProfileUnavailable");
+                }
 
                 await using var configuration = Command(connection, transaction,
                     "SELECT TemplateId,TemplateVersion,ConfigurationJson FROM [workerdock].JobRevisions WHERE JobId=@job AND Revision=@rev");
@@ -161,8 +168,9 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 var executionId = Guid.NewGuid();
                 var receipt = new CommandReceipt(Guid.NewGuid(), executionId, "Pending");
                 await using var execution = Command(connection, transaction,
-                    "INSERT INTO [workerdock].Executions(ExecutionId,JobId,JobRevision,TriggerKind,RequestKey,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc) VALUES (@execution,@job,@rev,N'Manual',@key,@idempotency,N'Queued',N'Known',@now,@correlation,@now)");
+                    "INSERT INTO [workerdock].Executions(ExecutionId,JobId,JobRevision,ProfileRevisionId,TriggerKind,RequestKey,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc) VALUES (@execution,@job,@rev,@profileRevision,N'Manual',@key,@idempotency,N'Queued',N'Known',@now,@correlation,@now)");
                 Add(execution, "@execution", SqlDbType.UniqueIdentifier, executionId);
+                Add(execution,"@profileRevision",SqlDbType.UniqueIdentifier,profileRevisionId ?? (object)DBNull.Value);
                 Add(execution, "@job", SqlDbType.UniqueIdentifier, jobId);
                 Add(execution, "@rev", SqlDbType.BigInt, revision);
                 Add(execution, "@key", SqlDbType.NVarChar, requestKey, 200);
