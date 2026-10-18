@@ -12,10 +12,20 @@ public sealed class SqlProjectionStore(TenantDatabaseOptions options) : IProject
     public ValueTask<IReadOnlyList<ProjectionEnvelope>> ReadPendingAsync(int limit, CancellationToken ct) => ReadAsync(limit, false, ct);
     public ValueTask<IReadOnlyList<ProjectionEnvelope>> ReadPublishedAsync(int limit, CancellationToken ct) => ReadAsync(limit, true, ct);
 
-    private ValueTask<IReadOnlyList<ProjectionEnvelope>> ReadAsync(int limit, bool published, CancellationToken ct)
+    private async ValueTask<IReadOnlyList<ProjectionEnvelope>> ReadAsync(int limit, bool published, CancellationToken ct)
     {
         if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
-        return RunAsync<IReadOnlyList<ProjectionEnvelope>>(async connection =>
+        await RunAsync(async connection =>
+        {
+            await using var jobs = connection.CreateCommand();
+            jobs.CommandText = "SELECT JobId FROM dbo.Jobs WHERE Archived=0";
+            var ids = new List<Guid>();
+            await using (var reader = await jobs.ExecuteReaderAsync(ct))
+                while (await reader.ReadAsync(ct)) ids.Add(reader.GetGuid(0));
+            foreach (var id in ids) await new JobAdmission(options).AdmitAsync(id, ct);
+            return true;
+        }, ct);
+        return await RunAsync<IReadOnlyList<ProjectionEnvelope>>(async connection =>
         {
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT TOP (@limit) EventId,EventType,SchemaVersion,EntityId,EntityRevision,PayloadDigest,AvailableAtUtc,PayloadJson FROM dbo.Outbox WHERE " +
@@ -58,7 +68,7 @@ public sealed class SqlProjectionStore(TenantDatabaseOptions options) : IProject
         await RunAsync(async connection =>
         {
             await using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE dbo.Outbox SET ProjectionState=CASE WHEN DispatchedAtUtc IS NULL THEN N'Failed' ELSE N'Published' END,LastErrorCode=@code,RetryAtUtc=@retry,ReviewAtUtc=@retry WHERE EventId=@id AND ProjectionState<>N'Retired'";
+            command.CommandText = "UPDATE dbo.Outbox SET ProjectionState=CASE WHEN @code=N'ProjectionHeld' THEN N'Held' WHEN DispatchedAtUtc IS NULL THEN N'Failed' ELSE N'Published' END,LastErrorCode=@code,RetryAtUtc=@retry,ReviewAtUtc=@retry WHERE EventId=@id AND ProjectionState<>N'Retired'";
             command.Parameters.Add(new("@id", SqlDbType.UniqueIdentifier) { Value = intentId });
             command.Parameters.Add(new("@code", SqlDbType.NVarChar, 40) { Value = safeCode });
             command.Parameters.Add(new("@retry", SqlDbType.DateTime2) { Value = retryAtUtc.UtcDateTime });
@@ -89,8 +99,16 @@ public sealed class SqlProjectionStore(TenantDatabaseOptions options) : IProject
             throw new WorkerDockException("ProjectionIntegrityError");
         var intent = new DispatchIntent(envelope.IntentId, envelope.EntityId, attemptOrdinal, reader.GetString(2),
             new(DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc)), reader.GetInt32(5), reader.GetInt64(1), "");
+        var capacityRevision = envelope.Payload.TryGetProperty("capacityRevision", out var epoch) ? epoch.GetInt64() : 0;
+        intent = intent with { CapacityRevision = capacityRevision, PayloadDigest = "" };
         intent = intent with { PayloadDigest = intent.ComputeDigest() };
-        return new DispatchState(reader.GetString(0), reader.GetInt32(4) >= attemptOrdinal, intent);
+        var state = reader.GetString(0); var attemptExists = reader.GetInt32(4) >= attemptOrdinal;
+        await reader.CloseAsync();
+        await using var admission = connection.CreateCommand();
+        admission.CommandText = "SELECT COUNT(*) FROM dbo.Executions e JOIN dbo.Jobs j ON j.JobId=e.JobId JOIN dbo.JobPermits permit ON permit.ExecutionId=e.ExecutionId JOIN dbo.JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision JOIN dbo.TemplatePolicies p ON p.TemplateId=r.TemplateId WHERE e.ExecutionId=@id AND j.Enabled=1 AND j.Archived=0 AND p.StartGateClosed=0 AND p.EffectiveLimit>0 AND p.EffectiveRevision=@epoch AND EXISTS(SELECT 1 FROM dbo.Workers w WHERE w.State=N'Ready' AND w.AcknowledgedRevision=p.EffectiveRevision             AND w.CatalogDigest=(SELECT CatalogDigest FROM dbo.PolicyRevisions WHERE PolicyKind=N'Capacity')             AND w.LastHeartbeatUtc>DATEADD(second,-60,SYSUTCDATETIME())             AND w.LiveLimit>(SELECT COUNT(*) FROM dbo.Attempts a WHERE a.WorkerBootId=w.BootId AND a.State=N'Running'))";
+        admission.Parameters.Add(new("@id",SqlDbType.UniqueIdentifier){Value=envelope.EntityId}); admission.Parameters.Add(new("@epoch",SqlDbType.BigInt){Value=capacityRevision});
+        if (state is "Queued" or "RetryWaiting" && (int)(await admission.ExecuteScalarAsync(ct))! == 0) state = "Held";
+        return new DispatchState(state, attemptExists, intent);
     }, ct);
 
     private async ValueTask<T> RunAsync<T>(Func<SqlConnection, ValueTask<T>> action, CancellationToken ct)

@@ -12,10 +12,21 @@ public sealed class QuartzPublisher(IScheduler scheduler, JobType jobType)
 
     public async ValueTask PublishAsync(DispatchIntent intent, CancellationToken ct) => await EnsurePublishedAsync(intent, ct);
 
+    public async ValueTask AgeAsync(DispatchIntent intent, DateTimeOffset now, CancellationToken ct)
+    {
+        if (intent.PayloadDigest != intent.ComputeDigest()) throw new WorkerDockException("ProjectionIntegrityError");
+        var age = Math.Clamp((now - intent.DueUtc).TotalMinutes, 0, 100);
+        var priority = Math.Min(200, intent.Priority + (int)age);
+        var trigger = await scheduler.GetTrigger(TriggerKey(intent), ct);
+        if (trigger is null || priority <= trigger.Priority || await scheduler.GetTriggerState(trigger.Key, ct) != TriggerState.Normal) return;
+        if (trigger.StartTimeUtc != intent.DueUtc || trigger.JobKey != JobKey(intent)) throw new WorkerDockException("ProjectionIntegrityError");
+        await scheduler.RescheduleJob(trigger.Key, trigger.GetTriggerBuilder().WithPriority(priority).Build(), cancellationToken: ct);
+    }
+
     internal async ValueTask<bool> EnsurePublishedAsync(DispatchIntent intent, CancellationToken ct)
     {
         if (intent.ExecutionId == Guid.Empty || intent.DeliveryId == Guid.Empty || intent.AttemptOrdinal < 1 ||
-            intent.EntityRevision < 1 || string.IsNullOrWhiteSpace(intent.TemplateId) || intent.TemplateId.Length > 100 ||
+            intent.EntityRevision < 1 || intent.CapacityRevision < 0 || string.IsNullOrWhiteSpace(intent.TemplateId) || intent.TemplateId.Length > 100 ||
             intent.TemplateId.Contains('|') || intent.PayloadDigest != intent.ComputeDigest())
             throw new WorkerDockException("ProjectionIntegrityError");
         var key = JobKey(intent);
@@ -24,7 +35,8 @@ public sealed class QuartzPublisher(IScheduler scheduler, JobType jobType)
             ["ExecutionId"] = intent.ExecutionId.ToString("N"), ["DeliveryId"] = intent.DeliveryId.ToString("N"),
             ["AttemptOrdinal"] = intent.AttemptOrdinal.ToString(CultureInfo.InvariantCulture), ["TemplateId"] = intent.TemplateId,
             ["EntityRevision"] = intent.EntityRevision.ToString(CultureInfo.InvariantCulture),
-            ["DueUtc"] = intent.DueUtc.UtcTicks.ToString(CultureInfo.InvariantCulture), ["PayloadDigest"] = intent.PayloadDigest
+            ["DueUtc"] = intent.DueUtc.UtcTicks.ToString(CultureInfo.InvariantCulture), ["PayloadDigest"] = intent.PayloadDigest,
+            ["CapacityRevision"] = intent.CapacityRevision.ToString(CultureInfo.InvariantCulture)
         };
         var job = JobBuilder.Create().OfType(jobType).WithIdentity(key).UsingJobData(data).StoreDurably().RequestRecovery()
             .DisallowConcurrentExecution(false).PersistJobDataAfterExecution(false).Build();

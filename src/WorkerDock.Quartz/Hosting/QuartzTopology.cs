@@ -66,7 +66,7 @@ public sealed class QuartzTopology(QuartzConnections connections) : IAsyncDispos
                 builder.UseExecutionLimits(configuration =>
                 {
                     var scope = memory ? ExecutionLimitScope.Node : ExecutionLimitScope.Cluster;
-                    configuration.ForDefaultGroup(1, scope).ForOtherGroups(1, scope);
+                    configuration.ForDefaultGroup(options.StartClosed ? 0 : 1, scope).ForOtherGroups(options.StartClosed ? 0 : 1, scope);
                     foreach (var pair in limits) configuration.ForGroup(pair.Key, pair.Value, scope);
                 });
                 if (memory) builder.UseInMemoryStore();

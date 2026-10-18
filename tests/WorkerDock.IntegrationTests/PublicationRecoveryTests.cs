@@ -17,6 +17,38 @@ namespace WorkerDock.IntegrationTests;
 
 public sealed class PublicationRecoveryTests
 {
+    [Fact]
+    public async Task Reissued_epoch_has_deterministic_distinct_delivery_and_does_not_rewrite_acquired_job()
+    {
+        await using var fixture=await Fixture.Create(); var original=fixture.Intent;
+        await fixture.Publisher().PublishAsync(original,default);
+        var delivery=DispatchIntent.CapacityDeliveryId(original.ExecutionId,original.AttemptOrdinal,7);
+        var rebound=original with { DeliveryId=delivery,CapacityRevision=7,PayloadDigest="" };
+        rebound=rebound with { PayloadDigest=rebound.ComputeDigest() };
+        await fixture.Publisher().PublishAsync(rebound,default); await fixture.Publisher().PublishAsync(rebound,default);
+        Assert.Equal(delivery,DispatchIntent.CapacityDeliveryId(original.ExecutionId,original.AttemptOrdinal,7));
+        Assert.NotEqual(delivery,DispatchIntent.CapacityDeliveryId(original.ExecutionId,original.AttemptOrdinal,8));
+        Assert.Equal(2,(await fixture.Execution.GetJobKeys(GroupMatcher<JobKey>.AnyGroup())).Count);
+        Assert.Equal("0",(await fixture.Execution.GetJobDetail(QuartzPublisher.JobKey(original)))!.JobDataMap.GetString("CapacityRevision"));
+        Assert.Equal("7",(await fixture.Execution.GetJobDetail(QuartzPublisher.JobKey(rebound)))!.JobDataMap.GetString("CapacityRevision"));
+    }
+
+    [Fact]
+    public async Task Bounded_aging_preserves_future_retry_deadline_and_immutable_epoch()
+    {
+        await using var fixture = await Fixture.Create();
+        var intent=fixture.Intent with { DueUtc=fixture.Clock.Now.AddHours(1), CapacityRevision=9, PayloadDigest="" };
+        intent=intent with { PayloadDigest=intent.ComputeDigest() };
+        var publisher=fixture.Publisher(); await publisher.PublishAsync(intent,default);
+        await publisher.AgeAsync(intent,fixture.Clock.Now,default);
+        Assert.Equal(intent.Priority,(await fixture.Execution.GetTrigger(QuartzPublisher.TriggerKey(intent)))!.Priority);
+        await publisher.AgeAsync(intent,fixture.Clock.Now.AddDays(1),default);
+        var trigger=await fixture.Execution.GetTrigger(QuartzPublisher.TriggerKey(intent));
+        Assert.Equal(intent.DueUtc,trigger!.StartTimeUtc); Assert.InRange(trigger.Priority,intent.Priority+1,200);
+        var job=await fixture.Execution.GetJobDetail(QuartzPublisher.JobKey(intent));
+        Assert.Equal("9",job!.JobDataMap.GetString("CapacityRevision"));
+    }
+
     [Theory]
     [InlineData("AfterWrite")]
     [InlineData("BeforeAck")]

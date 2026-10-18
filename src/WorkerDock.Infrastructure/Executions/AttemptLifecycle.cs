@@ -18,6 +18,7 @@ internal sealed class AttemptLifecycle
     public bool PermitRetained { get; set; } = true;
     public bool StopRequested { get; set; }
     public bool Force { get; set; }
+    public long EffectiveCapacityRevision { get; set; }
     public bool GateOpen { get; set; } = true;
     public bool DescriptorAvailable { get; set; } = true;
     public bool Uncertain { get; set; }
@@ -44,6 +45,7 @@ internal sealed class AttemptLifecycle
         }
         if (Terminal(State)) return new("Completed", null);
         if (State == "NeedsReview") return new("NeedsReview", null);
+        if (intent.CapacityRevision != EffectiveCapacityRevision) return new("Held", null);
         if (intent with { Priority = Intent.Priority } != Intent || intent.AttemptOrdinal != Ordinal + 1) throw new WorkerDockException("DispatchIntegrityError");
         if (!GateOpen || StopRequested || !DescriptorAvailable || intent.DueUtc > now || State is not ("Queued" or "RetryWaiting")) return new("Held", null);
         Lease = new(Guid.NewGuid(), intent.ExecutionId, intent.AttemptOrdinal, (Lease?.Generation ?? 0) + 1,
@@ -61,7 +63,7 @@ internal sealed class AttemptLifecycle
     {
         if (!Owned(lease, now)) throw new WorkerDockException("AttemptOwnershipLost");
         if (!DescriptorAvailable) throw new WorkerDockException("PinnedDescriptorUnavailable");
-        if (StopRequested || !GateOpen) throw new WorkerDockException("AttemptStartHeld");
+        if (StopRequested) throw new WorkerDockException("AttemptStartHeld");
         return Descriptor with { AttemptOrdinal = lease.Ordinal, DeadlineUtc = Lease!.DeadlineUtc };
     }
     public AttemptLease? Renew(AttemptLease lease, DateTimeOffset now)

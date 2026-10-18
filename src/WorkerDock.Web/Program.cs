@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using WorkerDock.Application.Common;
+using WorkerDock.Application.Workers;
+using WorkerDock.Infrastructure.Workers;
 using WorkerDock.Application.Tenants;
 using WorkerDock.Application.Jobs;
 using WorkerDock.Application.Executions;
@@ -44,6 +46,18 @@ builder.Services.TryAddSingleton<IExecutionControls>(provider =>
     return Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
         ? new SqlExecutionControls(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableExecutionControls();
 });
+builder.Services.TryAddSingleton<ICapacityStore>(provider =>
+{
+    var config=provider.GetRequiredService<IConfiguration>();
+    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlCapacityStore(new(config["Tenant:ConnectionString"]!,id)) : new UnavailableCapacityStore();
+});
+builder.Services.TryAddSingleton<ICapacityCommands>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlCapacityCommands(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableCapacityCommands();
+});
 var app = builder.Build();
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
@@ -56,6 +70,7 @@ app.UseAuthorization();
 app.MapWorkerDockSessions();
 app.MapJobCommands();
 app.MapExecutionControls();
+app.MapCapacity();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -126,4 +141,17 @@ internal sealed class UnavailableJobCommands : IJobCommands
         => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
     public ValueTask<JobEditorDto> GetEditableAsync(Guid jobId, CancellationToken ct)
         => ValueTask.FromException<JobEditorDto>(new WorkerDockException("PersistenceUnavailable"));
+}
+
+internal sealed class UnavailableCapacityCommands : ICapacityCommands
+{
+    private static ValueTask<CommandReceipt> Unavailable() => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<CommandReceipt> SetTemplateLimitAsync(string id,int limit,ActorContext actor,CancellationToken ct) => Unavailable();
+    public ValueTask<CommandReceipt> SetJobLimitAsync(Guid id,int limit,ActorContext actor,CancellationToken ct) => Unavailable();
+    public ValueTask<CommandReceipt> SetWorkerLimitAsync(Guid id,int limit,ActorContext actor,CancellationToken ct) => Unavailable();
+}
+
+internal sealed class UnavailableCapacityStore : ICapacityStore
+{
+    public ValueTask<T> TransactAsync<T>(Func<CapacityState,DateTimeOffset,T> change,CancellationToken ct) => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
 }

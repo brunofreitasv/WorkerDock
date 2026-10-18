@@ -33,6 +33,8 @@ public class PublisherScheduler : DispatchProxy
         if (shutdown) throw new WorkerDockException("PublisherShutdown");
         if (method.Name is "get_SchedulerName" or "get_SchedulerInstanceId" or "GetSchedulerInstanceId") return Forward(method, args);
         if (method.Name is "GetJobDetail" or "GetTrigger" or "GetTriggerState") return Forward(method, args);
+        if (method.Name == "RescheduleJob" && args is [TriggerKey key, ITrigger replacement, ..])
+            return RaisePriorityAsync(key, replacement, args.LastOrDefault() is CancellationToken token ? token : default);
         if (method.Name is not ("ScheduleJob" or "AddJob")) throw new WorkerDockException("PublisherOperationForbidden");
         foreach (var argument in args ?? [])
         {
@@ -43,6 +45,21 @@ public class PublisherScheduler : DispatchProxy
                 throw new WorkerDockException("PublisherOperationForbidden");
         }
         return Forward(method, args);
+    }
+    // This facade only permits aging: identical delivery, due time and schedule, with a bounded priority increase.
+    private async ValueTask<DateTimeOffset?> RaisePriorityAsync(TriggerKey key, ITrigger replacement, CancellationToken ct)
+    {
+        var current = await scheduler.GetTrigger(key, ct);
+        if (current is null) return null;
+        if (current is not ISimpleTrigger before || replacement is not ISimpleTrigger after ||
+            replacement.Key != key || replacement.JobKey != current.JobKey || replacement.StartTimeUtc != current.StartTimeUtc ||
+            replacement.EndTimeUtc != current.EndTimeUtc || replacement.CalendarName != current.CalendarName ||
+            replacement.ExecutionGroup != current.ExecutionGroup || replacement.RetryPolicy != current.RetryPolicy ||
+            after.MisfireInstruction != before.MisfireInstruction || before.RepeatCount != after.RepeatCount ||
+            before.RepeatInterval != after.RepeatInterval || replacement.JobDataMap.Count != 0 || current.JobDataMap.Count != 0 ||
+            replacement.Priority < current.Priority || replacement.Priority > 200)
+            throw new WorkerDockException("PublisherOperationForbidden");
+        return await scheduler.RescheduleJob(key,replacement,cancellationToken:ct);
     }
     private object? Forward(MethodInfo method, object?[]? args)
     {
@@ -56,7 +73,7 @@ public class PublisherScheduler : DispatchProxy
     private static void Validate(JobDataMap data)
     {
         foreach (var pair in data)
-            if (pair.Key is not ("ExecutionId" or "DeliveryId" or "AttemptOrdinal" or "TemplateId" or "EntityRevision" or "DueUtc" or "PayloadDigest") || pair.Value is not string)
+            if (pair.Key is not ("ExecutionId" or "DeliveryId" or "AttemptOrdinal" or "TemplateId" or "EntityRevision" or "DueUtc" or "PayloadDigest" or "CapacityRevision") || pair.Value is not string)
                 throw new WorkerDockException("InvalidQuartzJobData");
     }
 }

@@ -13,7 +13,7 @@ The public creation APIs are `CreateScheduleAsync`, `CreateExecutionAsync`, and
 has its own handle with `ZeroSizeThreadPool` and is never started. Its facade
 permits single-job `ScheduleJob` and `AddJob` writes with string identity metadata
 and public identity/status reads. It denies starting,
-rescheduling, deletion, and other scheduler administration. The execution
+arbitrary rescheduling, deletion, and other scheduler administration. A narrow priority-aging reschedule preserves the delivery, due time, execution group and one-shot schedule. The execution
 scheduler is the only handle that starts worker jobs. Both SQL stores use
 clustering, string job data, `System.Text.Json`, locked trigger acquisition,
 and cluster-scoped Quartz execution groups. WorkerDock commands and audits
@@ -195,3 +195,87 @@ multi-process/cluster restart/fault proofs are pending until the disposable SQL
 fixture and Task08 worker are available. Memory success is not evidence for
 those properties. See [database.md](database.md) for exact setup/tests and
 [development.md](development.md) for memory tests.
+
+
+## Live capacity, capability admission and logical job permits
+
+Apply the paired `0003c_capacity` migration after `0003b_attempts`. Quartz remains
+the only cluster reservation ledger; no WorkerDock template-slot table exists.
+Every template version uses its template identifier as the execution group, with
+cluster scope and locked acquisition. `CapacityCoordinator` changes snapshots
+through `IScheduler.Standby`, `SetExecutionLimits`, and `Start`; it never calls
+Quartz while a tenant business transaction holds the business lock.
+
+A template command closes all execution start gates and advances the shared
+capacity revision in the same transaction as its receipt and audit. This common
+snapshot intentionally coordinates the homogeneous tenant pool. Workers enter
+standby, install that exact snapshot, and acknowledge it. The policy remains
+`Pending` while any compatible worker has not acknowledged. After 60 seconds
+without a heartbeat its boot is fenced, but it is counted as recovered only after
+Quartz's public `QueryClusterNodes` no longer lists it and
+`QueryFireInstances(State = null)` reports no acquired or executing reservations.
+Neither lease expiry nor application fencing deletes a Quartz reservation.
+A fenced boot cannot register or authorize attempts again.
+
+The worker uses a stable `Worker:InstallationId`, a fresh boot ID, a configured
+`Worker:HostCeiling` (1 through 1024), and the installed common
+`Worker:CatalogDigest`. A new scheduler initially has zero limits for every
+known and unknown group. It can check in and recover an old boot without
+acquiring business work. Registration and revision acknowledgement precede
+positive acquisition limits. The independent five-second policy/heartbeat loop
+stays responsive when all Quartz execution threads run infinite jobs. A live
+worker limit must be between zero and its installation ceiling. Attempt
+transactions serialize local authorizations against that live limit; existing
+authorizations drain after decreases.
+
+The approved catalog digest is uppercase SHA-256 of UTF-8 text, ordered by
+ordinal template identifier and version. Each enabled catalog row contributes
+`TemplateId|TemplateVersion|MetadataDigest` followed by a single LF. Worker
+configuration must describe the actual installed common package set. A mismatch
+is visible as `CatalogMismatch` and cannot enter acquisition. Job creation does
+not change this catalog or require a new service.
+
+Each dispatch has immutable `CapacityRevision` string metadata, included in its
+dispatch digest. Start authorization rechecks that epoch against the current
+effective template revision, worker acknowledgement, catalog, readiness, live
+host budget and logical job permit in one tenant business transaction. A wrapper
+acquired under an old epoch defers without an attempt, even after the new gate
+reopens. Eligible unstarted work is reissued from the business outbox under a
+deterministic execution/attempt-ordinal/epoch delivery identity; the old outbox
+entry is retired. No acquired Quartz job is rewritten to adopt a newer epoch.
+Due time, pinned revision and idempotency key survive reissue.
+
+`JobAdmission` allocates logical permits while materializing dispatch. Queue and
+Skip use exclusive permits; Allow uses shared permits up to the live job limit.
+The SQL admission sequence orders executions within one job, including mixed
+revision policies; later shared executions cannot bypass an exclusive waiter.
+Retries and NeedsReview retain their permit. Finalization or explicit audited
+reconciliation releases it and wakes eligible successors. Decreasing the job
+limit blocks new logical admissions while existing holders can still retry.
+Overlap skips and backlog overflow persist `SkippedOverlap` and
+`SkippedBacklog` status events. Held wrappers consume no business attempt;
+policy/enable/worker-room/permit changes make their outbox intents eligible on
+the next publisher maintenance pass.
+
+Trigger priority starts at the execution priority. Maintenance can add at most
+100 aging points, capped at 200, through Quartz's public reschedule API. Aging
+preserves the original due time, including future retry deadlines. Quartz due
+time still participates in ordering; this is not strict global FIFO or a
+starvation-free cross-job latency promise.
+
+`GET /api/capacity` exposes desired/effective revisions, policy state and worker
+readiness under Read authorization. Manage and CSRF are required for
+`PUT /api/templates/{templateId}/limit`, `PUT /api/jobs/{jobId}/limit`, and
+`PUT /api/workers/{installationId}/limit`, each with `{ "limit": 1 }`. Template
+receipts remain Pending until the corresponding revision is effective.
+The Development web-only memory adapter does not run a capacity cluster; the
+capacity algorithm, wrapper and actual RAMJobStore tests are disposable fixtures.
+
+Current verification establishes memory policy races, actual local Quartz
+3-to-1-to-0-to-2 draining, publication/ownership fault guards and Windows process
+containment. Real SQL adapter/migration tests, restricted-runtime grants,
+three-service live policy propagation, and capacity-one across real SQL workers
+remain pending until an authorized disposable SQL instance and runtime login run
+the commands in database.md. SQL sources remain consistently in `dbo` for this
+task; the separately requested complete conversion to `workerdock` schema is
+pending before Stage 03.

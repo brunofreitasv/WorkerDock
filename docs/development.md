@@ -138,3 +138,27 @@ the same session CSRF header and Origin as other management commands.
 `{ "decision": "Cancel", "reason": "target checked; possible overlap acknowledged" }`;
 other decisions are `ReconcileSucceeded` and `AuthorizeRetry`. Both routes require
 Manage. The response is a command receipt after the stop/decision and audit commit.
+
+
+## Task 09 memory capacity verification
+
+These commands need no SQL login and exercise the production policy model,
+admission decisions, generic wrapper and actual RAMJobStore limits:
+
+```powershell
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~CapacityPolicyTests|FullyQualifiedName~JobAdmissionTests|FullyQualifiedName~CapacityEndpointTests|FullyQualifiedName~PublicationRecoveryTests|FullyQualifiedName~AttemptLifecycleTests'
+dotnet test tests/WorkerDock.ProcessTests -c Release
+dotnet test tests/WorkerDock.UnitTests -c Release
+dotnet build WorkerDock.slnx -c Release
+```
+
+To run every integration case that does not need SQL, including non-connection
+migration validation, use:
+
+```powershell
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'Store!=Sql&FullyQualifiedName!~WorkerDock.IntegrationTests.TenantSettingsTests.&FullyQualifiedName!~WorkerDock.IntegrationTests.JobSqlIntegrationTests.&FullyQualifiedName!~WorkerDock.IntegrationTests.MigrationTests.Checksum_tamper&FullyQualifiedName!~WorkerDock.IntegrationTests.MigrationTests.Up_down_up'
+```
+
+Memory success does not establish SQL transactions, migrations, grants, restart
+recovery or three-node capacity. Use the real-SQL commands in database.md before
+claiming those properties have been demonstrated.

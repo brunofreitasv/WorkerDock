@@ -202,3 +202,69 @@ Only an empty disposable attempt schema may use this rollback:
 ```powershell
 dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0003b_attempts
 ```
+
+
+## Task 09 live capacity setup and SQL proofs
+
+Use the already provisioned empty dedicated tenant database and deployment-only
+migrator identity described above. Supply values through local deployment
+configuration; the placeholders below are not credentials to commit:
+
+```powershell
+$env:WORKERDOCK_SQL='<dedicated-tenant-migrator-connection>'
+$env:WORKERDOCK_INSTANCE_ID='<stable-tenant-instance-guid>'
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0003c_capacity
+
+$env:Tenant__ConnectionString='<restricted-tenant-runtime-connection>'
+$env:Tenant__InstanceId=$env:WORKERDOCK_INSTANCE_ID
+$env:Worker__InstallationId='<stable-guid-unique-to-this-installed-service>'
+$env:Worker__CatalogDigest='<uppercase-installed-common-catalog-sha256>'
+$env:Worker__HostCeiling='10'
+$env:Executor__Path='<installed-production-executor-executable-path>'
+# Supply Executor:Arguments and Executor:MetadataDigests from installation configuration.
+dotnet run --project src/WorkerDock.Worker -c Release
+```
+
+The catalog digest algorithm and admission protocol are specified in
+quartz-integration.md. Repeat worker startup with three distinct installation
+IDs in separate service processes sharing the same tenant database and installed
+catalog. The host ceiling is installation configuration; live limits within it
+use the protected management routes without restarting. All initial template
+limits are zero. Start the Scheduler and Web host using their existing deployment
+instructions, then set desired template limits through the management API.
+Built-in SQL/HTTP handlers arrive in Stage 03; the current stage's contained
+execution demonstrations use test-only handlers from the test projects.
+
+The suffix pair adds durable worker acknowledgement/readiness, policy catalog
+identity, command policy revisions and a per-job admission sequence. It grants
+only the DML needed on existing policy/worker/permit tables. The down script
+refuses used policy/worker/permit state and restores the preceding schema. No
+existing numbered migration or released checksum is changed.
+
+Run these exact SQL checks against the separate disposable test SQL instance,
+with its pre-provisioned distinct restricted SQL login:
+
+```powershell
+$env:WORKERDOCK_TEST_SQL='<disposable-SQL-Server-2022+-provisioner-connection>'
+$env:WORKERDOCK_TEST_SQL_RUNTIME='<same-server-distinct-restricted-runtime-login>'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~CapacityPolicySqlTests|FullyQualifiedName~AttemptSqlTests|FullyQualifiedName~ProjectionSqlTests'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzCapacityTests|FullyQualifiedName~QuartzSqlTopologyTests'
+dotnet test WorkerDock.slnx -c Release
+```
+
+The new adapter fixture checks epoch rejection before and after reopening, no
+attempt consumption for an old acquired delivery, deterministic reissue, and one
+exclusive permit across queued work under both RCSI settings. Existing
+QuartzCapacityTests use three probe processes to establish Quartz reservation
+capacity. A real three-service Task 09 demonstration must additionally exercise
+the production policy coordinator/SQL attempt adapter while pausing node
+acknowledgements, lowering 3-to-1-to-0-to-2 with active attempts, rejoining an
+old boot, and retaining retry/review permits. That full live-policy SQL proof is
+still pending; probe and memory passes cannot substitute for it.
+
+The Task 09 full run has no configured SQL test connection and reports the SQL
+fixtures as SQL_TEST_BLOCKED. Real migration/rollback, permission and SQL
+capacity proofs remain pending. All Task 09 SQL references deliberately remain
+in the existing `dbo` schema; the requested complete `workerdock` schema
+conversion, including both Quartz stores and migration history, is a separate
+follow-up before Stage 03.

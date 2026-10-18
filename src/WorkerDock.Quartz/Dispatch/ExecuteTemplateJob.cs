@@ -31,11 +31,11 @@ public sealed class ExecuteTemplateJob(IAttemptStore store, IAttemptRunner runne
     {
         try
         {
-            if (data.Count != 7 || data.Any(pair => pair.Value is not string)) throw new FormatException();
+            if (data.Count != 8 || data.Any(pair => pair.Value is not string)) throw new FormatException();
             var intent = new DispatchIntent(Guid.ParseExact(data.GetString("DeliveryId")!, "N"), Guid.ParseExact(data.GetString("ExecutionId")!, "N"),
                 int.Parse(data.GetString("AttemptOrdinal")!, CultureInfo.InvariantCulture), data.GetString("TemplateId")!,
                 new DateTimeOffset(long.Parse(data.GetString("DueUtc")!, CultureInfo.InvariantCulture), TimeSpan.Zero), 0,
-                long.Parse(data.GetString("EntityRevision")!, CultureInfo.InvariantCulture), data.GetString("PayloadDigest")!);
+                long.Parse(data.GetString("EntityRevision")!, CultureInfo.InvariantCulture), data.GetString("PayloadDigest")!, long.Parse(data.GetString("CapacityRevision")!, CultureInfo.InvariantCulture));
             if (intent.PayloadDigest != intent.ComputeDigest()) throw new FormatException();
             return intent;
         }

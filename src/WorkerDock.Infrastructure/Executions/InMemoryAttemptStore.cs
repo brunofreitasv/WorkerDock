@@ -2,6 +2,7 @@ using WorkerDock.Application.Common;
 using WorkerDock.Application.Dispatch;
 using WorkerDock.Application.Executions;
 using WorkerDock.Application.Jobs;
+using WorkerDock.Application.Workers;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Domain.Jobs;
 
@@ -13,13 +14,14 @@ public sealed record MemoryExecutionAudit(string Decision, string Reason, ActorC
 public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IAttemptSignals
 {
     private readonly TimeProvider clock;
+    private readonly ICapacityStore? capacity;
     private readonly object gate = new();
     private readonly AttemptLifecycle data;
     private readonly List<DispatchIntent> retries = [];
     private readonly List<MemoryExecutionAudit> audits = [];
-    public InMemoryAttemptStore(TimeProvider clock, ExecutionDescriptor descriptor, ExecutionPolicy policy)
+    public InMemoryAttemptStore(TimeProvider clock, ExecutionDescriptor descriptor, ExecutionPolicy policy, ICapacityStore? capacity = null)
     {
-        this.clock = clock;
+        this.clock = clock; this.capacity = capacity;
         Intent = new(Guid.NewGuid(), descriptor.ExecutionId, 1, descriptor.TemplateId, clock.GetUtcNow(), policy.Priority, 1, "");
         Intent = Intent with { PayloadDigest = Intent.ComputeDigest() };
         data = new() { Descriptor = descriptor, Policy = policy, Intent = Intent, JobId = Guid.NewGuid() };
@@ -29,7 +31,15 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
     public IReadOnlyList<DispatchIntent> Retries { get { lock (gate) return retries.ToArray(); } }
     public IReadOnlyList<MemoryExecutionAudit> Audits { get { lock (gate) return audits.ToArray(); } }
     public AttemptLease? CurrentLease { get { lock (gate) return data.Lease; } }
-    public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) => Run(() => data.Begin(intent, workerBootId, clock.GetUtcNow()), ct);
+    public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) => capacity is null ? Run(() => data.Begin(intent, workerBootId, clock.GetUtcNow()), ct) : capacity.TransactAsync((state, now) =>
+    {
+        lock (gate)
+        {
+            data.GateOpen = state.CanStart(workerBootId, intent.TemplateId, now);
+            data.EffectiveCapacityRevision = state.EffectiveRevision;
+            return data.Begin(intent, workerBootId, now);
+        }
+    }, ct);
     public ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct) => Run(() => data.GetDescriptor(lease, clock.GetUtcNow()), ct);
     public ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct) => Run(() => data.Renew(lease, clock.GetUtcNow()), ct);
     public async ValueTask CompleteAsync(AttemptLease lease, AttemptCompletion completion, CancellationToken ct) =>

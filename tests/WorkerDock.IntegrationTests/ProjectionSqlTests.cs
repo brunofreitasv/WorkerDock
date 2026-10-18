@@ -20,7 +20,8 @@ public sealed class ProjectionSqlTests
     {
         await using var fixture = new QuartzProcessFixture();
         await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003a_projection", default);
+        await fixture.Runner.ApplyAsync("tenant", "0003c_capacity", default);
+        await SqlCapacityTestSetup.ReadyAsync(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
         var commands = new SqlJobCommands(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
         var job = Job();
         await commands.SaveAsync(job, null, Actor(), default);
@@ -47,7 +48,7 @@ public sealed class ProjectionSqlTests
         await fixture.Database.ExecuteAsync($"UPDATE dbo.Executions SET State=N'Succeeded' WHERE ExecutionId='{envelope.EntityId}'; UPDATE dbo.Outbox SET ReviewAtUtc=NULL;");
         Assert.Equal(1, await new DispatchReconciler(store, store, publisher, TimeProvider.System).ReconcileAsync(20, default));
         Assert.Empty(await store.ReadPublishedAsync(10, default));
-        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.Outbox WHERE ProjectionState=N'Retired'"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.Outbox WHERE ProjectionState=N'Retired' AND DispatchedAtUtc IS NOT NULL"));
     }
 
     [Theory]
@@ -57,7 +58,7 @@ public sealed class ProjectionSqlTests
     {
         await using var fixture = new QuartzProcessFixture();
         await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003a_projection", default);
+        await fixture.Runner.ApplyAsync("tenant", "0003c_capacity", default);
         var store = new SqlProjectionStore(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
         var id = Guid.NewGuid();
         var entity = Guid.NewGuid();

@@ -20,23 +20,16 @@ public sealed class AttemptSqlTests
     {
         await using var fixture = new QuartzProcessFixture();
         await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003b_attempts", default);
+        await fixture.Runner.ApplyAsync("tenant", "0003c_capacity", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         var commands = new SqlJobCommands(options);
         var job = new JobRevision(Guid.NewGuid(), 0, "attempt", "workerdock.http", "1.0.0", JsonSerializer.SerializeToElement(new { }), null,
             new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, "Queue", 100, 5));
         var actor = new ActorContext("operator", "Anonymous", Guid.NewGuid());
         await commands.SaveAsync(job, null, actor, default);
-        await fixture.Database.ExecuteAsync($"""
-            UPDATE dbo.Jobs SET Enabled=1 WHERE JobId='{job.JobId}';
-            UPDATE dbo.TemplatePolicies SET StartGateClosed=0 WHERE TemplateId=N'workerdock.http';
-            INSERT dbo.Workers(InstallationId,BootId,CatalogDigest,CapacityCeiling,LiveLimit,LastHeartbeatUtc)
-                VALUES(NEWID(),N'boot-a',REPLICATE('a',64),2,2,SYSUTCDATETIME()),(NEWID(),N'boot-b',REPLICATE('a',64),2,2,SYSUTCDATETIME());
-            INSERT dbo.WorkerCapabilities(InstallationId,TemplateId,TemplateVersion)
-                SELECT InstallationId,N'workerdock.http',N'1.0.0' FROM dbo.Workers;
-            """);
+        await fixture.Database.ExecuteAsync($"UPDATE dbo.Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
+        await SqlCapacityTestSetup.ReadyAsync(options,"boot-a","boot-b");
         var run = await commands.RunNowAsync(job.JobId, "sql-fence", actor, default);
-        await fixture.Database.ExecuteAsync($"INSERT dbo.JobPermits(PermitId,JobId,ExecutionId,Mode,AcquiredAtUtc) VALUES(NEWID(),'{job.JobId}','{run.TargetId}',N'Exclusive',SYSUTCDATETIME())");
         var projections = new SqlProjectionStore(options);
         var envelope = Assert.Single(await projections.ReadPendingAsync(10, default));
         var intent = (await projections.ReadAsync(envelope, 1, default)).Intent;
@@ -62,7 +55,6 @@ public sealed class AttemptSqlTests
         Assert.Equal("Completed", (await second.BeginAsync(intent, "boot-b", default)).Decision);
 
         var crash = await commands.RunNowAsync(job.JobId, "crash-before-launch", actor, default);
-        await fixture.Database.ExecuteAsync($"INSERT dbo.JobPermits(PermitId,JobId,ExecutionId,Mode,AcquiredAtUtc) VALUES(NEWID(),'{job.JobId}','{crash.TargetId}',N'Exclusive',SYSUTCDATETIME())");
         var nextEnvelope = (await projections.ReadPendingAsync(10, default)).Single(x => x.EntityId == crash.TargetId);
         var nextIntent = (await projections.ReadAsync(nextEnvelope, 1, default)).Intent;
         var abandoned = (await first.BeginAsync(nextIntent, "boot-a", default)).Lease!;
@@ -74,7 +66,7 @@ public sealed class AttemptSqlTests
         Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM dbo.Executions WHERE ExecutionId='{crash.TargetId}' AND State=N'NeedsReview' AND Certainty=N'Unknown'"));
         Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM dbo.AttemptStatusEvents WHERE ExecutionId='{crash.TargetId}' AND State=N'NeedsReview'"));
         Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM dbo.JobPermits WHERE ExecutionId='{crash.TargetId}'"));
-        var rejected = await Assert.ThrowsAsync<WorkerDockException>(async () => await fixture.Runner.RollbackAsync("tenant", "0003b_attempts", default));
+        var rejected = await Assert.ThrowsAsync<WorkerDockException>(async () => await fixture.Runner.RollbackAsync("tenant", "0003c_capacity", default));
         Assert.Equal("UnsafeRollback", rejected.Code);
     }
 

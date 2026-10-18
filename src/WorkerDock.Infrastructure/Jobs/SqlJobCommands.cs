@@ -188,6 +188,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 Add(outbox, "@revision", SqlDbType.BigInt, revision);
                 Add(outbox, "@digest", SqlDbType.Char, Hash("ExecutionDispatch|" + executionId.ToString("N") + "|" + revision), 64);
                 await outbox.ExecuteNonQueryAsync(token);
+                await WorkerDock.Infrastructure.Dispatch.JobAdmission.AdmitAsync(connection, transaction, jobId, token);
                 return receipt;
             }, ct);
         }

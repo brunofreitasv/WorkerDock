@@ -35,6 +35,7 @@ public sealed class DispatchReconciler(IProjectionStore projections, IDispatchSt
                 {
                     if (business.State is not ("Queued" or "RetryWaiting")) throw new WorkerDockException("ProjectionHeld");
                     repaired = await publisher.EnsurePublishedAsync(intent, ct);
+                    await publisher.AgeAsync(intent, clock.GetUtcNow(), ct);
                 }
                 await projections.AcknowledgeAsync(envelope.IntentId, envelope.PayloadDigest, ct);
                 if (reviews is not null) await reviews.CompleteReviewAsync(envelope.IntentId, retired, clock.GetUtcNow().AddMinutes(1), ct);
@@ -55,14 +56,14 @@ public sealed class DispatchReconciler(IProjectionStore projections, IDispatchSt
         try
         {
             var payload = envelope.Payload;
-            if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any(p => p.Name is not ("executionId" or "jobRevision" or "attemptOrdinal")) ||
+            if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any(p => p.Name is not ("executionId" or "jobRevision" or "attemptOrdinal" or "capacityRevision")) ||
                 payload.EnumerateObject().GroupBy(p => p.Name).Any(group => group.Count() != 1))
                 throw new WorkerDockException("ProjectionIntegrityError");
             var id = payload.GetProperty("executionId").GetGuid();
             var revision = payload.GetProperty("jobRevision").GetInt64();
             var ordinal = payload.TryGetProperty("attemptOrdinal", out var number) ? number.GetInt32() : 1;
             if (envelope.IntentId == Guid.Empty || id == Guid.Empty || revision < 1 || ordinal < 1 || id != envelope.EntityId || revision != envelope.EntityRevision ||
-                envelope.PayloadDigest != ProjectionEnvelope.ExecutionDigest(id, revision, ordinal))
+                envelope.PayloadDigest != ProjectionEnvelope.ExecutionDigest(id, revision, ordinal, payload.TryGetProperty("capacityRevision", out var epoch) ? epoch.GetInt64() : 0))
                 throw new WorkerDockException("ProjectionIntegrityError");
             return ordinal;
         }
