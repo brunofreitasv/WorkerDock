@@ -104,7 +104,7 @@ public static class TemplateSchemaValidator
                 case "minItems": case "maxItems": case "minLength": case "maxLength":
                     if(value.ValueKind!=JsonValueKind.Number || !value.TryGetInt32(out var bound) || bound is <0 or >16384) Add("InvalidSchema"); break;
                 case "minimum": case "maximum": case "exclusiveMinimum": case "exclusiveMaximum": case "multipleOf":
-                    if(value.ValueKind!=JsonValueKind.Number || !value.TryGetDouble(out var n) || !double.IsFinite(n) || p.Name=="multipleOf" && n<=0) Add("InvalidSchema"); break;
+                    if(!TryExactDecimal(value,out var n) || p.Name=="multipleOf" && n<=0) Add("InvalidSchema"); break;
                 case "pattern": if(value.ValueKind!=JsonValueKind.String || !PortablePattern(value.GetString()!)) Add("InvalidSchema"); break;
                 case "format": if(value.ValueKind!=JsonValueKind.String || value.GetString() is not ("uuid" or "date-time")) Add("UnsupportedSchemaFormat"); break;
                 case "uniqueItems": case "x-workerDock-secretReference": case "x-workerDock-sensitive":
@@ -119,7 +119,7 @@ public static class TemplateSchemaValidator
             }
         }
         foreach(var pair in new[] { ("minLength","maxLength"),("minItems","maxItems"),("minimum","maximum"),("exclusiveMinimum","exclusiveMaximum") })
-            if(schema.TryGetProperty(pair.Item1,out var lower) && schema.TryGetProperty(pair.Item2,out var upper) && lower.ValueKind==JsonValueKind.Number && upper.ValueKind==JsonValueKind.Number && lower.TryGetDouble(out var lo) && upper.TryGetDouble(out var hi) && lo>hi) Add("InvalidSchema");
+            if(schema.TryGetProperty(pair.Item1,out var lower) && schema.TryGetProperty(pair.Item2,out var upper) && TryExactDecimal(lower,out var lo) && TryExactDecimal(upper,out var hi) && lo>hi) Add("InvalidSchema");
         if(schema.TryGetProperty("x-workerDock-secretReference",out var secretReference) && secretReference.ValueKind==JsonValueKind.True &&
             (!schema.TryGetProperty("type",out var referenceType) || referenceType.ValueKind!=JsonValueKind.String || referenceType.GetString()!="string" || schema.TryGetProperty("default",out _))) Add("InvalidSchema");
         void Add(string code) { if(issues.Count<64) issues.Add(new(path,code)); }
@@ -183,6 +183,7 @@ public static class TemplateSchemaValidator
         {
             var matches=0;
             foreach(var branch in alternatives.EnumerateArray()) { var branchIssues=new List<ValidationIssue>(); Check(root,branch,value,path,branchIssues,depth+1,budget); if(branchIssues.Count==0) matches++; }
+            if(budget[0]<0) { Add("ValidationBudgetExceeded"); return; }
             if(matches!=1) Add("OneOf");
         }
         switch(value.ValueKind)
@@ -199,10 +200,16 @@ public static class TemplateSchemaValidator
                 }
                 break;
             case JsonValueKind.Array:
-                Bound("minItems",value.GetArrayLength(),"MinItems",false); Bound("maxItems",value.GetArrayLength(),"MaxItems",true);
+                if(Bound("minItems",value.GetArrayLength(),"MinItems",false) || Bound("maxItems",value.GetArrayLength(),"MaxItems",true)) break;
                 var array=value.EnumerateArray().ToArray();
                 if(schema.TryGetProperty("uniqueItems",out var unique) && unique.ValueKind==JsonValueKind.True)
-                { for(var i=0;i<array.Length;i++) for(var j=0;j<i;j++) if(JsonElement.DeepEquals(array[i],array[j])) { Add("UniqueItems"); break; } }
+                {
+                    for(var i=0;i<array.Length;i++) for(var j=0;j<i;j++)
+                    {
+                        if(--budget[0]<0) { Add("ValidationBudgetExceeded"); return; }
+                        if(JsonElement.DeepEquals(array[i],array[j])) { Add("UniqueItems"); return; }
+                    }
+                }
                 if(schema.TryGetProperty("items",out var item)) foreach(var element in array) Check(root,item,element,path+"[]",issues,depth+1,budget);
                 break;
             case JsonValueKind.String:
@@ -213,25 +220,39 @@ public static class TemplateSchemaValidator
                 if(schema.TryGetProperty("format",out var format) && !(format.GetString()=="uuid" ? Guid.TryParseExact(text,"D",out _) : DateTimeOffset.TryParseExact(text,["yyyy-MM-dd'T'HH:mm:ssK","yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK"],CultureInfo.InvariantCulture,DateTimeStyles.None,out _) && (text.EndsWith('Z') || Regex.IsMatch(text,@"[+-][0-9]{2}:[0-9]{2}$")))) Add("Format");
                 break;
             case JsonValueKind.Number:
-                if(!value.TryGetDouble(out var number) || !double.IsFinite(number)) { Add("Number"); break; }
+                if(!TryExactDecimal(value,out var number)) { Add("Number"); break; }
                 Bound("minimum",number,"Minimum",false); Bound("maximum",number,"Maximum",true);
-                if(schema.TryGetProperty("exclusiveMinimum",out var min) && number<=min.GetDouble()) Add("ExclusiveMinimum");
-                if(schema.TryGetProperty("exclusiveMaximum",out var max) && number>=max.GetDouble()) Add("ExclusiveMaximum");
+                if(schema.TryGetProperty("exclusiveMinimum",out var min) && number<=min.GetDecimal()) Add("ExclusiveMinimum");
+                if(schema.TryGetProperty("exclusiveMaximum",out var max) && number>=max.GetDecimal()) Add("ExclusiveMaximum");
                 if(schema.TryGetProperty("multipleOf",out var multiple))
                 {
-                    if(value.TryGetDecimal(out var exact) && multiple.TryGetDecimal(out var divisor) && divisor>0) { if(exact%divisor!=0) Add("MultipleOf"); }
+                    if(TryExactDecimal(multiple,out var divisor) && divisor>0) { if(number%divisor!=0) Add("MultipleOf"); }
                     else Add("Number");
                 }
                 break;
         }
         void Add(string code) { if(issues.Count<64) issues.Add(new(path,code)); }
-        void Bound(string key,double actual,string code,bool upper) { if(schema.TryGetProperty(key,out var n) && (upper?actual>n.GetDouble():actual<n.GetDouble())) Add(code); }
+        bool Bound(string key,decimal actual,string code,bool upper) { if(!schema.TryGetProperty(key,out var n) || !(upper?actual>n.GetDecimal():actual<n.GetDecimal())) return false; Add(code); return true; }
+    }
+    // TryGetDecimal can round excess digits; inspect normalized significant digits/scale first.
+    private static bool TryExactDecimal(JsonElement number,out decimal exact)
+    {
+        exact=0;
+        if(number.ValueKind!=JsonValueKind.Number) return false;
+        var raw=number.GetRawText(); var exponentAt=raw.AsSpan().IndexOfAny('e','E'); var exponent=0;
+        if(exponentAt>=0 && !int.TryParse(raw.AsSpan(exponentAt+1),NumberStyles.AllowLeadingSign,CultureInfo.InvariantCulture,out exponent)) return false;
+        var mantissa=(exponentAt<0?raw:raw[..exponentAt]).TrimStart('-'); var point=mantissa.IndexOf('.');
+        var digits=mantissa.Replace(".","").TrimStart('0'); var significant=digits.TrimEnd('0');
+        if(significant.Length==0) return true;
+        var scale=(long)(point<0?0:mantissa.Length-point-1)-exponent-(digits.Length-significant.Length);
+        if(significant.Length>28 || scale is >28 or <-28) return false;
+        return number.TryGetDecimal(out exact);
     }
     private static bool Matches(string type,JsonElement value) => type switch
     {
         "object"=>value.ValueKind==JsonValueKind.Object,"array"=>value.ValueKind==JsonValueKind.Array,"string"=>value.ValueKind==JsonValueKind.String,
         "boolean"=>value.ValueKind is JsonValueKind.True or JsonValueKind.False,"null"=>value.ValueKind==JsonValueKind.Null,
-        "number"=>value.ValueKind==JsonValueKind.Number,"integer"=>value.ValueKind==JsonValueKind.Number && value.TryGetDecimal(out var n) && decimal.Truncate(n)==n,_=>false
+        "number"=>value.ValueKind==JsonValueKind.Number,"integer"=>value.ValueKind==JsonValueKind.Number && TryExactDecimal(value,out var n) && decimal.Truncate(n)==n,_=>false
     };
     private static bool Resolve(JsonElement root,string reference,out JsonElement target)
     {

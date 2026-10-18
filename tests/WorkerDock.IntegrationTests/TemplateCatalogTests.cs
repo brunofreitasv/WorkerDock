@@ -96,4 +96,47 @@ public sealed partial class TemplateCatalogTests
             if(fixture.TryGetProperty("code",out var code)) Assert.Contains(issues,x=>x.Code==code.GetString());
         }
     }
+    [Theory]
+    [InlineData("maximum","9007199254740992","9007199254740993",false)]
+    [InlineData("minimum","9007199254740993","9007199254740992",false)]
+    [InlineData("maximum","9007199254740992","9007199254740992",true)]
+    [InlineData("minimum","9007199254740993","9007199254740993",true)]
+    [InlineData("exclusiveMinimum","9007199254740992","9007199254740993",true)]
+    [InlineData("exclusiveMaximum","9007199254740993","9007199254740992",true)]
+    [InlineData("exclusiveMinimum","9007199254740992","9007199254740992",false)]
+    [InlineData("exclusiveMaximum","9007199254740993","9007199254740993",false)]
+    [InlineData("maximum","0.1234567890123456789012345678","0.1234567890123456789012345679",false)]
+    [InlineData("maximum","9.007199254740992e15","9007199254740993",false)]
+    public void Numeric_boundaries_do_not_round_distinct_JSON_numbers(string keyword,string bound,string number,bool valid)
+    {
+        var descriptor=Descriptor("{\"type\":\"number\",\""+keyword+"\":"+bound+"}");
+        Assert.Empty(TemplateSchemaValidator.ValidateDescriptor(descriptor));
+        Assert.Equal(valid,TemplateSchemaValidator.Validate(descriptor,JsonSerializer.Deserialize<JsonElement>(number)).Count==0);
+    }
+    [Fact]
+    public void Unsupported_numeric_precision_is_rejected_in_schema_and_configuration()
+    {
+        Assert.NotEmpty(TemplateSchemaValidator.ValidateDescriptor(Descriptor("""{"type":"number","minimum":1e-29}""")));
+        Assert.NotEmpty(TemplateSchemaValidator.Validate(Descriptor("""{"type":"number"}"""),JsonSerializer.Deserialize<JsonElement>("1.000000000000000000000000000001")));
+    }
+    [Fact]
+    public void Uniqueness_comparisons_share_the_evaluation_budget()
+    {
+        var descriptor=Descriptor("""{"type":"array","uniqueItems":true}""");
+        var issues=TemplateSchemaValidator.Validate(descriptor,JsonSerializer.SerializeToElement(Enumerable.Range(0,9000)));
+        Assert.Contains(issues,x=>x.Code=="ValidationBudgetExceeded");
+        var nested=Descriptor("""{"type":"array","items":{"type":"array","uniqueItems":true}}""");
+        var nestedIssues=TemplateSchemaValidator.Validate(nested,JsonSerializer.SerializeToElement(new[] { Enumerable.Range(0,200).ToArray(),Enumerable.Range(0,200).ToArray() }));
+        Assert.Contains(nestedIssues,x=>x.Code=="ValidationBudgetExceeded");
+        var alternatives=Descriptor("""{"oneOf":[{"properties":{"kind":{"const":"a"},"values":{"type":"array"}},"required":["kind"]},{"properties":{"kind":{"const":"b"},"values":{"type":"array","uniqueItems":true}},"required":["kind"]}]}""");
+        var branchIssues=TemplateSchemaValidator.Validate(alternatives,JsonSerializer.SerializeToElement(new { kind="a",values=Enumerable.Range(0,9000).ToArray() }));
+        Assert.Contains(branchIssues,x=>x.Code=="ValidationBudgetExceeded");
+    }
+    [Fact]
+    public void Decisive_array_length_failure_skips_uniqueness_and_item_evaluation()
+    {
+        var descriptor=Descriptor("""{"type":"array","maxItems":1,"uniqueItems":true,"items":{"type":"string"}}""");
+        var issues=TemplateSchemaValidator.Validate(descriptor,JsonSerializer.SerializeToElement(Enumerable.Repeat(0,9000)));
+        Assert.Equal("MaxItems",Assert.Single(issues).Code);
+    }
 }
