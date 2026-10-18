@@ -129,8 +129,12 @@
       "workerdock.application": {
         "type": "Project",
         "dependencies": {
+          "WorkerDock.Contracts": "[1.0.0, )",
           "WorkerDock.Domain": "[1.0.0, )"
         }
+      },
+      "workerdock.contracts": {
+        "type": "Project"
       },
       "workerdock.domain": {
         "type": "Project"

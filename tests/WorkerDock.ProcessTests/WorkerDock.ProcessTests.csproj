@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0-windows</TargetFramework><OutputType>Exe</OutputType><IsTestProject>true</IsTestProject><IsPackable>false</IsPackable><StartupObject>WorkerDock.ProcessTests.FixtureProgram</StartupObject></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/WorkerDock.Runtime/WorkerDock.Runtime.csproj" />
+    <ProjectReference Include="../../src/WorkerDock.Executor/WorkerDock.Executor.csproj" />
+    <ProjectReference Include="../WorkerDock.TestTemplates/WorkerDock.TestTemplates.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="xunit" /><PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

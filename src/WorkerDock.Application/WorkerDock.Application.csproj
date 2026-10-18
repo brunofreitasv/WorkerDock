@@ -1,1 +1,6 @@
-<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../WorkerDock.Domain/WorkerDock.Domain.csproj" /></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../WorkerDock.Domain/WorkerDock.Domain.csproj" />
+    <ProjectReference Include="../WorkerDock.Contracts/WorkerDock.Contracts.csproj" />
+  </ItemGroup>
+</Project>

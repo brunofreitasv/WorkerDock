@@ -1,16 +1,21 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/WorkerDock.Application/WorkerDock.Application.csproj" />
+    <Project Path="src/WorkerDock.Contracts/WorkerDock.Contracts.csproj" />
     <Project Path="src/WorkerDock.DatabaseMigrator/WorkerDock.DatabaseMigrator.csproj" />
     <Project Path="src/WorkerDock.Domain/WorkerDock.Domain.csproj" />
+    <Project Path="src/WorkerDock.Executor/WorkerDock.Executor.csproj" />
     <Project Path="src/WorkerDock.Infrastructure/WorkerDock.Infrastructure.csproj" />
     <Project Path="src/WorkerDock.Quartz/WorkerDock.Quartz.csproj" />
+    <Project Path="src/WorkerDock.Runtime/WorkerDock.Runtime.csproj" />
     <Project Path="src/WorkerDock.Scheduler/WorkerDock.Scheduler.csproj" />
     <Project Path="src/WorkerDock.Web/WorkerDock.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WorkerDock.IntegrationTests/WorkerDock.IntegrationTests.csproj" />
+    <Project Path="tests/WorkerDock.ProcessTests/WorkerDock.ProcessTests.csproj" />
     <Project Path="tests/WorkerDock.TestHost/WorkerDock.TestHost.csproj" />
+    <Project Path="tests/WorkerDock.TestTemplates/WorkerDock.TestTemplates.csproj" />
     <Project Path="tests/WorkerDock.UnitTests/WorkerDock.UnitTests.csproj" />
   </Folder>
 </Solution>
