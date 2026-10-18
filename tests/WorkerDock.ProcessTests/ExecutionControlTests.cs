@@ -2,7 +2,11 @@ using System.Diagnostics;
 using Quartz;
 using Quartz.Extensibility;
 using WorkerDock.Application.Common;
+using WorkerDock.Application.Dispatch;
+using WorkerDock.Application.Execution;
 using WorkerDock.Application.Executions;
+using WorkerDock.Contracts.Execution;
+using WorkerDock.Contracts.Templates;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Executions;
 using WorkerDock.Quartz.Dispatch;
@@ -13,6 +17,59 @@ namespace WorkerDock.ProcessTests;
 
 public sealed class ExecutionControlTests
 {
+    [Theory]
+    [InlineData(1999, "Succeeded")]
+    [InlineData(2000, "TimedOut")]
+    [InlineData(2001, "TimedOut")]
+    public async Task Success_observed_around_deadline_while_control_poll_is_held_obeys_timeout(int completionMilliseconds, string expected)
+    {
+        var policy = new ExecutionPolicy(TimeSpan.FromSeconds(2), 1, TimeSpan.Zero, TimeSpan.Zero, 0, [], false, "Queue", 100, 5);
+        var store = new InMemoryAttemptStore(TimeProvider.System, FixtureProgram.Descriptor("spawn", "unused"), policy);
+        var lease = (await store.BeginAsync(store.Intent, "boot", default)).Lease!;
+        var clock = new ControlledClock(); var child = new ControlledChild(); var signals = new HeldSignals(store);
+        var monitor = new OwnershipMonitor(store, signals, new ControlledSupervisor(child), clock);
+        var run = monitor.RunAsync(lease, await store.GetDescriptorAsync(lease, default), clock.GetTimestamp(), default).AsTask();
+        try
+        {
+            clock.Advance(TimeSpan.FromSeconds(1));
+            await signals.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            clock.Advance(TimeSpan.FromMilliseconds(completionMilliseconds - 1000));
+            child.Succeed(); signals.Release.TrySetResult();
+            await run.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(expected, store.Snapshot.State);
+            Assert.Equal(expected, store.Snapshot.AttemptState);
+        }
+        finally { signals.Release.TrySetResult(); child.Succeed(); await monitor.DrainAsync(TimeSpan.FromMilliseconds(100), default); await run; }
+    }
+
+    [Theory]
+    [InlineData(46)]
+    [InlineData(56)]
+    public async Task Renewal_ack_held_across_previous_safety_cutoff_contains_the_real_process_tree(int acknowledgementSeconds)
+    {
+        using var fixture = new DirectoryFixture();
+        var policy = new ExecutionPolicy(null, 1, TimeSpan.Zero, TimeSpan.Zero, 0, [], false, "Queue", 100, 5);
+        var store = new InMemoryAttemptStore(TimeProvider.System, FixtureProgram.Descriptor("spawn", fixture.Path), policy);
+        var lease = (await store.BeginAsync(store.Intent, "boot", default)).Lease!;
+        var clock = new ControlledClock(); var held = new HeldRenewalStore(store);
+        var monitor = new OwnershipMonitor(held, store, FixtureProgram.Supervisor(), clock);
+        var run = monitor.RunAsync(lease, await store.GetDescriptorAsync(lease, default), clock.GetTimestamp(), default).AsTask();
+        var pids = await ContainmentTests.WaitForPids(fixture.Path);
+        try
+        {
+            // Enter renewal while the prior conservative cutoff is still valid, then withhold its committed acknowledgement.
+            clock.Advance(TimeSpan.FromSeconds(40));
+            await held.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            clock.Advance(TimeSpan.FromSeconds(acknowledgementSeconds - 40));
+            held.Release.TrySetResult();
+            await WaitUntil(() => pids.All(pid => !Alive(pid)), 5);
+            await run.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("NeedsReview", store.Snapshot.State);
+            Assert.Empty(store.Retries);
+        }
+        finally { held.Release.TrySetResult(); await monitor.DrainAsync(TimeSpan.FromMilliseconds(100), default); await run; }
+    }
+
     [Fact]
     public async Task Canceled_shutdown_still_contains_remaining_children()
     {
@@ -132,6 +189,51 @@ public sealed class ExecutionControlTests
         public override long GetTimestamp() => Stopwatch.GetTimestamp() + Interlocked.Read(ref offset);
         public override DateTimeOffset GetUtcNow() => DateTimeOffset.UtcNow.AddDays(-100);
         public void Advance(TimeSpan value) => Interlocked.Add(ref offset, (long)(value.TotalSeconds * Stopwatch.Frequency));
+    }
+
+    private sealed class ControlledClock : TimeProvider
+    {
+        private long ticks;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Interlocked.Read(ref ticks);
+        public void Advance(TimeSpan value) => Interlocked.Add(ref ticks, value.Ticks);
+    }
+    private sealed class HeldSignals(IAttemptSignals inner) : IAttemptSignals
+    {
+        public readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async ValueTask<AttemptSignal> ReadSignalAsync(AttemptLease lease, CancellationToken ct)
+        {
+            var signal = await inner.ReadSignalAsync(lease, ct);
+            Entered.TrySetResult(); await Release.Task.WaitAsync(ct); return signal;
+        }
+    }
+    private sealed class HeldRenewalStore(IAttemptStore inner) : IAttemptStore
+    {
+        public readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) => inner.BeginAsync(intent, workerBootId, ct);
+        public ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct) => inner.GetDescriptorAsync(lease, ct);
+        public async ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct)
+        {
+            var renewed = await inner.RenewAsync(lease, ct);
+            Entered.TrySetResult(); await Release.Task.WaitAsync(ct); return renewed;
+        }
+        public ValueTask CompleteAsync(AttemptLease lease, AttemptCompletion completion, CancellationToken ct) => inner.CompleteAsync(lease, completion, ct);
+        public ValueTask<int> ReviewExpiredAsync(int limit, CancellationToken ct) => inner.ReviewExpiredAsync(limit, ct);
+    }
+    private sealed class ControlledSupervisor(IExecutionChild child) : IExecutionSupervisor
+    {
+        public ValueTask<IExecutionChild> StartAsync(Guid attemptId, long generation, ExecutionDescriptor descriptor, CancellationToken ct) => ValueTask.FromResult(child);
+    }
+    private sealed class ControlledChild : IExecutionChild
+    {
+        private readonly TaskCompletionSource<TemplateResult> result = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void Succeed() => result.TrySetResult(new("Success", "Ok", false, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null));
+        public ValueTask<TemplateResult> WaitAsync(CancellationToken ct) => new(result.Task.WaitAsync(ct));
+        public ValueTask CancelAsync(CancellationToken ct) => ValueTask.CompletedTask;
+        public ValueTask TerminateAsync(CancellationToken ct) { Succeed(); return ValueTask.CompletedTask; }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class DirectoryFixture : IDisposable

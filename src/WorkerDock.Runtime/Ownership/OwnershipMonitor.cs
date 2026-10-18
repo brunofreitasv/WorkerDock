@@ -34,19 +34,23 @@ public sealed class OwnershipMonitor(IAttemptStore store, IAttemptSignals signal
             long? cancellationAt = null;
             while (true)
             {
+                var now = clock.GetTimestamp();
+                // A completion exposed between polls still has to satisfy the admitted attempt's deadline.
+                if (finiteBudget is { } budget && clock.GetElapsedTime(authorizationStarted, now) >= budget && cancellationAt is null)
+                { outcome = "TimedOut"; cancellationAt = now; }
                 if (completion.IsCompleted)
                 {
                     result = await completion; exitConfirmed = true; effects = result.EffectsMayHaveOccurred;
-                    if (cancellationAt is null) outcome = "Completed";
+                    if (cancellationAt is null)
+                        outcome = finiteBudget is { } completionBudget && clock.GetElapsedTime(authorizationStarted) >= completionBudget
+                            ? "TimedOut" : "Completed";
                     break;
                 }
-                var now = clock.GetTimestamp(); var force = Volatile.Read(ref forceShutdown) != 0;
+                var force = Volatile.Read(ref forceShutdown) != 0;
                 // A late acknowledgement cannot revive a child after the conservative local safety boundary.
                 force |= Remaining() <= TimeSpan.FromSeconds(10);
                 if (ct.IsCancellationRequested || Volatile.Read(ref stopping) != 0 || Remaining() <= OwnershipDefaults.CancellationGrace + TimeSpan.FromSeconds(5))
                     cancellationAt ??= now;
-                if (finiteBudget is { } budget && clock.GetElapsedTime(authorizationStarted) >= budget && cancellationAt is null)
-                { outcome = "TimedOut"; cancellationAt = now; }
                 if (!force && clock.GetElapsedTime(lastPoll) >= TimeSpan.FromSeconds(1))
                 {
                     lastPoll = now;
@@ -66,7 +70,9 @@ public sealed class OwnershipMonitor(IAttemptStore store, IAttemptSignals signal
                     {
                         using var request = new CancellationTokenSource(TimeSpan.FromSeconds(3));
                         var renewed = await store.RenewAsync(lease, request.Token).AsTask().WaitAsync(request.Token);
-                        if (renewed is null) { cancellationAt ??= lastRenew; force = true; }
+                        // Keep the old acknowledged reference until this await's elapsed time has been checked.
+                        if (renewed is null || Remaining() <= TimeSpan.FromSeconds(10))
+                        { cancellationAt ??= clock.GetTimestamp(); force = true; }
                         else { lease = renewed; acknowledgedAt = lastRenew; }
                     }
                     catch { /* Never extend the monotonic lease without a database acknowledgement. */ }
