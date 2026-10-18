@@ -392,6 +392,7 @@
       "workerdock.executor": {
         "type": "Project",
         "dependencies": {
+          "WorkerDock.Infrastructure": "[1.0.0, )",
           "WorkerDock.Runtime": "[1.0.0, )"
         }
       },

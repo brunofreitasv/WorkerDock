@@ -25,7 +25,7 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifie
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzCapacityTests|FullyQualifiedName~QuartzSqlTopologyTests'
 ```
 
-For local manual setup, create an empty tenant database at compatibility level 160. Supply a deployment-only migrator connection string in `WORKERDOCK_SQL` and a newly generated, stable GUID in `WORKERDOCK_INSTANCE_ID`; the GUID binds this database to one tenant context. Run `dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0003d_dispatch`. The migrator applies all earlier manifest entries through `0003d_dispatch`, starting with `0001_bootstrap`, checks both script checksums before connecting, records them in `SchemaHistory`, and verifies the stored instance ID on later runs. Only the migrator login needs DDL rights. Add the runtime database user to `WorkerDockRuntime`, which grants settings/audit rights plus DML on both Quartz table sets. Configure `Tenant__ConnectionString` and `Tenant__InstanceId` for the web host from deployment secrets/configuration, never a browser selector.
+For local manual setup, create an empty tenant database at compatibility level 160. Supply a deployment-only migrator connection string in `WORKERDOCK_SQL` and a newly generated, stable GUID in `WORKERDOCK_INSTANCE_ID`; the GUID binds this database to one tenant context. Run `dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0004_templates`. The migrator applies all earlier manifest entries through `0004_templates`, starting with `0001_bootstrap`, checks both script checksums before connecting, records them in `SchemaHistory`, and verifies the stored instance ID on later runs. Only the migrator login needs DDL rights. Add the runtime database user to `WorkerDockRuntime`, which grants settings/audit rights plus DML on both Quartz table sets. Configure `Tenant__ConnectionString` and `Tenant__InstanceId` for the web host from deployment secrets/configuration, never a browser selector.
 
 Before any migration DDL, the runner reads the connected server's major version and the connected database's compatibility level. It requires SQL Server major version 16 or later and compatibility level exactly 160, returning `UnsupportedSqlServerVersion` or `UnsupportedCompatibilityLevel` otherwise. This check and the scripts still require live verification on the disposable SQL test instance.
 
@@ -53,7 +53,7 @@ For a newly provisioned, dedicated empty local tenant database, run these exact 
 $env:WORKERDOCK_INSTANCE_ID='<new-stable-instance-guid>'
 $env:WORKERDOCK_SQL='<dedicated-local-tenant-migrator-connection-string>'
 dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0001_bootstrap
-dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0003d_dispatch
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0004_templates
 $env:Tenant__Adapter='SqlServer'
 $env:Tenant__InstanceId=$env:WORKERDOCK_INSTANCE_ID
 $env:Tenant__ConnectionString='<dedicated-local-tenant-runtime-connection-string>'
@@ -213,7 +213,7 @@ configuration; the placeholders below are not credentials to commit:
 ```powershell
 $env:WORKERDOCK_SQL='<dedicated-tenant-migrator-connection>'
 $env:WORKERDOCK_INSTANCE_ID='<stable-tenant-instance-guid>'
-dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0003d_dispatch
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0004_templates
 
 $env:Tenant__ConnectionString='<restricted-tenant-runtime-connection>'
 $env:Tenant__InstanceId=$env:WORKERDOCK_INSTANCE_ID
@@ -295,7 +295,7 @@ sqlcmd -S localhost -E -C -b -Q "CREATE DATABASE [WorkerDock_Local]; ALTER DATAB
 $env:WORKERDOCK_SQL='<deployment-only-connection-for-WorkerDock_Local>'
 $env:WORKERDOCK_INSTANCE_ID=[guid]::NewGuid().ToString()
 # Persist this instance ID in deployment configuration before starting hosts.
-dotnet run --project src/WorkerDock.DatabaseMigrator -c Release -- apply tenant 0003d_dispatch
+dotnet run --project src/WorkerDock.DatabaseMigrator -c Release -- apply tenant 0004_templates
 # The distinct restricted server login WorkerDockRuntimeLocal must be provisioned by the administrator first.
 sqlcmd -S localhost -E -C -b -d WorkerDock_Local -Q "CREATE USER [WorkerDockRuntimeLocal] FOR LOGIN [WorkerDockRuntimeLocal]; ALTER ROLE [WorkerDockRuntime] ADD MEMBER [WorkerDockRuntimeLocal];"
 ```
@@ -331,9 +331,35 @@ SQL_TEST_BLOCKED remains the expected result while `WORKERDOCK_TEST_SQL` is abse
 After supplying the deployment connection and stable instance identity as above, apply the complete schema:
 
 ```powershell
-dotnet run --project src/WorkerDock.DatabaseMigrator -c Release -- apply tenant 0003d_dispatch
+dotnet run --project src/WorkerDock.DatabaseMigrator -c Release -- apply tenant 0004_templates
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~CommandOutcomeSqlTests|FullyQualifiedName~ProjectionSqlTests|FullyQualifiedName~AttemptSqlTests|FullyQualifiedName~MigrationTests.Fresh_custom_schema'
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'Store=Sql'
 ```
 
 The paired `0003d_dispatch` migration adds `[workerdock].ProjectionMaintenance`, its per-object runtime grants, a filtered eligible-execution index, and a pending-command target index. Stop all hosts before rollback; reverse `0003d_dispatch` before `0003c_capacity`. The cursor is maintenance progress only and never authorizes an attempt or replaces Quartz acquisition. SQL parity, rollback and large-dataset timing tests require real SQL Server with RCSI OFF and ON; memory/source tests are not SQL execution proof.
+
+## Task 10 immutable template catalog
+
+Stop/drain the worker pool and back up the tenant database, then run the paired migration with the already provisioned migration identity:
+
+```powershell
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0004_templates
+```
+
+`0004_templates` follows `0003d_dispatch`. It adds nullable descriptor JSON and retirement state to `[workerdock].TemplateCatalog`, its JSON/retirement checks and `[workerdock].TemplateCatalog_Immutable`. The existing WorkerDockRuntime role retains SELECT and receives only INSERT and column-level UPDATE on descriptor/digest/enablement/retirement; it receives no DELETE or DDL. All metadata publication runs through the trusted catalog adapter and existing tenant transaction lock. Initial promotion is limited to the exact two seeded built-in 1.0.0 placeholder digests with NULL metadata. Published descriptors/digests cannot be updated/deleted, and retired versions cannot be reenabled through registration. Profile and tenant vault/egress settings tables are owned by later tasks, not this migration.
+
+For an unpopulated disposable catalog, stop every runtime writer before rollback. The paired down script refuses published descriptors, retired versions or later migrations; a populated deployment requires backup restore or a reviewed forward change.
+
+```powershell
+dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0004_templates
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0004_templates
+```
+
+With the separately provisioned disposable `WORKERDOCK_TEST_SQL` and distinct restricted `WORKERDOCK_TEST_SQL_RUNTIME` login described above, run:
+
+```powershell
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~TemplateCatalogSqlTests&Store=Sql'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~MigrationTests.Fresh_custom_schema_installs_and_rolls_back_all_pairs&Store=Sql'
+```
+
+These cases exercise snapshot OFF/ON, exact bootstrap promotion with restricted grants, immutable mismatch rejection, retirement without metadata loss, rollback refusal and empty up/down/up. Fresh installation now applies all eight pairs through `0004_templates`. The source checksum/custom-schema tests and memory catalog tests are SQL-independent; they cannot prove migration execution, trigger behavior, runtime grants, locking or restart durability. Live SQL acceptance is **SQL_TEST_BLOCKED** until the authorized test credentials are available and the above commands pass.

@@ -59,7 +59,7 @@ public static class FixtureProgram
             await ExecutionProtocol.WriteAsync(pipe, new Handshake(1, attempt, generation, nonce, pid), default);
             await Task.Delay(Timeout.InfiniteTimeSpan); return 0;
         }
-        return await ExecutorHost.RunAsync(() => [new BlockingTemplate(), new SpawningTemplate(() => Process.Start(StartInfo("grandchild"))!), new SecretTemplate()], execution => new(new TestVault(), new TestLog(execution.Configuration.GetProperty("path").GetString()!)));
+        return await ExecutorHost.RunAsync(() => [new BlockingTemplate(), new SpawningTemplate(() => Process.Start(StartInfo("grandchild"))!), new SecretTemplate()], execution => new(new TestVault(args[0]=="provider-failure"), new TestLog(execution.Configuration.GetProperty("path").GetString()!)));
     }
     public static ProcessStartInfo StartInfo(params string[] args)
     {
@@ -71,9 +71,9 @@ public static class FixtureProgram
     public static ExecutionSupervisor Supervisor() => new(Options());
     public static ExecutionSupervisorOptions Options(string mode = "executor") => new("dotnet", [typeof(FixtureProgram).Assembly.Location, mode], new Dictionary<string, string> { ["block@1"] = "test-v1", ["spawn@1"] = "test-v1", ["secret@1"] = "test-v1" });
     public static ExecutionDescriptor Descriptor(string template, string path) => new(Guid.NewGuid(), 1, template, "1", "stable-idempotency", JsonSerializer.SerializeToElement(new { path }), null, null, JsonSerializer.SerializeToElement(new { version = 1 }), null);
-    private sealed class TestVault : ISecretVault
+    private sealed class TestVault(bool fail) : ISecretVault
     {
-        public ValueTask<SecretValue> ResolveAsync(SecretReference reference, CancellationToken ct) => ValueTask.FromResult(new SecretValue(Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SECRET")!.AsSpan()));
+        public ValueTask<SecretValue> ResolveAsync(SecretReference reference, CancellationToken ct) => fail ? throw new Exception(Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SECRET") + Environment.GetEnvironmentVariable("WORKERDOCK_TEST_PREVIOUS_SECRET")) : ValueTask.FromResult(new SecretValue(Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SECRET")!.AsSpan()));
     }
     private sealed class TestLog(string path) : ISafeExecutionLog
     {

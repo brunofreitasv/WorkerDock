@@ -11,6 +11,35 @@ namespace WorkerDock.ProcessTests;
 public sealed class ContainmentTests
 {
     [Fact]
+    public async Task Provider_failure_and_rotated_attempts_emit_only_safe_diagnostics()
+    {
+        var oldSentinel="OLD_SECRET_"+Guid.NewGuid().ToString("N");
+        var newSentinel="NEW_SECRET_"+Guid.NewGuid().ToString("N");
+        using var fixture=new TestDirectory();
+        try
+        {
+            foreach(var value in new[] { oldSentinel,newSentinel })
+            {
+                Environment.SetEnvironmentVariable("WORKERDOCK_TEST_SECRET",value);
+                await using var child=await FixtureProgram.Supervisor().StartAsync(Guid.NewGuid(),1,FixtureProgram.Descriptor("secret",fixture.Path),default);
+                var result=await child.WaitAsync(default);
+                Assert.Equal("Success",result.Outcome);
+                var emitted=JsonSerializer.Serialize(result)+await File.ReadAllTextAsync(System.IO.Path.Combine(fixture.Path,"diagnostics"))+await File.ReadAllTextAsync(System.IO.Path.Combine(fixture.Path,"arguments"));
+                Assert.DoesNotContain(oldSentinel,emitted); Assert.DoesNotContain(newSentinel,emitted);
+            }
+            Environment.SetEnvironmentVariable("WORKERDOCK_TEST_PREVIOUS_SECRET",oldSentinel);
+            await using var failed=await new ExecutionSupervisor(FixtureProgram.Options("provider-failure")).StartAsync(Guid.NewGuid(),1,FixtureProgram.Descriptor("secret",fixture.Path),default);
+            var failure=await failed.WaitAsync(default);
+            Assert.Equal("SecretUnavailable",failure.SafeCode);
+            Assert.DoesNotContain(oldSentinel,JsonSerializer.Serialize(failure)); Assert.DoesNotContain(newSentinel,JsonSerializer.Serialize(failure));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WORKERDOCK_TEST_SECRET",null);
+            Environment.SetEnvironmentVariable("WORKERDOCK_TEST_PREVIOUS_SECRET",null);
+        }
+    }
+    [Fact]
     public async Task Supervisor_exit_kills_child_and_grandchild()
     {
         using var fixture = new TestDirectory();

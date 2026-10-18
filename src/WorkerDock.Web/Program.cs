@@ -1,3 +1,5 @@
+using WorkerDock.Application.Templates;
+using WorkerDock.Infrastructure.Templates;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Workers;
@@ -58,6 +60,13 @@ builder.Services.TryAddSingleton<ICapacityCommands>(provider =>
     return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
         ? new SqlCapacityCommands(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableCapacityCommands();
 });
+builder.Services.TryAddSingleton<ITemplateCatalog>(provider =>
+{
+    var config=provider.GetRequiredService<IConfiguration>();
+    if(config["Tenant:Adapter"]=="Memory" && provider.GetRequiredService<IHostEnvironment>().IsDevelopment()) return new TemplateCatalog([]);
+    return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlTemplateCatalog(new(config["Tenant:ConnectionString"]!,id),[]) : new UnavailableTemplateCatalog();
+});
 var app = builder.Build();
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
@@ -71,6 +80,7 @@ app.MapWorkerDockSessions();
 app.MapJobCommands();
 app.MapExecutionControls();
 app.MapCapacity();
+app.MapTemplateCatalog();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -154,4 +164,11 @@ internal sealed class UnavailableCapacityCommands : ICapacityCommands
 internal sealed class UnavailableCapacityStore : ICapacityStore
 {
     public ValueTask<T> TransactAsync<T>(Func<CapacityState,DateTimeOffset,T> change,CancellationToken ct) => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
+}
+internal sealed class UnavailableTemplateCatalog : ITemplateCatalog
+{
+    public ValueTask<string> RegisterAsync(IReadOnlyList<WorkerDock.Contracts.Templates.TemplateDescriptor> descriptors,CancellationToken ct) => ValueTask.FromException<string>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<IReadOnlyList<WorkerDock.Contracts.Templates.TemplateDescriptor>> ListAsync(CancellationToken ct) => ValueTask.FromException<IReadOnlyList<WorkerDock.Contracts.Templates.TemplateDescriptor>>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<WorkerDock.Contracts.Templates.TemplateDescriptor?> GetAsync(string id,string version,CancellationToken ct) => ValueTask.FromException<WorkerDock.Contracts.Templates.TemplateDescriptor?>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<bool> IsSelectableAsync(string id,string version,CancellationToken ct) => ValueTask.FromException<bool>(new WorkerDockException("PersistenceUnavailable"));
 }

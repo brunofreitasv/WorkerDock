@@ -1,3 +1,5 @@
+using WorkerDock.Contracts.Templates;
+using WorkerDock.Infrastructure.Templates;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -35,11 +37,16 @@ internal sealed class WorkerService(IConfiguration configuration) : BackgroundSe
         if (drainSeconds is < 1 or > 60) throw new WorkerDockException("WorkerConfigurationUnavailable");
         var boot = Guid.NewGuid().ToString("N");
         var database = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(configuration["Tenant:ConnectionString"]!, instanceId);
+        // Explicit installed descriptors only. Built-in packages are added here with their reviewed handler references.
+        IReadOnlyList<TemplateDescriptor> installedDescriptors=[];
+        var registeredDigest=TemplateMetadata.AggregateDigest(installedDescriptors);
+        if(registeredDigest!=catalogDigest) throw new WorkerDockException("CatalogMismatch");
+        await new SqlTemplateCatalog(database,installedDescriptors).RegisterAsync(installedDescriptors,stoppingToken);
         var capacity = new SqlCapacityStore(database);
         var store = new SqlAttemptStore(database);
         var supervisor = new ExecutionSupervisor(new(configuration["Executor:Path"]!,
             configuration.GetSection("Executor:Arguments").Get<string[]>() ?? [],
-            configuration.GetSection("Executor:MetadataDigests").Get<Dictionary<string, string>>() ?? []));
+            installedDescriptors.ToDictionary(x=>x.Id+"@"+x.Version,x=>x.MetadataDigest,StringComparer.Ordinal)));
         var monitor = new OwnershipMonitor(store, store, supervisor, TimeProvider.System);
         await using var topology = new QuartzTopology(new(configuration["Tenant:ConnectionString"]!, instanceId));
         var initial = await capacity.TransactAsync((s, _) => s.Snapshot, stoppingToken);

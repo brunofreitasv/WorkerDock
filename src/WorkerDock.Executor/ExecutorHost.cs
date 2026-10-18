@@ -1,3 +1,4 @@
+using WorkerDock.Infrastructure.Templates;
 using System.Globalization;
 using System.IO.Pipes;
 using System.Text.Json;
@@ -65,7 +66,7 @@ public static class ExecutorHost
             var template = installed.SingleOrDefault(x => x.Descriptor.Id == request.Execution.TemplateId && x.Descriptor.Version == request.Execution.TemplateVersion);
             if (template is null) return Failure("TemplateVersionUnavailable", false);
             if (string.IsNullOrEmpty(request.MetadataDigest) || template.Descriptor.MetadataDigest != request.MetadataDigest) return Failure("TemplateMetadataMismatch", false);
-            if (template.Validate(request.Execution.Configuration).Count != 0) return Failure("TemplateConfigurationInvalid", false);
+            if (TemplateSchemaValidator.Validate(template.Descriptor,request.Execution.Configuration).Count != 0 || template.Validate(request.Execution.Configuration).Count != 0) return Failure("TemplateConfigurationInvalid", false);
             ct.ThrowIfCancellationRequested();
             var composed = adapters(request.Execution);
             secrets.Provider = composed.Secrets;
@@ -78,6 +79,7 @@ public static class ExecutorHost
             _ = ExecutionProtocol.Serialize(sanitized);
             return sanitized;
         }
+        catch (SecretUnavailableException) { return Failure("SecretUnavailable", true); }
         catch (OperationCanceledException) { return Failure("TemplateCancelled", true); }
         catch { return Failure("TemplateExecutionFailed", true); }
     }
@@ -88,13 +90,22 @@ public static class ExecutorHost
     private sealed class RedactingSecrets : ISecretVault, IDisposable
     {
         private readonly List<char[]> resolved = [];
+        private readonly List<SecretValue> leased = [];
         private readonly object gate = new();
         public ISecretVault Provider { get; set; } = null!;
         public async ValueTask<SecretValue> ResolveAsync(SecretReference reference, CancellationToken ct)
         {
-            var value = await Provider.ResolveAsync(reference, ct);
-            lock (gate) resolved.Add(value.Reveal().ToArray());
-            return value;
+            ct.ThrowIfCancellationRequested();
+            SecretValue? value=null;
+            try
+            {
+                value=await Provider.ResolveAsync(reference,ct);
+                var snapshot=value.Reveal().ToArray();
+                lock(gate) { resolved.Add(snapshot); leased.Add(value); }
+                return value;
+            }
+            catch(OperationCanceledException) when(ct.IsCancellationRequested) { value?.Dispose(); throw new OperationCanceledException(ct); }
+            catch { value?.Dispose(); throw new SecretUnavailableException(); }
         }
         public string Redact(string text)
         {
@@ -110,7 +121,7 @@ public static class ExecutorHost
                     }
             return text;
         }
-        public void Dispose() { lock (gate) { foreach (var value in resolved) Array.Clear(value); resolved.Clear(); } }
+        public void Dispose() { lock (gate) { foreach (var value in leased) value.Dispose(); leased.Clear(); foreach (var value in resolved) Array.Clear(value); resolved.Clear(); } }
     }
     private sealed class RedactingLog(ISafeExecutionLog target, RedactingSecrets secrets) : ISafeExecutionLog
     {

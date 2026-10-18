@@ -208,3 +208,26 @@ Manual run commands become Applied when publication or attempt admission commits
 Job validation budgets the serialized descriptor, 1 KiB of execute-envelope overhead and 8 KiB for future pinned nonsecret profile/settings fields inside the 64 KiB frame. Runtime checks the actual complete frame before launching. A proven rejection before handler permission records known no effects; ambiguous permission writes remain uncertain.
 
 Memory/source-contract passes do not establish SQL latency, durability or grants. Follow database.md for real SQL setup; live SQL remains SQL_TEST_BLOCKED until its credentials are available.
+
+## Task 10 vault/catalog verification
+
+Use the development-only secret adapter and explicit nonsecret mapping described in [secrets.md](secrets.md). Approved mappings are protected deployment configuration; there is no secret-resolution API or arbitrary environment lookup. SQL profiles and audited tenant integration settings remain owned by their separate tasks.
+
+Run focused behavior checks and then every SQL-independent Release check:
+
+```powershell
+dotnet restore WorkerDock.slnx --locked-mode
+dotnet test tests/WorkerDock.UnitTests -c Release --filter FullyQualifiedName~SecretBoundaryTests
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter FullyQualifiedName~TemplateCatalogTests
+dotnet test tests/WorkerDock.ProcessTests -c Release --filter FullyQualifiedName~Provider_failure_and_rotated_attempts
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'Store!=Sql'
+dotnet test tests/WorkerDock.UnitTests -c Release
+dotnet test tests/WorkerDock.ProcessTests -c Release
+dotnet build WorkerDock.slnx -c Release
+```
+
+Shared schema fixtures live at `tests/fixtures/template-schemas.json`; server tests consume them now and Task 13 uses the same corpus for forms. The catalog metadata routes require Manage and expose descriptor/schema/hints and selection status only. Installed SQL/HTTP handler references are added by Tasks 11/12; the current roots deliberately register an empty installed package list and cannot activate a pool whose catalog digest differs.
+
+Task 10 real-SQL migration/permission/promotion tests are separate in [database.md](database.md#task-10-immutable-template-catalog). Their status remains **SQL_TEST_BLOCKED** without the provisioned disposable SQL logins. Memory and process tests do not prove SQL durability or grant enforcement.
+
+Authoring boundary still pending Task 13: the existing job-save path retains its built-in-only gate and has not yet adopted catalog schema validation. Task 10 validates registration metadata and validates configuration again inside the child before any handler effects. Task 13 must replace that authoring gate with trusted registered-catalog policy and enforce server schema validation before enable/run-now; saving a revision today is not evidence that its template schema has passed.

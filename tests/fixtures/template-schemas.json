@@ -1,0 +1,18 @@
+[
+  {"name":"closed-object","schema":{"type":"object","properties":{"count":{"type":"integer","minimum":1,"maximum":5}},"required":["count"],"additionalProperties":false},"configuration":{"count":3},"valid":true},
+  {"name":"unexpected-property","schema":{"type":"object","additionalProperties":false},"configuration":{"unexpected":"synthetic"},"valid":false,"code":"AdditionalProperty"},
+  {"name":"required","schema":{"type":"object","required":["name"]},"configuration":{},"valid":false,"code":"Required"},
+  {"name":"nullable-type","schema":{"type":["string","null"]},"configuration":null,"valid":true},
+  {"name":"enum","schema":{"type":"string","enum":["a","b"]},"configuration":"c","valid":false,"code":"Enum"},
+  {"name":"array-bound","schema":{"type":"array","minItems":1,"maxItems":2,"items":{"type":"boolean"}},"configuration":[true,false,true],"valid":false,"code":"MaxItems"},
+  {"name":"unique-items","schema":{"type":"array","uniqueItems":true,"items":{"type":"integer"}},"configuration":[1,1.0],"valid":false,"code":"UniqueItems"},
+  {"name":"decimal-multiple","schema":{"type":"number","multipleOf":0.1,"exclusiveMinimum":0,"exclusiveMaximum":1},"configuration":0.3,"valid":true},
+  {"name":"unicode-scalars","schema":{"type":"string","minLength":1,"maxLength":1},"configuration":"😀","valid":true},
+  {"name":"portable-pattern","schema":{"type":"string","pattern":"^[a-z0-9_-]+$"},"configuration":"safe_name-2","valid":true},
+  {"name":"format-uuid","schema":{"type":"string","format":"uuid"},"configuration":"not-a-uuid","valid":false,"code":"Format"},
+  {"name":"format-date-time","schema":{"type":"string","format":"date-time"},"configuration":"2026-10-17T10:00:00Z","valid":true},
+  {"name":"format-zone-required","schema":{"type":"string","format":"date-time"},"configuration":"2026-10-17T10:00:00","valid":false,"code":"Format"},
+  {"name":"local-reference","schema":{"$defs":{"reference":{"type":"string","x-workerDock-secretReference":true}},"type":"object","properties":{"credential":{"$ref":"#/$defs/reference"}},"additionalProperties":false},"configuration":{"credential":"logical.reference"},"valid":true},
+  {"name":"discriminated-one-of","schema":{"type":"object","oneOf":[{"properties":{"kind":{"const":"a"},"a":{"type":"integer"}},"required":["kind","a"],"additionalProperties":false},{"properties":{"kind":{"const":"b"},"b":{"type":"string"}},"required":["kind","b"],"additionalProperties":false}]},"configuration":{"kind":"a","a":2},"valid":true},
+  {"name":"discriminator-mismatch","schema":{"type":"object","oneOf":[{"properties":{"kind":{"const":"a"}},"required":["kind"]},{"properties":{"kind":{"const":"b"}},"required":["kind"]}]},"configuration":{"kind":"c"},"valid":false,"code":"OneOf"}
+]
