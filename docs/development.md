@@ -21,8 +21,8 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifie
 
 `QuartzTopology.CreateMemory(instanceId, "Development")` is selected by the
 composition root when a local Quartz host is added. The current browser memory
-instance exercises tenant settings and policy ports; it does not start a
-Quartz scheduler or expose a job submission route. See
+instance exercises tenant settings, job commands and execution controls; it does
+not start a Quartz scheduler or execute submitted work. See
 [quartz-integration.md](quartz-integration.md) for the scheduler port and its
 memory/SQL behavior.
 
@@ -76,7 +76,7 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release --filter '(FullyQualifi
 These prove filtering, one-time conversion, bounded enumeration, in-process JSON
 serialization, stored memory trigger calculations and actual memory job dispatch
 with an injected clock. They do not prove SQL calendar blobs survive restart.
-The browser memory host still exposes settings only; the schedule editor and its
+The browser memory host has no schedule editor; that editor and its
 preview endpoint arrive in the scheduling UI stage. See
 [quartz-integration.md](quartz-integration.md) for the five-field and DST policy.
 
@@ -95,7 +95,46 @@ The fault tests cover both sides of Quartz writes and application ack, concurren
 publishers, identity/digest corruption, completed/active executions with consumed
 triggers, unsupported payloads, future authorized retry deadlines, permanent
 trigger errors, actual memory probe firing and direct control-job startup. The
-Scheduler contains no test executor; Task08 provides its guarded production
-wrapper. Use [database.md](database.md) for migration 0003a_projection, restricted
+Scheduler contains no test executor; its guarded generic wrapper is invoked by
+the Worker. Use [database.md](database.md) for migration 0003a_projection, restricted
 runtime setup, Scheduler startup and real SQL publication tests. RAM restart
 means loss of its disposable store; no SQL or multi-process guarantee is inferred.
+
+## Attempt ownership and execution controls
+
+The same `IAttemptStore`, `IAttemptSignals` and `IExecutionControls` ports have
+SQL and disposable memory implementations. `InMemoryJobCommands` shares its
+accepted executions and control command receipts with `InMemoryAttemptStore`.
+The Development web host exposes stop/resolve routes against that same memory
+state. The browser host does not launch executors or start Quartz; seeded tests
+exercise execution without a SQL login. Restart discards all memory state.
+
+Run these exact commands from the repository root on Windows:
+
+```powershell
+dotnet restore WorkerDock.slnx --locked-mode
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~AttemptLifecycleTests|FullyQualifiedName~ExecutionControlsEndpointTests|FullyQualifiedName~PublicationRecoveryTests'
+dotnet test tests/WorkerDock.ProcessTests -c Release --filter FullyQualifiedName~ExecutionControlTests
+dotnet test tests/WorkerDock.ProcessTests -c Release
+dotnet test tests/WorkerDock.UnitTests -c Release
+dotnet build WorkerDock.slnx -c Release
+```
+
+The control tests use real contained Windows child/grandchild processes through
+the production Quartz wrapper and Runtime supervisor. They fill both execution
+slots with infinite attempts, observe ownership renewal, force-stop one tree
+while preserving its sibling, enforce the 30-second timeout grace, and reject a
+late renewal after the monotonic safety deadline despite host UTC skew. Memory
+business state in these tests is not proof of SQL fencing or durable stop.
+Publication tests also invoke the actual generic wrapper across lost publication
+and completion acknowledgements. SQL-only fixtures remain separate; use the
+exact migration/setup commands in [database.md](database.md).
+
+`POST /api/executions/{executionId}/stop` accepts
+`{ "force": false, "confirmForce": false, "reason": "operator request" }`.
+Force requires both booleans to be true and a nonblank reason. The request uses
+the same session CSRF header and Origin as other management commands.
+`POST /api/executions/{executionId}/resolve` accepts
+`{ "decision": "Cancel", "reason": "target checked; possible overlap acknowledged" }`;
+other decisions are `ReconcileSucceeded` and `AuthorizeRetry`. Both routes require
+Manage. The response is a command receipt after the stop/decision and audit commit.

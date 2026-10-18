@@ -6,6 +6,10 @@ using System.Text.Json;
 using Quartz;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Dispatch;
+using WorkerDock.Application.Executions;
+using WorkerDock.Contracts.Execution;
+using WorkerDock.Contracts.Templates;
+using WorkerDock.Infrastructure.Executions;
 using WorkerDock.Quartz.Dispatch;
 using WorkerDock.Quartz.Hosting;
 
@@ -13,6 +17,55 @@ namespace WorkerDock.IntegrationTests;
 
 public sealed class PublicationRecoveryTests
 {
+    [Theory]
+    [InlineData("AfterWrite")]
+    [InlineData("BeforeAck")]
+    [InlineData("AfterAck")]
+    [InlineData("CompletionAck")]
+    public async Task Actual_wrapper_recovery_after_consumption_does_not_repeat_an_authorized_attempt(string fault)
+    {
+        var factory = new ActualWrapperFactory();
+        await using var fixture = await Fixture.Create(factory);
+        var descriptor = AttemptLifecycleTests.Descriptor() with { ExecutionId = fixture.Store.Envelope.EntityId, TemplateId = "template-probe" };
+        var attempts = new InMemoryAttemptStore(fixture.Clock, descriptor, AttemptLifecycleTests.Policy());
+        fixture.Store.Envelope = fixture.Store.Envelope with { IntentId = attempts.Intent.DeliveryId };
+        var runner = new CompletingRunner(attempts, () => { fixture.Store.State = attempts.Snapshot.State; fixture.Store.AttemptExists = true; }, fault == "CompletionAck");
+        factory.Job = new ExecuteTemplateJob(attempts, runner, new("publication"), fixture.Clock);
+        fixture.Fault = fault;
+        await new DispatchReconciler(fixture.Store, fixture.Store, fixture.NamedPublisher(), fixture.Clock).ReconcileAsync(20, default);
+        await fixture.Execution.Start();
+        await runner.Committed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (await fixture.Execution.GetTrigger(QuartzPublisher.TriggerKey(fixture.Intent), timeout.Token) is not null)
+            await Task.Delay(10, timeout.Token);
+        fixture.Fault = null; fixture.Clock.Now += TimeSpan.FromMinutes(2);
+        await new DispatchReconciler(fixture.Store, fixture.Store, fixture.NamedPublisher(), fixture.Clock).ReconcileAsync(20, default);
+        Assert.Equal("Succeeded", attempts.Snapshot.State);
+        Assert.Equal(1, runner.Entries);
+        Assert.True(fixture.Store.Acknowledged);
+        Assert.Null(await fixture.Execution.GetTrigger(QuartzPublisher.TriggerKey(fixture.Intent)));
+        Assert.Equal("Completed", (await attempts.BeginAsync(attempts.Intent, "recovered-boot", default)).Decision);
+        await fixture.Execution.Shutdown(true);
+    }
+
+    private sealed class ActualWrapperFactory : IJobFactory
+    {
+        public IJob Job = null!;
+        public ValueTask<JobScope> CreateJob(TriggerFiredBundle bundle, IScheduler scheduler, CancellationToken cancellationToken = default) => ValueTask.FromResult(new JobScope(Job));
+        public ValueTask ReturnJob(JobScope scope, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+    }
+    private sealed class CompletingRunner(IAttemptStore store, Action afterCommit, bool loseAcknowledgement) : IAttemptRunner
+    {
+        public int Entries;
+        public readonly TaskCompletionSource Committed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async ValueTask RunAsync(AttemptLease lease, ExecutionDescriptor descriptor, long authorizationStarted, CancellationToken ct)
+        {
+            Interlocked.Increment(ref Entries);
+            await store.CompleteAsync(lease, new(new TemplateResult("Success", "Ok", false, JsonSerializer.SerializeToElement(new { }), null), "Completed", true, false), ct);
+            afterCommit(); Committed.SetResult();
+            if (loseAcknowledgement) throw new WorkerDockException("PersistenceUnavailable");
+        }
+    }
     [Theory]
     [InlineData("BeforeWrite")]
     [InlineData("AfterWrite")]
@@ -382,12 +435,12 @@ public sealed class PublicationRecoveryTests
         public QuartzPublisher Publisher() => new(Handle, typeof(PublicationProbe));
         public QuartzPublisher NamedPublisher() => new(Handle, (JobType)"WorkerDock.Quartz.Dispatch.ExecuteTemplateJob, WorkerDock.Quartz");
         public ValueTask<int> Reconcile() => new DispatchReconciler(Store, Store, Publisher(), Clock).ReconcileAsync(20, default);
-        public static async Task<Fixture> Create()
+        public static async Task<Fixture> Create(IJobFactory? jobFactory = null)
         {
             var id = Guid.NewGuid();
             var topology = QuartzTopology.CreateMemory(id, "Development");
             var node = new QuartzNodeOptions(id, "publication", 1);
-            var execution = await topology.CreateExecutionAsync(node, default);
+            var execution = jobFactory is null ? await topology.CreateExecutionAsync(node, default) : await topology.CreateExecutionAsync(node, jobFactory, default);
             var facade = await topology.CreateExecutionPublisherAsync(node, default);
             var proxy = DispatchProxy.Create<IScheduler, FaultScheduler>();
             ((FaultScheduler)proxy).Inner = facade;

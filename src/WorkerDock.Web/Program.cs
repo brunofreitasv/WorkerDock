@@ -2,6 +2,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Tenants;
 using WorkerDock.Application.Jobs;
+using WorkerDock.Application.Executions;
+using WorkerDock.Infrastructure.Executions;
 using WorkerDock.Domain.Tenants;
 using WorkerDock.Infrastructure.Persistence;
 using WorkerDock.Infrastructure.Authentication;
@@ -33,6 +35,15 @@ builder.Services.TryAddSingleton<ITenantSettingsService>(provider =>
     var connection = config["Tenant:ConnectionString"];
     return !string.IsNullOrWhiteSpace(connection) ? new TenantSettingsService(new(connection, instanceId)) : new UnavailableTenantSettingsService();
 });
+builder.Services.TryAddSingleton<IExecutionControls>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    if (config["Tenant:Adapter"] == "Memory")
+        return provider.GetRequiredService<IHostEnvironment>().IsDevelopment() && provider.GetRequiredService<IJobCommands>() is IExecutionControls controls
+            ? controls : new UnavailableExecutionControls();
+    return Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlExecutionControls(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableExecutionControls();
+});
 var app = builder.Build();
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
@@ -44,6 +55,7 @@ app.UseWorkerDockSessions();
 app.UseAuthorization();
 app.MapWorkerDockSessions();
 app.MapJobCommands();
+app.MapExecutionControls();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 

@@ -114,8 +114,8 @@ $env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string
 dotnet run --project src/WorkerDock.Scheduler -c Release
 ```
 
-This starts only the control scheduler. Deploy Task08's Worker before enabling
-execution acquisition; Task06 stores its exact future wrapper identity. Use the
+This starts only the control scheduler. Deploy the Worker and complete its
+capability/policy registration before enabling execution acquisition. Use the
 runtime user with WorkerDockRuntime membership, never the migrator identity.
 The Scheduler never creates or changes a database/schema itself.
 
@@ -140,4 +140,65 @@ After all services stop, only an empty disposable projection schema may use:
 
 ```powershell
 dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0003a_projection
+```
+
+## Attempt ownership migration and SQL proof
+
+Apply `0003b_attempts` after `0003a_projection`; the manifest orders every
+predecessor automatically. The `0004_templates` slot remains reserved. This
+paired migration adds durable StopRequested/ForceStop markers, attempt exit/effect
+certainty, and indexed minimal AttemptStatusEvents. It grants the runtime role
+attempt mutation, permit release, worker/capability/policy reads, and status-event
+append/read rights, without schema rights or direct Quartz changes. Rollback
+refuses any attempts/status events or persisted stop markers. Stop every runtime
+process first; populated histories require backup/restore.
+
+For the previously provisioned dedicated tenant database and restricted runtime
+identity, from the repository root:
+
+```powershell
+$env:WORKERDOCK_INSTANCE_ID='<stable-dedicated-tenant-guid>'
+$env:WORKERDOCK_SQL='<dedicated-tenant-migrator-connection-string>'
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0003b_attempts
+dotnet build WorkerDock.slnx -c Release
+$env:Tenant__InstanceId=$env:WORKERDOCK_INSTANCE_ID
+$env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
+$env:Executor__Path=(Resolve-Path 'src/WorkerDock.Executor/bin/Release/net10.0-windows/WorkerDock.Executor.exe').Path
+$env:Worker__HostCeiling='10'
+$env:Worker__DrainSeconds='40'
+dotnet run --project src/WorkerDock.Worker -c Release
+```
+
+Start `dotnet run --project src/WorkerDock.Scheduler -c Release` in another shell
+with the same tenant runtime configuration. The Scheduler starts only short
+control/recovery/projection jobs; the Worker starts only execution acquisition.
+Task08 deliberately fails admission closed until Task09 registers the current
+boot/capabilities and opens effective policy gates. The Executor currently has no
+production template factories; trusted built-in package composition arrives in
+Task10. Do not bypass those gates to make an incomplete installation run work.
+Executor path/arguments/catalog digests are administrator deployment configuration,
+never job-supplied code. Task08 adds the foreground Worker composition root;
+Windows service packaging remains part of deployment work.
+
+Run the real fixtures only against the authorized disposable SQL instance:
+
+```powershell
+$env:WORKERDOCK_TEST_SQL='<disposable-test-server-owner-connection-string>'
+$env:WORKERDOCK_TEST_SQL_RUNTIME='<same-server-distinct-restricted-login-connection-string>'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter FullyQualifiedName~AttemptSqlTests
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter FullyQualifiedName~ProjectionSqlTests
+```
+
+AttemptSqlTests applies through 0003b_attempts, uses the restricted runtime login,
+and checks competing boots, SQL-time expiry, stale generation/boot rejection,
+stop-before-success, concurrent expiry reviewers, safe descriptor identity and
+paired migration round trip under both supported snapshot settings. These SQL
+proofs remain pending while local SQL login/configuration is unavailable; the
+fixtures explicitly fail `SQL_TEST_BLOCKED` without both SQL variables. The full
+unfiltered solution suite retains those failures instead of silently skipping them.
+
+Only an empty disposable attempt schema may use this rollback:
+
+```powershell
+dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0003b_attempts
 ```

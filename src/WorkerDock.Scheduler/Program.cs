@@ -5,6 +5,8 @@ using Quartz;
 using Quartz.Extensibility;
 using WorkerDock.Application.Common;
 using WorkerDock.Infrastructure.Dispatch;
+using WorkerDock.Application.Executions;
+using WorkerDock.Infrastructure.Executions;
 using WorkerDock.Quartz.Dispatch;
 using WorkerDock.Quartz.Hosting;
 
@@ -24,13 +26,13 @@ internal sealed class SchedulerService(IConfiguration configuration) : Backgroun
         var node = new QuartzNodeOptions(instanceId, Guid.NewGuid().ToString("N"), 4);
         var handle = await topology.CreateExecutionPublisherAsync(node, stoppingToken);
         var store = new SqlProjectionStore(new(connection, instanceId));
-        // This exact trusted type is installed by Task08. Never run execution acquisition here.
-        var publisher = new QuartzPublisher(handle, (JobType)"WorkerDock.Quartz.Dispatch.ExecuteTemplateJob, WorkerDock.Quartz");
+        var publisher = new QuartzPublisher(handle, typeof(ExecuteTemplateJob));
         var reconciler = new DispatchReconciler(store, store, publisher, TimeProvider.System);
-        var control = await topology.CreateScheduleAsync(node, new MaintenanceFactory(reconciler), stoppingToken);
+        var control = await topology.CreateScheduleAsync(node, new MaintenanceFactory(reconciler, new SqlAttemptStore(new(connection, instanceId))), stoppingToken);
         try
         {
             await ProjectionJob.RegisterAsync(control, stoppingToken);
+            await RecoveryReviewJob.RegisterAsync(control, stoppingToken);
             await control.Start(stoppingToken);
             await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
         }
@@ -43,12 +45,14 @@ internal sealed class SchedulerService(IConfiguration configuration) : Backgroun
         }
     }
 
-    private sealed class MaintenanceFactory(DispatchReconciler reconciler) : IJobFactory
+    private sealed class MaintenanceFactory(DispatchReconciler reconciler, IAttemptStore attempts) : IJobFactory
     {
         public ValueTask<JobScope> CreateJob(TriggerFiredBundle bundle, IScheduler scheduler, CancellationToken cancellationToken = default)
         {
-            if (bundle.JobDetail.JobType != typeof(ProjectionJob)) throw new SchedulerException("UnsupportedControlJob");
-            return ValueTask.FromResult(new JobScope(new ProjectionJob(reconciler)));
+            IJob job = bundle.JobDetail.JobType == typeof(ProjectionJob) ? new ProjectionJob(reconciler)
+                : bundle.JobDetail.JobType == typeof(RecoveryReviewJob) ? new RecoveryReviewJob(attempts)
+                : throw new SchedulerException("UnsupportedControlJob");
+            return ValueTask.FromResult(new JobScope(job));
         }
         public ValueTask ReturnJob(JobScope scope, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
     }

@@ -3,6 +3,10 @@ using System.Security.Cryptography;
 using System.Text;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Jobs;
+using WorkerDock.Application.Executions;
+using WorkerDock.Contracts.Execution;
+using WorkerDock.Infrastructure.Executions;
+using System.Text.Json;
 using WorkerDock.Domain.Jobs;
 
 namespace WorkerDock.Infrastructure.Jobs;
@@ -10,12 +14,13 @@ namespace WorkerDock.Infrastructure.Jobs;
 public sealed record MemoryExecution(Guid ExecutionId, Guid JobId, long JobRevision, Guid? ProfileId,
     string State, string IdempotencyKey);
 
-public sealed class InMemoryJobCommands : IJobCommands
+public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
 {
     private readonly TimeProvider clock;
     private readonly Func<string, CancellationToken, ValueTask>? beforeCommit;
     private readonly SemaphoreSlim gate = new(1, 1);
     private State state = new([], [], [], [], [], [], []);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, InMemoryAttemptStore> attemptStores = new();
 
     public InMemoryJobCommands(TimeProvider clock, IEnumerable<JobRevision>? enabledSeeds = null,
         Func<string, CancellationToken, ValueTask>? beforeCommit = null,
@@ -43,7 +48,13 @@ public sealed class InMemoryJobCommands : IJobCommands
     public ImmutableArray<MemoryJobAudit> AuditEvents => Volatile.Read(ref state).Audits;
     public int OutboxCount => Volatile.Read(ref state).Outbox.Length;
     public int ExecutionCount => Volatile.Read(ref state).Executions.Count;
-    public MemoryExecution? GetExecution(Guid id) => Volatile.Read(ref state).Executions.GetValueOrDefault(id);
+    public MemoryExecution? GetExecution(Guid id)
+    {
+        var execution = Volatile.Read(ref state).Executions.GetValueOrDefault(id);
+        return execution is not null && attemptStores.TryGetValue(id, out var attempts)
+            ? execution with { State = attempts.Snapshot.State } : execution;
+    }
+    public InMemoryAttemptStore? GetAttemptStore(Guid id) => attemptStores.GetValueOrDefault(id);
     public JobRevision? GetRevision(Guid jobId, long revision) => Volatile.Read(ref state).Revisions.GetValueOrDefault((jobId, revision));
 
     public async ValueTask<CommandReceipt> SaveAsync(JobRevision proposed, byte[]? expectedVersion, ActorContext actor, CancellationToken ct)
@@ -114,6 +125,9 @@ public sealed class InMemoryJobCommands : IJobCommands
                 Outbox = before.Outbox.Add(new(Guid.NewGuid(), "ExecutionDispatch", executionId,
                     editor.Revision.Revision, digest, now))
             });
+            attemptStores[executionId] = new InMemoryAttemptStore(clock,
+                new ExecutionDescriptor(executionId, 1, editor.Revision.TemplateId, editor.Revision.TemplateVersion,
+                    execution.IdempotencyKey, editor.Revision.Configuration, null, null, JsonSerializer.SerializeToElement(new { }), null), editor.Revision.Policy);
             return receipt;
         }
         finally { gate.Release(); }
@@ -125,6 +139,30 @@ public sealed class InMemoryJobCommands : IJobCommands
         return Volatile.Read(ref state).Commands.TryGetValue(commandId, out var receipt)
             ? ValueTask.FromResult(receipt)
             : ValueTask.FromException<CommandReceipt>(new WorkerDockException("CommandNotFound"));
+    }
+
+    public ValueTask<CommandReceipt> StopAsync(Guid executionId, bool force, string reason, ActorContext actor, CancellationToken ct) =>
+        ControlAsync(executionId, "Stop", actor, store => store.StopAsync(executionId, force, reason, actor, ct), ct);
+    public ValueTask<CommandReceipt> ResolveAsync(Guid executionId, string decision, string reason, ActorContext actor, CancellationToken ct) =>
+        ControlAsync(executionId, decision, actor, store => store.ResolveAsync(executionId, decision, reason, actor, ct), ct);
+    private async ValueTask<CommandReceipt> ControlAsync(Guid id, string kind, ActorContext actor,
+        Func<InMemoryAttemptStore, ValueTask<CommandReceipt>> action, CancellationToken ct)
+    {
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (!attemptStores.TryGetValue(id, out var store)) throw new WorkerDockException("ExecutionNotFound");
+            await CheckPhaseAsync("Audit", ct);
+            var receipt = await action(store);
+            Volatile.Write(ref state, state with
+            {
+                Commands = state.Commands.Add(receipt.CommandId, receipt),
+                Audits = state.Audits.Add(new(Guid.NewGuid(), kind, id, null, 1, receipt.State, actor.Subject,
+                    actor.AuthenticationMode, actor.CorrelationId, clock.GetUtcNow()))
+            });
+            return receipt;
+        }
+        finally { gate.Release(); }
     }
 
     public ValueTask<JobEditorDto> GetEditableAsync(Guid jobId, CancellationToken ct)

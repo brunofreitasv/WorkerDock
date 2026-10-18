@@ -25,6 +25,7 @@ public sealed class QuartzTopology(QuartzConnections connections) : IAsyncDispos
     public ValueTask<IScheduler> CreateScheduleAsync(QuartzNodeOptions options, CancellationToken ct) => CreateAsync(options, false, false, ct);
     public ValueTask<IScheduler> CreateScheduleAsync(QuartzNodeOptions options, global::Quartz.Extensibility.IJobFactory jobFactory, CancellationToken ct) => CreateAsync(options, false, false, ct, jobFactory);
     public ValueTask<IScheduler> CreateExecutionAsync(QuartzNodeOptions options, CancellationToken ct) => CreateAsync(options, true, false, ct);
+    public ValueTask<IScheduler> CreateExecutionAsync(QuartzNodeOptions options, global::Quartz.Extensibility.IJobFactory jobFactory, CancellationToken ct) => CreateAsync(options, true, false, ct, jobFactory);
     public ValueTask<IScheduler> CreateExecutionPublisherAsync(QuartzNodeOptions options, CancellationToken ct) => CreateAsync(options, true, true, ct);
 
     private async ValueTask<IScheduler> CreateAsync(QuartzNodeOptions options, bool execution, bool publisher, CancellationToken ct, global::Quartz.Extensibility.IJobFactory? jobFactory = null)

@@ -10,6 +10,7 @@
     <Project Path="src/WorkerDock.Runtime/WorkerDock.Runtime.csproj" />
     <Project Path="src/WorkerDock.Scheduler/WorkerDock.Scheduler.csproj" />
     <Project Path="src/WorkerDock.Web/WorkerDock.Web.csproj" />
+    <Project Path="src/WorkerDock.Worker/WorkerDock.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WorkerDock.IntegrationTests/WorkerDock.IntegrationTests.csproj" />
