@@ -17,3 +17,20 @@ Implemented `workerdock.http@1.0.0` as an independent template project, register
 ## Scope review
 
 Only Task12 HTTP project, outbound policy and connection factory, Worker/Executor registrations, solution/project references and lockfiles, focused integration tests, and the two requested docs are included. Task12A and Task13 were not implemented. `git diff --check` passes.
+
+## Independent review fix round 1/5
+
+At base `a06eb09`, three Important findings were reproduced and fixed:
+
+- RED: a noncooperative destination preflight with no execution deadline exceeded the test's 8-second guard. GREEN: the template now gives destination approval a linked five-second timeout and awaits with that token; the regression verifies cancellation, `HttpTimeout`, and no effects. The configured client preflight is independently bounded as well.
+- RED: a real bodyless POST to a controlled server that recorded each request and reset the connection before replying was transmitted four times by `SocketsHttpHandler`. GREEN: bodyless requests now carry an empty content object, preventing replay; the server records exactly one POST and the result remains uncertain (`HttpTransportFailure`, effects possible).
+- RED: direct `CreateHandler` use with an HTTPS-only policy sent a request to an HTTP URI without throwing. GREEN: `ConnectCallback` validates the original request URI scheme and port from `InitialRequestMessage`; the HTTP request is denied before the server accepts a socket.
+
+Verification after the fixes:
+
+- Three focused review regressions: 3 passed, 0 failed.
+- All HTTP/outbound tests: 31 passed, 0 failed.
+- SQL-independent integration suite: 172 passed, 0 failed.
+- Unit suite: 31 passed, 0 failed.
+- `dotnet build WorkerDock.slnx -c Release --no-restore`: succeeded, 0 warnings, 0 errors.
+- Existing process-stress concern and SQL_TEST_BLOCKED status remain as recorded above; this fix round changes neither.

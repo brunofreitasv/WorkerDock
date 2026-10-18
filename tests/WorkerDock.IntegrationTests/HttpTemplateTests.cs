@@ -99,6 +99,49 @@ public sealed class OutboundPolicyTests
 public sealed class HttpTemplateTests
 {
     [Fact]
+    public async Task Direct_handler_rejects_http_when_policy_disallows_it()
+    {
+        await using var server = new ControlledHttpServer("200 OK", "", "no-request-expected");
+        IOutboundPolicy policy = new HttpsOnlyTestPolicy(new("allowed.test", server.Port, [IPAddress.Loopback]));
+        using var client = new HttpClient(new ValidatedConnectionFactory(policy).CreateHandler("tenant-jobs"));
+        await Assert.ThrowsAnyAsync<HttpRequestException>(() => client.GetAsync($"http://allowed.test:{server.Port}/"));
+        Assert.Equal(0, server.AcceptCount);
+    }
+
+    [Fact]
+    public async Task Unbounded_execution_still_bounds_noncooperative_destination_preflight()
+    {
+        var resolverStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var preflightToken = CancellationToken.None;
+        using var client = new HttpClient(new DelegateHandler((_, _) => throw new InvalidOperationException("request must not be sent")));
+        var template = new HttpTemplate(client, (_, ct) =>
+        {
+            preflightToken = ct;
+            resolverStarted.TrySetResult();
+            return new ValueTask(new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task);
+        });
+        var resultTask = template.ExecuteAsync(Context(Config("https://allowed.test", timeoutSeconds: 0), null), default).AsTask();
+        await resolverStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var result = await resultTask.WaitAsync(TimeSpan.FromSeconds(8));
+        Assert.Equal("HttpTimeout", result.SafeCode);
+        Assert.False(result.EffectsMayHaveOccurred);
+        Assert.True(preflightToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task Bodyless_post_is_not_retried_after_server_closes_before_response()
+    {
+        await using var server = new DropAfterRequestServer();
+        IOutboundPolicy policy = new FixedPolicy(new("allowed.test", server.Port, [IPAddress.Loopback]));
+        using var client = new ValidatedConnectionFactory(policy).CreateClient("tenant-jobs");
+        var template = new HttpTemplate(client, async (uri, ct) => { await policy.ResolveAsync(new(uri, "tenant-jobs"), ct); });
+        var result = await template.ExecuteAsync(Context(Config($"http://allowed.test:{server.Port}/", timeoutSeconds: 3, method: "POST"), DateTimeOffset.UtcNow.AddSeconds(5)), default);
+        Assert.Equal(1, await server.RequestCount.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal("HttpTransportFailure", result.SafeCode);
+        Assert.True(result.EffectsMayHaveOccurred);
+    }
+
+    [Fact]
     public void Descriptor_is_stable_and_defaults_to_safe_summary()
     {
         var template = new HttpTemplate(new HttpClient(new HttpClientHandler()));
@@ -296,10 +339,15 @@ public sealed class HttpTemplateTests
         Assert.True(result.EffectsMayHaveOccurred);
     }
 
-    private static JsonElement Config(string url, int? timeoutSeconds = null) => JsonSerializer.SerializeToElement(new { method = "GET", url, query = new { }, headers = new { }, secretHeaders = new { }, parameters = new { }, timeoutSeconds, successStatuses = Array.Empty<int>(), maxResponseBytes = 1024, responseMode = "SafeSummary" });
+    private static JsonElement Config(string url, int? timeoutSeconds = null, string method = "GET") => JsonSerializer.SerializeToElement(new { method, url, query = new { }, headers = new { }, secretHeaders = new { }, parameters = new { }, timeoutSeconds, successStatuses = Array.Empty<int>(), maxResponseBytes = 1024, responseMode = "SafeSummary" });
     private static TemplateExecutionContext Context(JsonElement configuration, DateTimeOffset? deadline, ISecretVault? secrets = null) => new(new(Guid.NewGuid(), 1, "workerdock.http", "1.0.0", "stable-key", configuration, null, null, JsonDocument.Parse("{}").RootElement, deadline), secrets ?? new NoSecrets(), new NoLog());
     private sealed class NoSecrets : ISecretVault { public ValueTask<SecretValue> ResolveAsync(SecretReference reference, CancellationToken ct) => throw new SecretUnavailableException(); }
     private sealed class FixedPolicy(ApprovedDestination destination) : IOutboundPolicy { public ValueTask<ApprovedDestination> ResolveAsync(OutboundTarget target, CancellationToken ct) => ValueTask.FromResult(destination); }
+    private sealed class HttpsOnlyTestPolicy(ApprovedDestination destination) : IOutboundPolicy
+    {
+        public ValueTask<ApprovedDestination> ResolveAsync(OutboundTarget target, CancellationToken ct) =>
+            target.Uri.Scheme == "https" ? ValueTask.FromResult(destination) : ValueTask.FromException<ApprovedDestination>(new OutboundPolicyException("OutboundPortDenied"));
+    }
     private sealed class NoLog : WorkerDock.Contracts.Logging.ISafeExecutionLog { public ValueTask WriteAsync(string eventCode, IReadOnlyDictionary<string, string> safeFields, CancellationToken ct) => ValueTask.CompletedTask; }
     private sealed class DelegateHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler { protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken); }
     private sealed class RotatingVault(params string[] values) : ISecretVault { private int _index; public ValueTask<SecretValue> ResolveAsync(SecretReference reference, CancellationToken ct) => ValueTask.FromResult(new SecretValue(values[Math.Min(Interlocked.Increment(ref _index) - 1, values.Length - 1)])); }
@@ -336,6 +384,42 @@ public sealed class HttpTemplateTests
             catch (SocketException) { }
         }
         public async ValueTask DisposeAsync() { _listener.Stop(); try { await _serverTask.WaitAsync(TimeSpan.FromSeconds(2)); } catch { } }
+    }
+
+    private sealed class DropAfterRequestServer : IAsyncDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        private readonly Task _serverTask;
+        private int _requestCount;
+        public DropAfterRequestServer()
+        {
+            _listener.Start(); Port = ((IPEndPoint)_listener.LocalEndpoint).Port; _serverTask = ServeAsync();
+        }
+        public int Port { get; }
+        public Task<int> RequestCount => _serverTask.ContinueWith(_ => Volatile.Read(ref _requestCount), TaskScheduler.Default);
+        private async Task ServeAsync()
+        {
+            using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            try
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    using var client = await _listener.AcceptTcpClientAsync(stop.Token);
+                    var stream = client.GetStream(); var one = new byte[1]; var matched = 0; var marker = new byte[] { 13, 10, 13, 10 };
+                    while (matched < marker.Length)
+                    {
+                        var read = await stream.ReadAsync(one, stop.Token); if (read == 0) break;
+                        matched = one[0] == marker[matched] ? matched + 1 : one[0] == 13 ? 1 : 0;
+                    }
+                    if (matched == marker.Length) Interlocked.Increment(ref _requestCount);
+                    client.Client.LingerState = new LingerOption(true, 0);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+            catch (SocketException) { }
+        }
+        public async ValueTask DisposeAsync() { _listener.Stop(); try { await _serverTask.WaitAsync(TimeSpan.FromSeconds(5)); } catch { } }
     }
 
     private sealed class TlsControlledServer : IAsyncDisposable

@@ -16,6 +16,7 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
     private const int MaxBodyLength = 65_536;
     private const int MaxResponseLimit = 2_097_152;
     private const int MaxRetryAfterSeconds = 86_400;
+    private static readonly TimeSpan DestinationPreflightTimeout = TimeSpan.FromSeconds(5);
     private static readonly HashSet<string> ForbiddenHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
         "Host", "Proxy-Authorization", "Proxy-Connection", "Connection", "Keep-Alive", "Transfer-Encoding",
@@ -62,7 +63,11 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
             if (config.TimeoutSeconds == 0 && context.Execution.DeadlineUtc is not null)
                 return Result("PermanentFailure", "HttpTimeoutInvalid", false);
             if (approveDestination is not null)
-                await approveDestination(uri, deadline.Token);
+            {
+                using var preflight = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+                preflight.CancelAfter(DestinationPreflightTimeout);
+                await approveDestination(uri, preflight.Token).AsTask().WaitAsync(preflight.Token);
+            }
 
             using var request = new HttpRequestMessage(new HttpMethod(config.Method), uri);
             if (config.Body is not null)
@@ -73,6 +78,7 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
                 if (config.ContentType is not null) request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(Substitute(config.ContentType, config, context.Execution.IdempotencyKey));
             }
             else if (config.ContentType is not null) return Result("PermanentFailure", "HttpConfigurationInvalid", false);
+            else request.Content = new ByteArrayContent([]);
 
             foreach (var header in config.Headers)
             {

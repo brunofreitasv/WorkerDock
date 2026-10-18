@@ -10,6 +10,8 @@ namespace WorkerDock.Infrastructure.Outbound;
 /// <summary>Connects only to freshly approved IPs while TLS continues to use the URI hostname for SNI and validation.</summary>
 public sealed class ValidatedConnectionFactory(IOutboundPolicy policy)
 {
+    private static readonly TimeSpan DestinationPreflightTimeout = TimeSpan.FromSeconds(5);
+
     public SocketsHttpHandler CreateHandler(string policyName)
     {
         if (policyName is not ("tenant-jobs" or "tenant-alerts" or "central-health")) throw new OutboundPolicyException("OutboundPolicyUnavailable");
@@ -37,8 +39,10 @@ public sealed class ValidatedConnectionFactory(IOutboundPolicy policy)
 
     private async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext context, string policyName, CancellationToken ct)
     {
-        var uri = new UriBuilder("https", context.DnsEndPoint.Host, context.DnsEndPoint.Port).Uri;
-        // Scheme is checked against the original request by ResolveAsync before the HTTP stack opens a socket.
+        var requestUri = context.InitialRequestMessage?.RequestUri;
+        if (requestUri is null || !requestUri.IsAbsoluteUri || requestUri.Scheme is not ("http" or "https") || requestUri.Port != context.DnsEndPoint.Port)
+            throw new OutboundDestinationDeniedException("OutboundTargetInvalid");
+        var uri = new UriBuilder(requestUri.Scheme, context.DnsEndPoint.Host, context.DnsEndPoint.Port).Uri;
         ApprovedDestination approved;
         try { approved = await policy.ResolveAsync(new(uri, policyName), ct); }
         catch (OutboundPolicyException error) { throw new OutboundDestinationDeniedException(error.SafeCode); }
@@ -69,7 +73,9 @@ public sealed class ValidatedConnectionFactory(IOutboundPolicy policy)
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request.RequestUri is null) throw new OutboundPolicyException("OutboundTargetInvalid");
-            try { await policy.ResolveAsync(new(request.RequestUri, policyName), cancellationToken); }
+            using var preflight = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            preflight.CancelAfter(DestinationPreflightTimeout);
+            try { await policy.ResolveAsync(new(request.RequestUri, policyName), preflight.Token).AsTask().WaitAsync(preflight.Token); }
             catch (OutboundPolicyException error) { throw new OutboundDestinationDeniedException(error.SafeCode); }
             return await base.SendAsync(request, cancellationToken);
         }
