@@ -63,8 +63,8 @@ public sealed class IntegrationSettingsTests
         var secondStore = jobs.GetAttemptStore(secondReceipt.TargetId)!;
         var secondLease = await secondStore.BeginAsync(secondStore.Intent, "boot", default);
         var secondDescriptor = await secondStore.GetDescriptorAsync(secondLease.Lease!, default);
-        var previous = firstDescriptor.IntegrationConfiguration.Deserialize<IntegrationConfigurationDto>()!;
-        var updated = secondDescriptor.IntegrationConfiguration.Deserialize<IntegrationConfigurationDto>()!;
+        var previous = IntegrationConfigurationJson.Deserialize(firstDescriptor.IntegrationConfiguration);
+        var updated = IntegrationConfigurationJson.Deserialize(secondDescriptor.IntegrationConfiguration);
         Assert.Empty(previous.Policies.Single(x => x.Name == "tenant-jobs").Hosts);
         Assert.Equal("api.example.test", Assert.Single(updated.Policies.Single(x => x.Name == "tenant-jobs").Hosts));
         Assert.NotEmpty(settings.AuditEvents);
@@ -109,10 +109,53 @@ public sealed class IntegrationSettingsTests
     {
         var settings = new InMemoryIntegrationSettings();
         var snapshot = await settings.GetSnapshotAsync(default);
-        var json = JsonSerializer.SerializeToElement(snapshot);
-        var policy = WorkerDock.Infrastructure.Outbound.OutboundPolicy.FromIntegrationConfiguration(json);
+        var descriptor = AttemptLifecycleTests.Descriptor() with { IntegrationConfiguration = IntegrationConfigurationJson.Serialize(snapshot) };
+        var policy = WorkerDock.Infrastructure.Outbound.OutboundPolicy.FromExecutionDescriptor(descriptor);
         await Assert.ThrowsAsync<WorkerDock.Application.Outbound.OutboundPolicyException>(async () =>
             await policy.ResolveAsync(new(new Uri("http://127.0.0.1/"), "tenant-jobs"), default));
+    }
+
+    [Fact]
+    public async Task Child_policy_uses_the_saved_host_port_and_http_options()
+    {
+        var settings = new InMemoryIntegrationSettings();
+        var actor = new ActorContext("manager", "Anonymous", Guid.NewGuid());
+        var current = await settings.GetEgressAsync("tenant-jobs", default);
+        await settings.SaveEgressAsync(current with { Hosts = ["8.8.8.8"], Ports = [8080], AllowHttp = true }, actor, default);
+        var snapshot = await settings.GetSnapshotAsync(default);
+        var descriptor = AttemptLifecycleTests.Descriptor() with { IntegrationConfiguration = IntegrationConfigurationJson.Serialize(snapshot) };
+        var policy = WorkerDock.Infrastructure.Outbound.OutboundPolicy.FromExecutionDescriptor(descriptor);
+
+        await policy.ResolveAsync(new(new Uri("http://8.8.8.8:8080/"), "tenant-jobs"), default);
+    }
+
+    [Fact]
+    public async Task Retry_attempt_uses_latest_settings_revision_while_first_attempt_keeps_its_snapshot()
+    {
+        var settings = new InMemoryIntegrationSettings();
+        var clock = new AttemptLifecycleTests.Clock();
+        var actor = new ActorContext("manager", "Anonymous", Guid.NewGuid());
+        var job = new WorkerDock.Domain.Jobs.JobRevision(Guid.NewGuid(), 1, "HTTP", "workerdock.http", "1.0.0",
+            JsonSerializer.SerializeToElement(new { }), null, AttemptLifecycleTests.Policy(attempts: 2));
+        var jobs = new InMemoryJobCommands(clock, [job], integrationSettings: settings);
+        var receipt = await jobs.RunNowAsync(job.JobId, "same-execution-retry", actor, default);
+        var store = jobs.GetAttemptStore(receipt.TargetId)!;
+        var firstLease = (await store.BeginAsync(store.Intent, "boot", default)).Lease!;
+        var firstDescriptor = await store.GetDescriptorAsync(firstLease, default);
+        await store.CompleteAsync(firstLease, new(new WorkerDock.Contracts.Templates.TemplateResult("TransientFailure", "Busy", false,
+            JsonSerializer.SerializeToElement(new { }), null), "Completed", true, false), default);
+
+        var current = await settings.GetEgressAsync("tenant-jobs", default);
+        await settings.SaveEgressAsync(current with { Hosts = ["api.example.test"] }, actor, default);
+        var retry = Assert.Single(store.Retries);
+        clock.Now = retry.DueUtc;
+        var secondLease = (await store.BeginAsync(retry, "boot", default)).Lease!;
+        var secondDescriptor = await store.GetDescriptorAsync(secondLease, default);
+
+        var first = IntegrationConfigurationJson.Deserialize(firstDescriptor.IntegrationConfiguration);
+        var second = IntegrationConfigurationJson.Deserialize(secondDescriptor.IntegrationConfiguration);
+        Assert.Empty(first.Policies.Single(x => x.Name == "tenant-jobs").Hosts);
+        Assert.Equal("api.example.test", Assert.Single(second.Policies.Single(x => x.Name == "tenant-jobs").Hosts));
     }
 
     private static HttpRequestMessage Request(HttpMethod method, string path, object body, string csrf, string? etag = null)

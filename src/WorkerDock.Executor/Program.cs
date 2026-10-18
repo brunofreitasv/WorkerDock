@@ -11,9 +11,7 @@ internal static class Program
         // Add only explicit references to reviewed installed packages. No discovery from job input.
         descriptor =>
         {
-            var policy = new OutboundPolicy();
-            if (descriptor.IntegrationConfiguration.ValueKind == System.Text.Json.JsonValueKind.Object && descriptor.IntegrationConfiguration.TryGetProperty("version", out _))
-                policy = OutboundPolicy.FromIntegrationConfiguration(descriptor.IntegrationConfiguration);
+            var policy = OutboundPolicy.FromExecutionDescriptor(descriptor);
             var client = new ValidatedConnectionFactory(policy).CreateClient("tenant-jobs");
             return [new WorkerDock.Templates.SqlServer.SqlTemplate(), new HttpTemplate(client, async (uri, ct) =>
             {

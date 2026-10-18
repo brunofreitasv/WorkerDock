@@ -24,3 +24,12 @@ Migration hashes verified against database/tenant/manifest.json:
 - up: 91469EB10137B347418F41488BE03A221BAD16131FD87DF113D2A07DD38B67D5
 - down: B1A84221D9C15C19C9671B222AB5EFB6D213EBFE4339FEB3AD31378FC3C31859
 
+## Reviewer fix round 1/5 (base 37d43bf)
+
+- RED: the custom child-policy test failed with `OutboundPortDenied` because the PascalCase snapshot did not satisfy the child's case-sensitive `version` lookup. The same-execution retry test confirmed the second attempt retained the old empty host list.
+- GREEN: settings snapshots now use one web-cased serializer/deserializer, the child composition selects integration policy through a shared descriptor helper, and the in-memory attempt store captures one settings revision per attempt ordinal. Existing child descriptors remain unchanged; a retry loads the latest settings.
+- Added integration coverage proving an `http://8.8.8.8:8080/` destination is resolved under the saved tenant policy, plus a retry on the same execution where the first descriptor retains its old revision and the second reads the new host.
+- Alert consumer search found no alert-delivery implementation in the current source tree. Task12A persists and validates the `tenant-alerts` policy; a later stage must wire the alert sink to this policy. No delivery work was added here.
+- Original SQL_TEST_BLOCKED and PLAYWRIGHT_BLOCKED environment limitations remain unchanged.
+- Verification: focused Task12A settings tests passed 5/5; complete SQL-independent integration suite passed 247/247; unit suite passed 31/31; ProcessTests passed 33/33; Executor Release build passed with 0 warnings/errors.
+

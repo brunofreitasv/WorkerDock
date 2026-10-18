@@ -113,8 +113,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             WorkerDock.Contracts.Connections.ConnectionProfileRevision? pinnedProfile=null;
             if(editor.Revision.ProfileId is {} profileId)
                 pinnedProfile=profiles is not null ? (await profiles.GetCurrentAsync(profileId,ct)).Current : throw new WorkerDockException("ProfileUnavailable");
-            var integration = integrationSettings is null ? JsonSerializer.SerializeToElement(new { version = 1, vaultRevision = 1, providerId = "workerdock.environment", publicOptions = new { }, policies = Array.Empty<object>() })
-                : JsonSerializer.SerializeToElement(await integrationSettings.GetSnapshotAsync(ct));
+            var integration = JsonSerializer.SerializeToElement(new { version = 1, vaultRevision = 1, providerId = "workerdock.environment", publicOptions = new { }, policies = Array.Empty<object>() });
             var executionId = Guid.NewGuid();
             var receipt = new CommandReceipt(Guid.NewGuid(), executionId, "Pending");
             var execution = new MemoryExecution(executionId, jobId, editor.Revision.Revision,
@@ -136,7 +135,9 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             });
             attemptStores[executionId] = new InMemoryAttemptStore(clock,
                 new ExecutionDescriptor(executionId, 1, editor.Revision.TemplateId, editor.Revision.TemplateVersion,
-                    execution.IdempotencyKey, editor.Revision.Configuration, pinnedProfile?.ProfileRevisionId, pinnedProfile is null ? null : JsonSerializer.SerializeToElement(pinnedProfile), integration, null), editor.Revision.Policy, committed: snapshot => SettleCommands(executionId, snapshot));
+                    execution.IdempotencyKey, editor.Revision.Configuration, pinnedProfile?.ProfileRevisionId, pinnedProfile is null ? null : JsonSerializer.SerializeToElement(pinnedProfile), integration, null), editor.Revision.Policy,
+                committed: snapshot => SettleCommands(executionId, snapshot),
+                integrationSnapshot: integrationSettings is null ? null : async token => IntegrationConfigurationJson.Serialize(await integrationSettings.GetSnapshotAsync(token)));
             return receipt;
         }
         finally { gate.Release(); }

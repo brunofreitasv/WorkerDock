@@ -10,7 +10,7 @@ namespace WorkerDock.Infrastructure.Executions;
 // One transaction's data. SQL supplies its own clock and persists changes under the tenant business lock.
 internal sealed class AttemptLifecycle
 {
-    public required ExecutionDescriptor Descriptor { get; init; }
+    public required ExecutionDescriptor Descriptor { get; set; }
     public required ExecutionPolicy Policy { get; init; }
     public required DispatchIntent Intent { get; set; }
     public required Guid JobId { get; init; }

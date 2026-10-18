@@ -5,6 +5,7 @@ using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Dispatch;
 using WorkerDock.Application.Executions;
+using WorkerDock.Application.Settings;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Persistence;
@@ -29,7 +30,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
                 var descriptor = data.GetDescriptor(lease, now);
                 await SaveAsync(connection, transaction, data, previous, previousState, previousState == "Running" && previous!.ExpiresUtc <= now, token);
                 var snapshot = await SqlIntegrationSettings.ReadSnapshotAsync(connection, transaction, token);
-                return descriptor with { IntegrationConfiguration = JsonSerializer.SerializeToElement(snapshot) };
+                return descriptor with { IntegrationConfiguration = IntegrationConfigurationJson.Serialize(snapshot) };
             }, ct);
         }
         catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }

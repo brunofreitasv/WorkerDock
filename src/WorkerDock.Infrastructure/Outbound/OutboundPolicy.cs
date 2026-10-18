@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using WorkerDock.Application.Outbound;
 using WorkerDock.Application.Settings;
 using WorkerDock.Infrastructure.Settings;
+using WorkerDock.Contracts.Execution;
 using System.Text.Json;
 
 namespace WorkerDock.Infrastructure.Outbound;
@@ -47,7 +48,7 @@ public sealed class OutboundPolicy : IOutboundPolicy
     {
         try
         {
-            var snapshot = configuration.Deserialize<IntegrationConfigurationDto>() ?? throw new OutboundPolicyException("OutboundPolicyInvalid");
+            var snapshot = IntegrationConfigurationJson.Deserialize(configuration);
             if (snapshot.Version != 1 || snapshot.ProviderId != "workerdock.environment" || snapshot.Policies.Count != 2)
                 throw new OutboundPolicyException("OutboundPolicyInvalid");
             var rules = new Dictionary<string, OutboundPolicyRule>(StringComparer.Ordinal);
@@ -61,6 +62,14 @@ public sealed class OutboundPolicy : IOutboundPolicy
         }
         catch (OutboundPolicyException) { throw; }
         catch { throw new OutboundPolicyException("OutboundPolicyInvalid"); }
+    }
+
+    public static OutboundPolicy FromExecutionDescriptor(ExecutionDescriptor descriptor)
+    {
+        var configuration = descriptor.IntegrationConfiguration;
+        return configuration.ValueKind == JsonValueKind.Object && configuration.TryGetProperty("version", out _)
+            ? FromIntegrationConfiguration(configuration)
+            : new OutboundPolicy();
     }
 
     public async ValueTask<ApprovedDestination> ResolveAsync(OutboundTarget target, CancellationToken ct)

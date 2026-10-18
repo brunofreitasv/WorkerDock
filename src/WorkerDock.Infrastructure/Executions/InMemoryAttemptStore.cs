@@ -5,6 +5,7 @@ using WorkerDock.Application.Jobs;
 using WorkerDock.Application.Workers;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Domain.Jobs;
+using System.Text.Json;
 
 namespace WorkerDock.Infrastructure.Executions;
 
@@ -16,13 +17,17 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
     private readonly TimeProvider clock;
     private readonly ICapacityStore? capacity;
     private readonly Action<AttemptSnapshot>? committed;
+    private readonly Func<CancellationToken, ValueTask<JsonElement>>? integrationSnapshot;
+    private readonly SemaphoreSlim descriptorRefresh = new(1, 1);
+    private int snapshotOrdinal;
     private readonly object gate = new();
     private readonly AttemptLifecycle data;
     private readonly List<DispatchIntent> retries = [];
     private readonly List<MemoryExecutionAudit> audits = [];
-    public InMemoryAttemptStore(TimeProvider clock, ExecutionDescriptor descriptor, ExecutionPolicy policy, ICapacityStore? capacity = null, Action<AttemptSnapshot>? committed = null)
+    public InMemoryAttemptStore(TimeProvider clock, ExecutionDescriptor descriptor, ExecutionPolicy policy, ICapacityStore? capacity = null, Action<AttemptSnapshot>? committed = null,
+        Func<CancellationToken, ValueTask<JsonElement>>? integrationSnapshot = null)
     {
-        this.clock = clock; this.capacity = capacity; this.committed = committed;
+        this.clock = clock; this.capacity = capacity; this.committed = committed; this.integrationSnapshot = integrationSnapshot;
         Intent = new(Guid.NewGuid(), descriptor.ExecutionId, 1, descriptor.TemplateId, clock.GetUtcNow(), policy.Priority, 1, "");
         Intent = Intent with { PayloadDigest = Intent.ComputeDigest() };
         data = new() { Descriptor = descriptor, Policy = policy, Intent = Intent, JobId = Guid.NewGuid() };
@@ -42,7 +47,26 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
             Notify(); return result;
         }
     }, ct);
-    public ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct) => Run(() => data.GetDescriptor(lease, clock.GetUtcNow()), ct);
+    public async ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct)
+    {
+        await descriptorRefresh.WaitAsync(ct);
+        try
+        {
+            var cached = await Run(() => (snapshotOrdinal == lease.Ordinal, data.GetDescriptor(lease, clock.GetUtcNow())), ct);
+            if (cached.Item1 || integrationSnapshot is null) return cached.Item2;
+            var snapshot = (await integrationSnapshot(ct)).Clone();
+            return await Run(() =>
+            {
+                if (snapshotOrdinal != lease.Ordinal)
+                {
+                    data.Descriptor = data.Descriptor with { IntegrationConfiguration = snapshot };
+                    snapshotOrdinal = lease.Ordinal;
+                }
+                return data.GetDescriptor(lease, clock.GetUtcNow());
+            }, ct);
+        }
+        finally { descriptorRefresh.Release(); }
+    }
     public ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct) => Run(() => data.Renew(lease, clock.GetUtcNow()), ct);
     public async ValueTask CompleteAsync(AttemptLease lease, AttemptCompletion completion, CancellationToken ct) =>
         await Run(() => { data.Complete(lease, completion, clock.GetUtcNow()); return true; }, ct);
