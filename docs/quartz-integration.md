@@ -11,8 +11,8 @@ scheduler name, compatible limits, and distinct boot IDs.
 The public creation APIs are `CreateScheduleAsync`, `CreateExecutionAsync`, and
 `CreateExecutionPublisherAsync`, each returning `IScheduler`. The SQL publisher
 has its own handle with `ZeroSizeThreadPool` and is never started. Its facade
-permits single-job `ScheduleJob` and `AddJob` writes with only string
-`ExecutionId`, `DeliveryId`, and `AttemptOrdinal` job data. It denies starting,
+permits single-job `ScheduleJob` and `AddJob` writes with string identity metadata
+and public identity/status reads. It denies starting,
 rescheduling, deletion, and other scheduler administration. The execution
 scheduler is the only handle that starts worker jobs. Both SQL stores use
 clustering, string job data, `System.Text.Json`, locked trigger acquisition,
@@ -128,3 +128,70 @@ Schedule validation codes for the later editor use these English / pt-BR texts:
 | InvalidLocalOffset | The selected offset is not valid for this time and zone. | O deslocamento selecionado não é válido para este horário e fuso. |
 | InvalidLocalTimeKind | Supply a local wall time without an inferred UTC offset. | Informe um horário local sem deslocamento UTC inferido. |
 | InvalidLocalTime | The local time is outside the supported instant range. | O horário local está fora do intervalo de instantes compatível. |
+
+## Dispatch publication and reconciliation
+
+One common `ProjectionEnvelope` reads the existing `dbo.Outbox`; its `IntentId`
+is the outbox EventId, distinct from ExecutionId. Version 1 allowlists
+ExecutionDispatch, ScheduleProjection and AlertDispatch. Only ExecutionDispatch
+has a decoder in Task06. Unknown kinds, the two deferred kinds and unsupported
+versions remain failed with `UnsupportedProjection`, never acknowledged.
+Execution payloads contain `executionId`, `jobRevision` and optional
+`attemptOrdinal` (default 1). No configuration/profile/secret payload enters
+Quartz. The existing initial outbox digest remains compatible; ordinals after
+one add `|ordinal` to that canonical execution/revision digest.
+
+`SqlProjectionStore` reads the pinned JobRevision, template identity, policy
+priority, execution availability and existing attempt ordinals. DeliveryId is
+the immutable outbox intent ID. The port never inserts attempts, claims work,
+allocates permits or authorizes effects. An existing attempt, Running,
+NeedsReview or a terminal execution retires that delivery. Only Queued and
+RetryWaiting executions without that attempt may be published. Task08's
+transactional start gate must still recheck eligibility after acquisition.
+
+Quartz job/trigger keys encode execution, delivery and authorized ordinal in
+the template group; execution groups use that same template ID. Each durable,
+recovery-requesting job stores string ExecutionId, DeliveryId, AttemptOrdinal,
+TemplateId, EntityRevision, DueUtc and PayloadDigest. This second digest hashes
+canonical execution/delivery/ordinal/template/revision/UTC due ticks, excluding
+priority and Quartz fire bookkeeping. Replay verifies the stored identity and
+type before repairing a missing trigger. It rejects a stored trigger with an
+earlier due time, wrong template execution group, unexpected input, repeat
+schedule or retry policy. Triggers explicitly use FireNow misfires and
+RetryPolicy.None. Guarded recovery means the future worker start gate decides
+whether an attempt may run; Quartz recovery never authorizes a business retry.
+
+All Quartz calls use public APIs outside a business transaction. A crash before
+Quartz write leaves Pending/Failed intent. A crash after write but before ack
+replays the same deterministic identity; concurrent insert losers reread and
+verify instead of overwriting. A consumed trigger is checked against business
+state first. Acknowledgement independently records DispatchedAtUtc and
+Published. Published projections retain bounded periodic review, allowing
+eligible missing triggers to be repaired after acknowledgement. Terminal/active
+business state moves them to Retired. Failed writes and integrity errors retain
+LastErrorCode and RetryAtUtc; a failed published review stays Published with an
+error code and a future ReviewAtUtc. Permanent Error/Complete trigger states
+remain visible as ProjectionTriggerError, requiring investigation rather than
+an automatic reset or a silently successful acknowledgement. No direct Quartz
+SQL writes are used.
+
+Scheduler directly and idempotently registers projection/reconciliation control
+jobs at startup (15s/60s), before starting only WorkerDock.Schedule. Each firing
+has a 100-envelope batch and 20s cancellation deadline; pending publication and
+published review each have reserved batch capacity. The execution publisher
+uses ZeroSizeThreadPool and is never started. Quartz's public lazy JobType
+stores the exact future `WorkerDock.Quartz.Dispatch.ExecuteTemplateJob,
+WorkerDock.Quartz` identity with explicit execution metadata flags. Task06
+memory tests prove that unloaded identity can be stored/replayed without
+starting execution. Task08 installs its guarded implementation; no test or
+no-op executor is shipped in the Scheduler.
+
+Run `PublicationRecoveryTests` for in-process faults, concurrent publishers,
+actual probe consumption and control-job bootstrap. `ProjectionSqlTests` adds
+restricted-runtime SQL reads/writes, lost ack, concurrent replay after a fresh
+Quartz handle, retirement, retry metadata, instance fencing and paired migration
+checks in both isolation modes. These SQL proofs, SQL type loading and actual
+multi-process/cluster restart/fault proofs are pending until the disposable SQL
+fixture and Task08 worker are available. Memory success is not evidence for
+those properties. See [database.md](database.md) for exact setup/tests and
+[development.md](development.md) for memory tests.

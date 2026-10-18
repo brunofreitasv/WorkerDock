@@ -79,3 +79,23 @@ with an injected clock. They do not prove SQL calendar blobs survive restart.
 The browser memory host still exposes settings only; the schedule editor and its
 preview endpoint arrive in the scheduling UI stage. See
 [quartz-integration.md](quartz-integration.md) for the five-field and DST policy.
+
+## Publication recovery without SQL
+
+Run the same publication/reconciliation code against a disposable RAMJobStore
+and in-memory business/outbox test adapters:
+
+```powershell
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~PublicationRecoveryTests|FullyQualifiedName~QuartzTopologyTests'
+dotnet test tests/WorkerDock.UnitTests -c Release
+dotnet build WorkerDock.slnx -c Release
+```
+
+The fault tests cover both sides of Quartz writes and application ack, concurrent
+publishers, identity/digest corruption, completed/active executions with consumed
+triggers, unsupported payloads, future authorized retry deadlines, permanent
+trigger errors, actual memory probe firing and direct control-job startup. The
+Scheduler contains no test executor; Task08 provides its guarded production
+wrapper. Use [database.md](database.md) for migration 0003a_projection, restricted
+runtime setup, Scheduler startup and real SQL publication tests. RAM restart
+means loss of its disposable store; no SQL or multi-process guarantee is inferred.

@@ -92,3 +92,52 @@ cluster proof. No new schema objects, runtime grants or migration scripts are
 introduced by the calendar payload. These SQL cases remain explicitly pending
 until the configured instance runs them successfully. JSON and RAMJobStore passes
 are recorded separately.
+
+## Projection publication migration and SQL verification
+
+After the committed execution migration, apply the ordered suffix migration
+`0003a_projection` (the numbered `0004_templates` slot remains reserved). It adds
+bounded LastErrorCode and ReviewAtUtc outbox metadata, a review index and only
+SELECT on Attempts for WorkerDockRuntime. It grants no attempt mutations or DDL.
+The manifest explicitly orders the paired migration and records both SHA-256
+checksums. Stop runtime processes before rollback; rollback refuses populated
+publication/review/error metadata. Never modify an already applied pair.
+
+For the dedicated empty tenant database and identities provisioned above:
+
+```powershell
+$env:WORKERDOCK_INSTANCE_ID='<stable-dedicated-tenant-guid>'
+$env:WORKERDOCK_SQL='<dedicated-tenant-migrator-connection-string>'
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0003a_projection
+$env:Tenant__InstanceId=$env:WORKERDOCK_INSTANCE_ID
+$env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
+dotnet run --project src/WorkerDock.Scheduler -c Release
+```
+
+This starts only the control scheduler. Deploy Task08's Worker before enabling
+execution acquisition; Task06 stores its exact future wrapper identity. Use the
+runtime user with WorkerDockRuntime membership, never the migrator identity.
+The Scheduler never creates or changes a database/schema itself.
+
+Run against the dedicated disposable SQL Server 2022+ instance (compatibility
+160) with its separately provisioned restricted SQL login:
+
+```powershell
+$env:WORKERDOCK_TEST_SQL='<disposable-test-server-owner-connection-string>'
+$env:WORKERDOCK_TEST_SQL_RUNTIME='<same-server-distinct-restricted-login-connection-string>'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~ProjectionSqlTests'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzCapacityTests|FullyQualifiedName~QuartzSqlTopologyTests'
+```
+
+Fixtures generate their own WorkerDock_Test databases, apply migrations, create
+the runtime user within that database and remove their databases afterwards.
+ProjectionSqlTests applies through 0003a_projection, including all predecessors,
+and uses the runtime connection for projection and Quartz operations. Credentials
+are supplied through environment configuration and never printed. With either
+required SQL variable absent, the tests explicitly fail SQL_TEST_BLOCKED; SQL
+publication/locking/migration and clustered restart guarantees remain pending.
+After all services stop, only an empty disposable projection schema may use:
+
+```powershell
+dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0003a_projection
+```

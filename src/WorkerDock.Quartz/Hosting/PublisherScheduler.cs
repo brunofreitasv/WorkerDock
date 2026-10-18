@@ -32,6 +32,7 @@ public class PublisherScheduler : DispatchProxy
         }
         if (shutdown) throw new WorkerDockException("PublisherShutdown");
         if (method.Name is "get_SchedulerName" or "get_SchedulerInstanceId" or "GetSchedulerInstanceId") return Forward(method, args);
+        if (method.Name is "GetJobDetail" or "GetTrigger" or "GetTriggerState") return Forward(method, args);
         if (method.Name is not ("ScheduleJob" or "AddJob")) throw new WorkerDockException("PublisherOperationForbidden");
         foreach (var argument in args ?? [])
         {
@@ -55,7 +56,7 @@ public class PublisherScheduler : DispatchProxy
     private static void Validate(JobDataMap data)
     {
         foreach (var pair in data)
-            if (pair.Key is not ("ExecutionId" or "DeliveryId" or "AttemptOrdinal") || pair.Value is not string)
+            if (pair.Key is not ("ExecutionId" or "DeliveryId" or "AttemptOrdinal" or "TemplateId" or "EntityRevision" or "DueUtc" or "PayloadDigest") || pair.Value is not string)
                 throw new WorkerDockException("InvalidQuartzJobData");
     }
 }

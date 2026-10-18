@@ -5,6 +5,7 @@
     <Project Path="src/WorkerDock.Domain/WorkerDock.Domain.csproj" />
     <Project Path="src/WorkerDock.Infrastructure/WorkerDock.Infrastructure.csproj" />
     <Project Path="src/WorkerDock.Quartz/WorkerDock.Quartz.csproj" />
+    <Project Path="src/WorkerDock.Scheduler/WorkerDock.Scheduler.csproj" />
     <Project Path="src/WorkerDock.Web/WorkerDock.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">

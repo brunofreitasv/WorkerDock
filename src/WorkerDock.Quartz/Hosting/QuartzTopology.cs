@@ -23,10 +23,11 @@ public sealed class QuartzTopology(QuartzConnections connections) : IAsyncDispos
     }
 
     public ValueTask<IScheduler> CreateScheduleAsync(QuartzNodeOptions options, CancellationToken ct) => CreateAsync(options, false, false, ct);
+    public ValueTask<IScheduler> CreateScheduleAsync(QuartzNodeOptions options, global::Quartz.Extensibility.IJobFactory jobFactory, CancellationToken ct) => CreateAsync(options, false, false, ct, jobFactory);
     public ValueTask<IScheduler> CreateExecutionAsync(QuartzNodeOptions options, CancellationToken ct) => CreateAsync(options, true, false, ct);
     public ValueTask<IScheduler> CreateExecutionPublisherAsync(QuartzNodeOptions options, CancellationToken ct) => CreateAsync(options, true, true, ct);
 
-    private async ValueTask<IScheduler> CreateAsync(QuartzNodeOptions options, bool execution, bool publisher, CancellationToken ct)
+    private async ValueTask<IScheduler> CreateAsync(QuartzNodeOptions options, bool execution, bool publisher, CancellationToken ct, global::Quartz.Extensibility.IJobFactory? jobFactory = null)
     {
         if (options.InstanceId == Guid.Empty || options.InstanceId != connections.InstanceId) throw new WorkerDockException("TenantInstanceMismatch");
         if (string.IsNullOrWhiteSpace(options.BootId) || options.BootId.Length > 150 || options.BootId is "*" or "NON_CLUSTERED" || options.HostCeiling is < 1 or > 1024)
@@ -52,6 +53,7 @@ public sealed class QuartzTopology(QuartzConnections connections) : IAsyncDispos
                 return publisher ? PublisherScheduler.Create(existing, false) : existing;
             var factory = QuartzSchedulerBuilder.Create(builder =>
             {
+                if (jobFactory is not null) builder.UseJobFactory(jobFactory);
                 builder.ConfigureScheduler(settings =>
                 {
                     settings.InstanceName = name;
