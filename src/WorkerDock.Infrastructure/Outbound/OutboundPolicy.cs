@@ -2,6 +2,9 @@ using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using WorkerDock.Application.Outbound;
+using WorkerDock.Application.Settings;
+using WorkerDock.Infrastructure.Settings;
+using System.Text.Json;
 
 namespace WorkerDock.Infrastructure.Outbound;
 
@@ -40,6 +43,26 @@ public sealed class OutboundPolicy : IOutboundPolicy
         };
     }
 
+    public static OutboundPolicy FromIntegrationConfiguration(JsonElement configuration)
+    {
+        try
+        {
+            var snapshot = configuration.Deserialize<IntegrationConfigurationDto>() ?? throw new OutboundPolicyException("OutboundPolicyInvalid");
+            if (snapshot.Version != 1 || snapshot.ProviderId != "workerdock.environment" || snapshot.Policies.Count != 2)
+                throw new OutboundPolicyException("OutboundPolicyInvalid");
+            var rules = new Dictionary<string, OutboundPolicyRule>(StringComparer.Ordinal);
+            foreach (var policy in snapshot.Policies)
+            {
+                var validated = IntegrationSettingsValidation.ValidateEgress(policy);
+                rules.Add(validated.Name, new(validated.Hosts.ToHashSet(StringComparer.Ordinal), validated.Ports.ToHashSet(), validated.AllowHttp, validated.PrivateCidrs));
+            }
+            rules["central-health"] = new(new HashSet<string>(StringComparer.Ordinal), new HashSet<int> { 443 });
+            return new OutboundPolicy(rules: rules);
+        }
+        catch (OutboundPolicyException) { throw; }
+        catch { throw new OutboundPolicyException("OutboundPolicyInvalid"); }
+    }
+
     public async ValueTask<ApprovedDestination> ResolveAsync(OutboundTarget target, CancellationToken ct)
     {
         try
@@ -61,7 +84,7 @@ public sealed class OutboundPolicy : IOutboundPolicy
             var privateAllow = (rule.PrivateCidrs ?? []).Select(ParseCidr).ToArray();
             foreach (var address in normalized)
             {
-                if (IsHardDenied(address) || IsPrivate(address) && !privateAllow.Any(cidr => cidr.Contains(address)))
+                if (IsHardDenied(address) || IsPrivate(address) && (rule.Hosts.Count == 0 || !privateAllow.Any(cidr => cidr.Contains(address))))
                     throw new OutboundPolicyException("OutboundAddressDenied");
                 if (!IsPrivate(address) && !IsPublic(address)) throw new OutboundPolicyException("OutboundAddressDenied");
             }

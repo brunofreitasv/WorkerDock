@@ -8,6 +8,7 @@ using WorkerDock.Application.Executions;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Persistence;
+using WorkerDock.Infrastructure.Settings;
 
 namespace WorkerDock.Infrastructure.Executions;
 
@@ -15,8 +16,24 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
 {
     public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) =>
         TransactAsync(intent.ExecutionId, workerBootId, (data, now) => data.Begin(intent, workerBootId, now), ct);
-    public ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct) =>
-        TransactAsync(lease.ExecutionId, lease.WorkerBootId, (data, now) => data.GetDescriptor(lease, now), ct);
+    public async ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct)
+    {
+        try
+        {
+            return await new BusinessTransaction(options).RunAsync(async (connection, transaction, token) =>
+            {
+                await VerifyAsync(connection, transaction, token);
+                var data = await LoadAsync(connection, transaction, lease.ExecutionId, lease.WorkerBootId, token);
+                var previous = data.Lease; var previousState = data.AttemptState;
+                var now = await NowAsync(connection, transaction, token);
+                var descriptor = data.GetDescriptor(lease, now);
+                await SaveAsync(connection, transaction, data, previous, previousState, previousState == "Running" && previous!.ExpiresUtc <= now, token);
+                var snapshot = await SqlIntegrationSettings.ReadSnapshotAsync(connection, transaction, token);
+                return descriptor with { IntegrationConfiguration = JsonSerializer.SerializeToElement(snapshot) };
+            }, ct);
+        }
+        catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
+    }
     public async ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct)
     {
         try { return await TransactAsync(lease.ExecutionId, null, (data, now) => data.Renew(lease, now), ct); }

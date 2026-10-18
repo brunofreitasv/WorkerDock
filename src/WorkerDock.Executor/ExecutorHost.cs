@@ -14,7 +14,7 @@ public sealed record ExecutionAdapters(ISecretVault Secrets, ISafeExecutionLog L
 /// <summary>Installed composition root only; factories are invoked after containment permission.</summary>
 public static class ExecutorHost
 {
-    public static async Task<int> RunAsync(Func<IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters)
+    public static async Task<int> RunAsync(Func<ExecutionDescriptor, IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters)
     {
         try
         {
@@ -56,12 +56,12 @@ public static class ExecutorHost
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch { cancellation.Cancel(); }
     }
-    private static async Task<TemplateResult> ExecuteAsync(ExecuteRequest request, Func<IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters, CancellationToken ct)
+    private static async Task<TemplateResult> ExecuteAsync(ExecuteRequest request, Func<ExecutionDescriptor, IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters, CancellationToken ct)
     {
         using var secrets = new RedactingSecrets();
         try
         {
-            var installed = templates();
+            var installed = templates(request.Execution);
             if (installed.GroupBy(x => (x.Descriptor.Id, x.Descriptor.Version)).Any(x => x.Count() > 1)) return Failure("TemplateRegistrationConflict", false);
             var template = installed.SingleOrDefault(x => x.Descriptor.Id == request.Execution.TemplateId && x.Descriptor.Version == request.Execution.TemplateVersion);
             if (template is null) return Failure("TemplateVersionUnavailable", false);

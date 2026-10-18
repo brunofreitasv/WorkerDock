@@ -20,6 +20,8 @@ import {
 } from "@workerdock/ui";
 import { useSession } from "./auth/SessionProvider";
 import { ApiError, mutate, read, signOut } from "./api/client";
+import { VaultSettingsPage } from "./features/settings/VaultSettingsPage";
+import { OutboundPolicyPage } from "./features/settings/OutboundPolicyPage";
 const theme = createTheme({
   palette: {
     primary: { main: "#0b6c61", dark: "#064f47", light: "#dff2ed" },
@@ -163,6 +165,7 @@ export default function App() {
   const [active, setActive] = useState(
     () => window.location.hash.slice(2) || "dashboard",
   );
+  const [settingsTab, setSettingsTab] = useState("general");
   const [actionError, setActionError] = useState(false);
   useEffect(() => {
     const change = () =>
@@ -230,7 +233,14 @@ export default function App() {
             <>
               {active === "settings" ? (
                 session.canManage ? (
-                  <SettingsForm t={t} />
+                  <>
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 3 }}>
+                      <Button variant={settingsTab === "general" ? "contained" : "outlined"} onClick={() => setSettingsTab("general")}>{t.settings}</Button>
+                      <Button variant={settingsTab === "vault" ? "contained" : "outlined"} onClick={() => setSettingsTab("vault")}>{t.vaultSettings}</Button>
+                      <Button variant={settingsTab === "outbound" ? "contained" : "outlined"} onClick={() => setSettingsTab("outbound")}>{t.outboundSettings}</Button>
+                    </Stack>
+                    {settingsTab === "general" ? <SettingsForm t={t} /> : settingsTab === "vault" ? <VaultSettingsPage t={t} /> : <OutboundPolicyPage t={t} />}
+                  </>
                 ) : (
                   <Alert severity="error">{t.permission}</Alert>
                 )

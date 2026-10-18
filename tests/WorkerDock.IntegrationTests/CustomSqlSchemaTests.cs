@@ -51,7 +51,7 @@ public sealed class CustomSqlSchemaTests
         var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "manifest.json")));
         var ids = manifest.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetString()!).ToArray();
-        Assert.Equal(new[] { "0001_bootstrap", "0002_quartz", "0003_execution", "0003a_projection", "0003b_attempts", "0003c_capacity", "0003d_dispatch", "0004_templates", "0004a_profiles" }, ids);
+        Assert.Equal(new[] { "0001_bootstrap", "0002_quartz", "0003_execution", "0003a_projection", "0003b_attempts", "0003c_capacity", "0003d_dispatch", "0004_templates", "0004a_profiles", "0004b_integration_settings" }, ids);
         Assert.Equal(ids.Length * 2, Directory.GetFiles(directory, "*.sql").Length);
         foreach (var entry in manifest.RootElement.EnumerateArray())
         foreach (var direction in new[] { "up", "down" })

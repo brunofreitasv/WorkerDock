@@ -8,6 +8,7 @@ using WorkerDock.Contracts.Execution;
 using WorkerDock.Infrastructure.Executions;
 using System.Text.Json;
 using WorkerDock.Domain.Jobs;
+using WorkerDock.Application.Settings;
 
 namespace WorkerDock.Infrastructure.Jobs;
 
@@ -18,6 +19,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
 {
     private readonly TimeProvider clock;
     private readonly IConnectionProfiles? profiles;
+    private readonly IIntegrationSettings? integrationSettings;
     private readonly Func<string, CancellationToken, ValueTask>? beforeCommit;
     private readonly SemaphoreSlim gate = new(1, 1);
     private State state = new([], [], [], [], [], [], []);
@@ -25,9 +27,9 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
 
     public InMemoryJobCommands(TimeProvider clock, IEnumerable<JobRevision>? enabledSeeds = null,
         Func<string, CancellationToken, ValueTask>? beforeCommit = null,
-        IEnumerable<JobRevision>? archivedSeeds = null, IConnectionProfiles? profiles = null)
+        IEnumerable<JobRevision>? archivedSeeds = null, IConnectionProfiles? profiles = null, IIntegrationSettings? integrationSettings = null)
     {
-        this.clock = clock; this.profiles=profiles;
+        this.clock = clock; this.profiles=profiles; this.integrationSettings=integrationSettings;
         this.beforeCommit = beforeCommit;
         foreach (var seed in enabledSeeds ?? []) Seed(seed, false);
         foreach (var seed in archivedSeeds ?? []) Seed(seed, true);
@@ -111,6 +113,8 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             WorkerDock.Contracts.Connections.ConnectionProfileRevision? pinnedProfile=null;
             if(editor.Revision.ProfileId is {} profileId)
                 pinnedProfile=profiles is not null ? (await profiles.GetCurrentAsync(profileId,ct)).Current : throw new WorkerDockException("ProfileUnavailable");
+            var integration = integrationSettings is null ? JsonSerializer.SerializeToElement(new { version = 1, vaultRevision = 1, providerId = "workerdock.environment", publicOptions = new { }, policies = Array.Empty<object>() })
+                : JsonSerializer.SerializeToElement(await integrationSettings.GetSnapshotAsync(ct));
             var executionId = Guid.NewGuid();
             var receipt = new CommandReceipt(Guid.NewGuid(), executionId, "Pending");
             var execution = new MemoryExecution(executionId, jobId, editor.Revision.Revision,
@@ -132,7 +136,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             });
             attemptStores[executionId] = new InMemoryAttemptStore(clock,
                 new ExecutionDescriptor(executionId, 1, editor.Revision.TemplateId, editor.Revision.TemplateVersion,
-                    execution.IdempotencyKey, editor.Revision.Configuration, pinnedProfile?.ProfileRevisionId, pinnedProfile is null ? null : JsonSerializer.SerializeToElement(pinnedProfile), JsonSerializer.SerializeToElement(new { }), null), editor.Revision.Policy, committed: snapshot => SettleCommands(executionId, snapshot));
+                    execution.IdempotencyKey, editor.Revision.Configuration, pinnedProfile?.ProfileRevisionId, pinnedProfile is null ? null : JsonSerializer.SerializeToElement(pinnedProfile), integration, null), editor.Revision.Policy, committed: snapshot => SettleCommands(executionId, snapshot));
             return receipt;
         }
         finally { gate.Release(); }

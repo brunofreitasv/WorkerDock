@@ -36,5 +36,19 @@
   "localPreferences": "Seu idioma e fuso horário são salvos neste dispositivo.",
   "readOnly": "Acesso de consulta",
   "manage": "Acesso de gerenciamento",
-  "tenant": "Espaço da equipe"
+  "tenant": "Espaço da equipe",
+  "vaultSettings": "Provedor de segredos",
+  "vaultSettingsHelp": "Use o provedor instalado pela implantação. A identidade e as credenciais do provedor são gerenciadas pela implantação.",
+  "provider": "Provedor instalado",
+  "vaultReferenceOnly": "Esta página aceita apenas opções públicas do provedor e referências de segredos. Ela nunca aceita nem revela valores secretos.",
+  "outboundSettings": "Política de saída",
+  "outboundSettingsHelp": "Defina os destinos de tarefas e alertas por host, porta e lista de redes privadas.",
+  "policyName": "Política",
+  "allowedHosts": "Hosts permitidos",
+  "allowedHostsHelp": "Um host por linha. O curinga se limita a subdomínios de *.example.test.",
+  "allowedPorts": "Portas permitidas",
+  "privateCidrs": "Lista de redes privadas",
+  "privateCidrsHelp": "Um CIDR privado por linha. Loopback, link-local e metadados continuam bloqueados.",
+  "allowHttp": "Permitir HTTP sem TLS",
+  "hardDeniedNotice": "Bloqueios rígidos da implantação não podem ser alterados aqui. Destinos privados exigem um host e um CIDR explícitos dentro dos limites."
 }

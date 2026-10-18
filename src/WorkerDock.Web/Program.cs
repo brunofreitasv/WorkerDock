@@ -14,6 +14,8 @@ using WorkerDock.Domain.Tenants;
 using WorkerDock.Infrastructure.Persistence;
 using WorkerDock.Infrastructure.Authentication;
 using WorkerDock.Infrastructure.Jobs;
+using WorkerDock.Application.Settings;
+using WorkerDock.Infrastructure.Settings;
 using WorkerDock.Web.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -25,11 +27,20 @@ builder.Services.TryAddSingleton<IJobCommands>(provider =>
     var environment = provider.GetRequiredService<IHostEnvironment>();
     if (!Guid.TryParse(config["Tenant:InstanceId"], out var instanceId)) return new UnavailableJobCommands();
     if (config["Tenant:Adapter"] == "Memory")
-        return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>(),profiles:provider.GetRequiredService<IConnectionProfiles>()) : new UnavailableJobCommands();
+        return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>(),profiles:provider.GetRequiredService<IConnectionProfiles>(),integrationSettings:provider.GetRequiredService<IIntegrationSettings>()) : new UnavailableJobCommands();
     var connection = config["Tenant:ConnectionString"];
     return !string.IsNullOrWhiteSpace(connection)
         ? new SqlJobCommands(new(connection, instanceId))
         : new UnavailableJobCommands();
+});
+builder.Services.TryAddSingleton<IIntegrationSettings>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    var environment = provider.GetRequiredService<IHostEnvironment>();
+    if (config["Tenant:Adapter"] == "Memory")
+        return environment.IsDevelopment() ? new InMemoryIntegrationSettings() : new UnavailableIntegrationSettings();
+    return Guid.TryParse(config["Tenant:InstanceId"], out var instanceId) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlIntegrationSettings(new(config["Tenant:ConnectionString"]!, instanceId)) : new UnavailableIntegrationSettings();
 });
 builder.Services.TryAddSingleton<ITenantSettingsService>(provider =>
 {
@@ -99,6 +110,7 @@ app.MapExecutionControls();
 app.MapCapacity();
 app.MapTemplateCatalog();
 app.MapConnectionProfiles();
+app.MapIntegrationSettings();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -158,6 +170,15 @@ internal sealed class UnavailableTenantSettingsService : ITenantSettingsService
 {
     public ValueTask<TenantSettings> GetAsync(CancellationToken ct) => ValueTask.FromException<TenantSettings>(new WorkerDockException("PersistenceUnavailable"));
     public ValueTask<TenantSettings> UpdateAsync(TenantSettings desired, byte[] expectedVersion, ActorContext actor, CancellationToken ct) => ValueTask.FromException<TenantSettings>(new WorkerDockException("PersistenceUnavailable"));
+}
+internal sealed class UnavailableIntegrationSettings : IIntegrationSettings
+{
+    private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<WorkerDock.Application.Settings.VaultSettingsDto> GetVaultAsync(CancellationToken ct) => Unavailable<WorkerDock.Application.Settings.VaultSettingsDto>();
+    public ValueTask<CommandReceipt> SaveVaultAsync(WorkerDock.Application.Settings.VaultSettingsDto settings, ActorContext actor, CancellationToken ct) => Unavailable<CommandReceipt>();
+    public ValueTask<WorkerDock.Application.Settings.EgressPolicyDto> GetEgressAsync(string name, CancellationToken ct) => Unavailable<WorkerDock.Application.Settings.EgressPolicyDto>();
+    public ValueTask<CommandReceipt> SaveEgressAsync(WorkerDock.Application.Settings.EgressPolicyDto policy, ActorContext actor, CancellationToken ct) => Unavailable<CommandReceipt>();
+    public ValueTask<WorkerDock.Application.Settings.IntegrationConfigurationDto> GetSnapshotAsync(CancellationToken ct) => Unavailable<WorkerDock.Application.Settings.IntegrationConfigurationDto>();
 }
 internal sealed class UnavailableJobCommands : IJobCommands
 {

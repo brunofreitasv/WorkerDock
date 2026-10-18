@@ -36,5 +36,19 @@
   "localPreferences": "Your language and time zone are saved on this device.",
   "readOnly": "Read-only access",
   "manage": "Management access",
-  "tenant": "Tenant workspace"
+  "tenant": "Tenant workspace",
+  "vaultSettings": "Secret provider",
+  "vaultSettingsHelp": "Use the deployment-installed provider. Provider identity and credentials are managed by the deployment.",
+  "provider": "Installed provider",
+  "vaultReferenceOnly": "This page accepts public provider options and secret references only. It never accepts or reveals secret values.",
+  "outboundSettings": "Outbound policy",
+  "outboundSettingsHelp": "Scope job and alert destinations with host, port, and private network allowlists.",
+  "policyName": "Policy",
+  "allowedHosts": "Allowed hosts",
+  "allowedHostsHelp": "One host per line. A wildcard is limited to *.example.test subdomains.",
+  "allowedPorts": "Allowed ports",
+  "privateCidrs": "Private network allowlist",
+  "privateCidrsHelp": "One private CIDR per line. Loopback, link-local, and metadata ranges stay denied.",
+  "allowHttp": "Allow plain HTTP",
+  "hardDeniedNotice": "Deployment hard denials cannot be changed here. Private destinations require both a listed host and an explicit bounded CIDR."
 }

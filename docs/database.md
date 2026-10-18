@@ -25,7 +25,7 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifie
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzCapacityTests|FullyQualifiedName~QuartzSqlTopologyTests'
 ```
 
-For local manual setup, create an empty tenant database at compatibility level 160. Supply a deployment-only migrator connection string in `WORKERDOCK_SQL` and a newly generated, stable GUID in `WORKERDOCK_INSTANCE_ID`; the GUID binds this database to one tenant context. Run `dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0004_templates`. The migrator applies all earlier manifest entries through `0004_templates`, starting with `0001_bootstrap`, checks both script checksums before connecting, records them in `SchemaHistory`, and verifies the stored instance ID on later runs. Only the migrator login needs DDL rights. Add the runtime database user to `WorkerDockRuntime`, which grants settings/audit rights plus DML on both Quartz table sets. Configure `Tenant__ConnectionString` and `Tenant__InstanceId` for the web host from deployment secrets/configuration, never a browser selector.
+For local manual setup, create an empty tenant database at compatibility level 160. Supply a deployment-only migrator connection string in `WORKERDOCK_SQL` and a newly generated, stable GUID in `WORKERDOCK_INSTANCE_ID`; the GUID binds this database to one tenant context. Run `dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0004b_integration_settings`. The migrator applies all earlier manifest entries through `0004b_integration_settings`, starting with `0001_bootstrap`, checks both script checksums before connecting, records them in `SchemaHistory`, and verifies the stored instance ID on later runs. Only the migrator login needs DDL rights. Add the runtime database user to `WorkerDockRuntime`, which grants settings/audit rights plus DML on both Quartz table sets. Configure `Tenant__ConnectionString` and `Tenant__InstanceId` for the web host from deployment secrets/configuration, never a browser selector.
 
 Before any migration DDL, the runner reads the connected server's major version and the connected database's compatibility level. It requires SQL Server major version 16 or later and compatibility level exactly 160, returning `UnsupportedSqlServerVersion` or `UnsupportedCompatibilityLevel` otherwise. This check and the scripts still require live verification on the disposable SQL test instance.
 
@@ -40,6 +40,18 @@ the empty-table guard cannot prevent future writes by a process that remains
 running.
 
 The migration script is checked into `database/tenant` with its SHA-256 values in `manifest.json`. Central database migrations begin in Task 20. SQL integration outcomes must be reported separately from memory tests.
+
+## Tenant integration settings
+
+The ordered `0004b_integration_settings` migration follows `0004_templates` and `0004a_profiles`. It creates the current vault row, the fixed `tenant-jobs` and `tenant-alerts` egress rows, and immutable configuration revision history. SQL writes, command receipts, and sanitized before/after revision audit rows share one transaction. `WorkerDockRuntime` receives only SELECT/INSERT/UPDATE rights and no DDL rights. The down migration refuses rollback after any vault or policy advances beyond its seed revision; restore a backup instead of discarding settings history.
+
+Apply the migration on a fresh dedicated tenant database with:
+
+```powershell
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0004b_integration_settings
+```
+
+Set `Tenant__Adapter=SqlServer`, `Tenant__InstanceId` and `Tenant__ConnectionString` from protected deployment configuration. For local mock development, use `Tenant__Adapter=Memory` with `ASPNETCORE_ENVIRONMENT=Development`; this adapter does not establish SQL persistence or SQL target execution. SQL-backed migration, audit rollback, rowversion and restart checks require `WORKERDOCK_TEST_SQL` and remain `SQL_TEST_BLOCKED` until run against a disposable SQL Server 2022+ instance.
 
 
 ## Same application ports with real SQL

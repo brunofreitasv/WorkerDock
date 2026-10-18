@@ -66,6 +66,17 @@ public sealed class OutboundPolicyTests
     }
 
     [Fact]
+    public async Task Private_destination_requires_both_explicit_host_and_cidr_allowlists()
+    {
+        var rules = new Dictionary<string, OutboundPolicyRule>(StringComparer.Ordinal)
+        {
+            ["tenant-jobs"] = new(new HashSet<string>(StringComparer.Ordinal), new HashSet<int> { 443 }, PrivateCidrs: ["10.0.0.0/8"])
+        };
+        var policy = new OutboundPolicy(new FixedResolver(IPAddress.Parse("10.1.2.3")), rules);
+        await Assert.ThrowsAsync<OutboundPolicyException>(async () => await policy.ResolveAsync(new(new Uri("https://internal.test/"), "tenant-jobs"), default));
+    }
+
+    [Fact]
     public async Task Hostnames_are_normalized_and_userinfo_is_rejected()
     {
         var resolver = new FixedResolver(IPAddress.Parse("93.184.216.34"));

@@ -59,7 +59,7 @@ public static class FixtureProgram
             await ExecutionProtocol.WriteAsync(pipe, new Handshake(1, attempt, generation, nonce, pid), default);
             await Task.Delay(Timeout.InfiniteTimeSpan); return 0;
         }
-        return await ExecutorHost.RunAsync(() => [new BlockingTemplate(), new SpawningTemplate(() => Process.Start(StartInfo("grandchild"))!), new SecretTemplate()], execution => new(new TestVault(args[0]=="provider-failure"), new TestLog(execution.Configuration.GetProperty("path").GetString()!)));
+        return await ExecutorHost.RunAsync(_ => [new BlockingTemplate(), new SpawningTemplate(() => Process.Start(StartInfo("grandchild"))!), new SecretTemplate()], execution => new(new TestVault(args[0]=="provider-failure"), new TestLog(execution.Configuration.GetProperty("path").GetString()!)));
     }
     public static ProcessStartInfo StartInfo(params string[] args)
     {

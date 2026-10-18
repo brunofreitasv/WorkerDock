@@ -9,10 +9,12 @@
   "scripts": {
     "test": "vitest",
     "build": "node scripts/licenses.mjs && npm run build --workspaces --if-present",
+    "e2e": "playwright test --config playwright.config.ts",
     "dev": "npm run dev --workspace @workerdock/tenant",
     "format": "prettier --write apps packages scripts *.ts *.json"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.8",
