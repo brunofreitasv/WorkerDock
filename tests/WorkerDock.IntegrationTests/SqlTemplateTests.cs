@@ -66,6 +66,37 @@ public sealed partial class SqlTemplateTests
         Assert.Equal(0,infinite.CommandTimeout);
         await Assert.ThrowsAsync<SqlTemplateException>(async()=>await SqlTemplate.BuildCommandAsync(config with { CommandTimeoutSeconds=0 },c,new NoVault(),"key",DateTimeOffset.UtcNow.AddMinutes(1),default));
     }
+    [Fact]
+    public void Deadline_cancellation_preserves_deadlines_longer_than_timer_limit()
+    {
+        var clock=new ManualTimeProvider();var deadline=clock.GetUtcNow().AddDays(60);using var cancellation=new CancellationTokenSource();
+        using var schedule=SqlDeadlineCancellation.Schedule(cancellation,deadline,clock);
+        Assert.False(cancellation.IsCancellationRequested);
+        Assert.True(clock.NextDueTime<=TimeSpan.FromMilliseconds(int.MaxValue-1));
+        clock.Advance(clock.NextDueTime);
+        Assert.False(cancellation.IsCancellationRequested);
+        Assert.True(clock.NextDueTime<=TimeSpan.FromMilliseconds(int.MaxValue-1));
+        clock.Advance(deadline-clock.GetUtcNow());
+        Assert.True(cancellation.IsCancellationRequested);
+    }
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private DateTimeOffset now=new(2026,1,1,0,0,0,TimeSpan.Zero);
+        private ManualTimer? timer;
+        public override DateTimeOffset GetUtcNow()=>now;
+        public TimeSpan NextDueTime=>timer?.DueTime ?? Timeout.InfiniteTimeSpan;
+        public override ITimer CreateTimer(TimerCallback callback,object? state,TimeSpan dueTime,TimeSpan period)
+        {timer=new ManualTimer(callback,state);timer.Change(dueTime,period);return timer;}
+        public void Advance(TimeSpan duration){now+=duration;timer?.FireIfDue();}
+        private sealed class ManualTimer(TimerCallback callback,object? state) : ITimer
+        {
+            public TimeSpan DueTime {get;private set;}=Timeout.InfiniteTimeSpan;
+            public bool Change(TimeSpan dueTime,TimeSpan period){DueTime=dueTime;return true;}
+            public void FireIfDue(){if(DueTime==Timeout.InfiniteTimeSpan)return;DueTime=Timeout.InfiniteTimeSpan;callback(state);}
+            public void Dispose()=>DueTime=Timeout.InfiniteTimeSpan;
+            public ValueTask DisposeAsync(){Dispose();return ValueTask.CompletedTask;}
+        }
+    }
     internal sealed class NoVault : ISecretVault { public ValueTask<SecretValue> ResolveAsync(SecretReference reference,CancellationToken ct)=>throw new InvalidOperationException("Unexpected secret resolution"); }
     [Fact]
     public async Task Missing_or_mismatched_profile_and_provider_failure_are_safe_before_effects()

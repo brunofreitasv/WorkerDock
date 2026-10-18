@@ -86,6 +86,7 @@ public class SqlTemplate : IWorkerTemplate
     {
         var effects=false; var commitStarted=false; SqlTransaction? transaction=null; SqlConnection? connection=null;
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(ct);
+        SqlDeadlineCancellation? deadlineSchedule=null;
         try
         {
             if(Validate(context.Execution.Configuration).Count!=0) throw new SqlTemplateException("SqlConfigurationInvalid");
@@ -95,7 +96,7 @@ public class SqlTemplate : IWorkerTemplate
             if(context.Execution.DeadlineUtc is {} until)
             {
                 if(until<=DateTimeOffset.UtcNow) throw new SqlTemplateException("SqlDeadlineExceeded");
-                deadline.CancelAfter(until-DateTimeOffset.UtcNow);
+                deadlineSchedule=SqlDeadlineCancellation.Schedule(deadline,until,TimeProvider.System);
             }
             if(context.Execution.IntegrationConfiguration.TryGetProperty("sqlProfileDiagnostic",out var diagnostic) && diagnostic.ValueKind==JsonValueKind.True)
                 return await SqlProfileDiagnostic.ExecuteAsync(profile,config.Catalog,context.Secrets,deadline.Token);
@@ -128,7 +129,7 @@ public class SqlTemplate : IWorkerTemplate
             if(error is SqlException sql) return Result(sql.Number is -2 or 1205 or 4060 or 40197 or 40501 or 40613 ? "TransientFailure" : "PermanentFailure",SqlProfileDiagnostic.SafeCode(sql.Number),effects);
             return Result("PermanentFailure","SqlExecutionFailed",effects);
         }
-        finally { if(transaction is not null) await transaction.DisposeAsync(); if(connection is not null) await connection.DisposeAsync(); }
+        finally { deadlineSchedule?.Dispose(); if(transaction is not null) await transaction.DisposeAsync(); if(connection is not null) await connection.DisposeAsync(); }
     }
     protected virtual Task CommitAsync(SqlTransaction transaction,CancellationToken ct)=>transaction.CommitAsync(ct);
     internal static TemplateResult Result(string outcome,string code,bool effects)=>new(outcome,code,effects,JsonSerializer.SerializeToElement(new {}),null);
