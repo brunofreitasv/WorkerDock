@@ -47,6 +47,28 @@ public sealed class ContainmentTests
     }
 
     [Fact]
+    public async Task Disposing_active_noncooperative_child_confirms_tree_exit_without_lifecycle_race()
+    {
+        // Repeated real process exits exercise the completion-reader/disposal interleaving.
+        await Parallel.ForEachAsync(Enumerable.Range(0, 64), new ParallelOptions { MaxDegreeOfParallelism = 4 }, async (_, ct) =>
+        {
+            using var fixture = new TestDirectory();
+            await using var child = await FixtureProgram.Supervisor().StartAsync(Guid.NewGuid(), 1, FixtureProgram.Descriptor("spawn", fixture.Path), default);
+            var pids = await WaitForPids(fixture.Path);
+            Assert.True(Alive(pids[0])); Assert.True(Alive(pids[1]));
+            var disposal = child.DisposeAsync().AsTask();
+            try
+            {
+                await child.DisposeAsync();
+                Assert.True(disposal.IsCompleted, "A second disposal returned while the original cleanup was still running");
+            }
+            finally { await disposal; }
+            await AssertGone(pids[0]); await AssertGone(pids[1]);
+            Assert.Equal("ExecutorDisconnected", (await child.WaitAsync(default)).SafeCode);
+            await child.DisposeAsync();
+        });
+    }
+    [Fact]
     public async Task Containment_failure_never_enters_handler()
     {
         using var fixture = new TestDirectory();
@@ -205,8 +227,14 @@ public sealed class ContainmentTests
             timeout.Token.ThrowIfCancellationRequested();
             if (File.Exists(path))
             {
-                var text = await File.ReadAllTextAsync(path, timeout.Token);
-                if (text.Split(',') is { Length: 2 } parts && int.TryParse(parts[0], out var child) && int.TryParse(parts[1], out var grandchild)) return [child, grandchild];
+                try
+                {
+                    await using var signal = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
+                    using var reader = new StreamReader(signal);
+                    var text = await reader.ReadToEndAsync(timeout.Token);
+                    if (text.Split(',') is { Length: 2 } parts && int.TryParse(parts[0], out var child) && int.TryParse(parts[1], out var grandchild)) return [child, grandchild];
+                }
+                catch (IOException error) when ((error.HResult & 0xffff) == 32) { } // Transient Windows signal-file sharing only.
             }
             await Task.Delay(25, timeout.Token);
         }

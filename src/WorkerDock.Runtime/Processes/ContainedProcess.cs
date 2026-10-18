@@ -8,6 +8,8 @@ internal sealed class ContainedProcess : IAsyncDisposable
 {
     private readonly SafeFileHandle job;
     private readonly Process process;
+    private readonly object lifecycle = new();
+    private Task? termination;
     public ContainedProcess(Process process)
     {
         this.process = process;
@@ -28,26 +30,32 @@ internal sealed class ContainedProcess : IAsyncDisposable
         }
         catch { job.Dispose(); throw; }
     }
-    public async ValueTask TerminateAsync(CancellationToken ct)
+    public ValueTask TerminateAsync(CancellationToken ct)
     {
-        if (job.IsClosed) return;
-        if (!TerminateJobObject(job, 1)) throw new ExecutionProcessException("LocalTerminationUnconfirmed");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(5));
-        while (true)
-        {
-            if (!QueryInformationJobObject(job, 1, out var accounting, (uint)Marshal.SizeOf<BasicAccounting>(), IntPtr.Zero))
-                throw new ExecutionProcessException("LocalTerminationUnconfirmed");
-            if (accounting.ActiveProcesses == 0) break;
-            await Task.Delay(10, timeout.Token);
-        }
-        await process.WaitForExitAsync(timeout.Token);
+        Task operation;
+        lock (lifecycle) operation = termination ??= TerminateAndCloseAsync();
+        // A caller may stop waiting, but it cannot cancel the owner's bounded cleanup.
+        return new ValueTask(operation.WaitAsync(ct));
     }
-    public async ValueTask DisposeAsync()
+    private async Task TerminateAndCloseAsync()
     {
-        try { await TerminateAsync(default); }
+        try
+        {
+            if (!TerminateJobObject(job, 1)) throw new ExecutionProcessException("LocalTerminationUnconfirmed");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (true)
+            {
+                if (!QueryInformationJobObject(job, 1, out var accounting, (uint)Marshal.SizeOf<BasicAccounting>(), IntPtr.Zero))
+                    throw new ExecutionProcessException("LocalTerminationUnconfirmed");
+                if (accounting.ActiveProcesses == 0) break;
+                await Task.Delay(10, timeout.Token);
+            }
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) { throw new ExecutionProcessException("LocalTerminationUnconfirmed"); }
         finally { job.Dispose(); }
     }
+    public ValueTask DisposeAsync() => TerminateAsync(default);
     [StructLayout(LayoutKind.Sequential)]
     private struct BasicLimits
     {

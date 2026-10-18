@@ -14,7 +14,8 @@ internal sealed class ChildHandle : IExecutionChild
     private readonly Task stdout, stderr;
     private readonly Task<TemplateResult> completion;
     private readonly SemaphoreSlim writes = new(1, 1);
-    private int disposed;
+    private readonly object lifecycle = new();
+    private Task? disposal;
     public ChildHandle(Process process, ContainedProcess containment, NamedPipeServerStream pipe, Task stdout, Task stderr)
     {
         this.process = process; this.containment = containment; this.pipe = pipe; this.stdout = stdout; this.stderr = stderr;
@@ -49,16 +50,25 @@ internal sealed class ChildHandle : IExecutionChild
         finally { writes.Release(); }
     }
     public ValueTask TerminateAsync(CancellationToken ct) => containment.TerminateAsync(ct);
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        lock (lifecycle) return new ValueTask(disposal ??= DisposeCoreAsync());
+    }
+    private async Task DisposeCoreAsync()
+    {
         try { await containment.DisposeAsync(); }
         finally
         {
-            await pipe.DisposeAsync();
-            await completion;
-            await Task.WhenAll(stdout, stderr);
-            process.Dispose(); writes.Dispose();
+            try { await pipe.DisposeAsync(); }
+            finally
+            {
+                try { await Task.WhenAll(completion, stdout, stderr); }
+                finally
+                {
+                    try { process.Dispose(); }
+                    finally { writes.Dispose(); }
+                }
+            }
         }
     }
 }
