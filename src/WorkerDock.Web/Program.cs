@@ -1,12 +1,28 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Tenants;
+using WorkerDock.Application.Jobs;
 using WorkerDock.Domain.Tenants;
 using WorkerDock.Infrastructure.Persistence;
 using WorkerDock.Infrastructure.Authentication;
+using WorkerDock.Infrastructure.Jobs;
+using WorkerDock.Web.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWorkerDockAccess();
+builder.Services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.TryAddSingleton<IJobCommands>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    var environment = provider.GetRequiredService<IHostEnvironment>();
+    if (!Guid.TryParse(config["Tenant:InstanceId"], out var instanceId)) return new UnavailableJobCommands();
+    if (config["Tenant:Adapter"] == "Memory")
+        return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>()) : new UnavailableJobCommands();
+    var connection = config["Tenant:ConnectionString"];
+    return !string.IsNullOrWhiteSpace(connection)
+        ? new SqlJobCommands(new(connection, instanceId))
+        : new UnavailableJobCommands();
+});
 builder.Services.TryAddSingleton<ITenantSettingsService>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
@@ -27,6 +43,7 @@ app.UseAuthentication();
 app.UseWorkerDockSessions();
 app.UseAuthorization();
 app.MapWorkerDockSessions();
+app.MapJobCommands();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -86,4 +103,15 @@ internal sealed class UnavailableTenantSettingsService : ITenantSettingsService
 {
     public ValueTask<TenantSettings> GetAsync(CancellationToken ct) => ValueTask.FromException<TenantSettings>(new WorkerDockException("PersistenceUnavailable"));
     public ValueTask<TenantSettings> UpdateAsync(TenantSettings desired, byte[] expectedVersion, ActorContext actor, CancellationToken ct) => ValueTask.FromException<TenantSettings>(new WorkerDockException("PersistenceUnavailable"));
+}
+internal sealed class UnavailableJobCommands : IJobCommands
+{
+    public ValueTask<CommandReceipt> SaveAsync(WorkerDock.Domain.Jobs.JobRevision proposed, byte[]? expectedVersion, ActorContext actor, CancellationToken ct)
+        => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct)
+        => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<CommandReceipt> GetCommandAsync(Guid commandId, CancellationToken ct)
+        => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<JobEditorDto> GetEditableAsync(Guid jobId, CancellationToken ct)
+        => ValueTask.FromException<JobEditorDto>(new WorkerDockException("PersistenceUnavailable"));
 }
