@@ -39,7 +39,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
             {
                 await VerifyAsync(connection, transaction, token);
                 await using var command = Command(connection, transaction,
-                    "SELECT TOP (@limit) ExecutionId FROM dbo.Attempts WHERE State=N'Running' AND LeaseExpiresUtc<=SYSUTCDATETIME() ORDER BY LeaseExpiresUtc,AttemptId");
+                    "SELECT TOP (@limit) ExecutionId FROM [workerdock].Attempts WHERE State=N'Running' AND LeaseExpiresUtc<=SYSUTCDATETIME() ORDER BY LeaseExpiresUtc,AttemptId");
                 Add(command, "@limit", SqlDbType.Int, limit);
                 var ids = new List<Guid>();
                 await using (var reader = await command.ExecuteReaderAsync(token))
@@ -82,7 +82,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
 
     private async ValueTask VerifyAsync(DbConnection connection, DbTransaction transaction, CancellationToken ct)
     {
-        await using var command = Command(connection, transaction, "SELECT InstanceId FROM dbo.TenantSettings");
+        await using var command = Command(connection, transaction, "SELECT InstanceId FROM [workerdock].TenantSettings");
         if ((Guid?)await command.ExecuteScalarAsync(ct) != options.InstanceId) throw new WorkerDockException("TenantInstanceMismatch");
     }
     private static async ValueTask<DateTimeOffset> NowAsync(DbConnection c, DbTransaction t, CancellationToken ct)
@@ -96,20 +96,20 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
             SELECT e.JobId,e.JobRevision,e.IdempotencyKey,e.State,e.Certainty,e.AvailableAtUtc,e.ProfileRevisionId,
                 e.StopRequested,e.ForceStop,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.PolicyJson,
                 j.Enabled,j.Archived,cat.Enabled,CONVERT(bit,COALESCE(p.StartGateClosed,1)),o.EventId,o.PayloadJson,o.PayloadDigest,
-                CASE WHEN @boot IS NULL OR EXISTS(SELECT 1 FROM dbo.Workers w JOIN dbo.WorkerCapabilities wc ON wc.InstallationId=w.InstallationId
-                    JOIN dbo.PolicyRevisions policy ON policy.PolicyKind=N'Capacity'
+                CASE WHEN @boot IS NULL OR EXISTS(SELECT 1 FROM [workerdock].Workers w JOIN [workerdock].WorkerCapabilities wc ON wc.InstallationId=w.InstallationId
+                    JOIN [workerdock].PolicyRevisions policy ON policy.PolicyKind=N'Capacity'
                     WHERE w.BootId=@boot AND w.State=N'Ready' AND policy.State=N'Effective'
                     AND w.CatalogDigest=policy.CatalogDigest AND w.AcknowledgedRevision=policy.EffectiveRevision
                     AND p.EffectiveRevision=policy.EffectiveRevision AND p.EffectiveLimit>0
-                    AND w.LiveLimit>(SELECT COUNT(*) FROM dbo.Attempts active WHERE active.WorkerBootId=w.BootId AND active.State=N'Running')
+                    AND w.LiveLimit>(SELECT COUNT(*) FROM [workerdock].Attempts active WHERE active.WorkerBootId=w.BootId AND active.State=N'Running')
                     AND w.LastHeartbeatUtc>DATEADD(second,-60,SYSUTCDATETIME())
                     AND wc.TemplateId=r.TemplateId AND wc.TemplateVersion=r.TemplateVersion)
-                    AND EXISTS(SELECT 1 FROM dbo.JobPermits permit WHERE permit.ExecutionId=e.ExecutionId) THEN 1 ELSE 0 END,COALESCE(p.EffectiveRevision,-1)
-            FROM dbo.Executions e JOIN dbo.JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-                JOIN dbo.Jobs j ON j.JobId=e.JobId
-                LEFT JOIN dbo.TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
-                LEFT JOIN dbo.TemplatePolicies p ON p.TemplateId=r.TemplateId
-                OUTER APPLY (SELECT TOP(1) EventId,PayloadJson,PayloadDigest FROM dbo.Outbox WHERE EntityId=e.ExecutionId AND EventType=N'ExecutionDispatch'
+                    AND EXISTS(SELECT 1 FROM [workerdock].JobPermits permit WHERE permit.ExecutionId=e.ExecutionId) THEN 1 ELSE 0 END,COALESCE(p.EffectiveRevision,-1)
+            FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
+                JOIN [workerdock].Jobs j ON j.JobId=e.JobId
+                LEFT JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
+                LEFT JOIN [workerdock].TemplatePolicies p ON p.TemplateId=r.TemplateId
+                OUTER APPLY (SELECT TOP(1) EventId,PayloadJson,PayloadDigest FROM [workerdock].Outbox WHERE EntityId=e.ExecutionId AND EventType=N'ExecutionDispatch'
                     ORDER BY COALESCE(TRY_CONVERT(int,JSON_VALUE(PayloadJson,'$.attemptOrdinal')),1) DESC,COALESCE(TRY_CONVERT(bigint,JSON_VALUE(PayloadJson,'$.capacityRevision')),-1) DESC,CreatedAtUtc DESC) o
             WHERE e.ExecutionId=@id
             """);
@@ -136,7 +136,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
             DescriptorAvailable = !reader.IsDBNull(15) && reader.GetBoolean(15) && reader.IsDBNull(6)
         };
         await reader.CloseAsync();
-        await using var attempt = Command(c, t, "SELECT TOP(1) AttemptId,AttemptNumber,Generation,WorkerBootId,LeaseExpiresUtc,DeadlineUtc,State,LocalExitConfirmed,SafeCode FROM dbo.Attempts WHERE ExecutionId=@id ORDER BY AttemptNumber DESC");
+        await using var attempt = Command(c, t, "SELECT TOP(1) AttemptId,AttemptNumber,Generation,WorkerBootId,LeaseExpiresUtc,DeadlineUtc,State,LocalExitConfirmed,SafeCode FROM [workerdock].Attempts WHERE ExecutionId=@id ORDER BY AttemptNumber DESC");
         Add(attempt, "@id", SqlDbType.UniqueIdentifier, id);
         await using var ar = await attempt.ExecuteReaderAsync(ct);
         if (await ar.ReadAsync(ct))
@@ -156,10 +156,10 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
             var lease = data.Lease!;
             var insert = previous is null || previous.AttemptId != lease.AttemptId;
             await using var command = Command(c, t, insert ? """
-                INSERT INTO dbo.Attempts(AttemptId,ExecutionId,AttemptNumber,WorkerBootId,Generation,State,LeaseExpiresUtc,StartedAtUtc,DeadlineUtc,LocalExitConfirmed,EffectsMayHaveOccurred)
+                INSERT INTO [workerdock].Attempts(AttemptId,ExecutionId,AttemptNumber,WorkerBootId,Generation,State,LeaseExpiresUtc,StartedAtUtc,DeadlineUtc,LocalExitConfirmed,EffectsMayHaveOccurred)
                 VALUES(@attempt,@execution,@ordinal,@boot,@generation,@state,@expires,SYSUTCDATETIME(),@deadline,@exit,@effects)
                 """ : """
-                UPDATE dbo.Attempts SET State=@state,LeaseExpiresUtc=@expires,LocalExitConfirmed=@exit,EffectsMayHaveOccurred=@effects,
+                UPDATE [workerdock].Attempts SET State=@state,LeaseExpiresUtc=@expires,LocalExitConfirmed=@exit,EffectsMayHaveOccurred=@effects,
                     EndedAtUtc=CASE WHEN @state=N'Running' THEN NULL ELSE SYSUTCDATETIME() END,SafeCode=@code
                 WHERE AttemptId=@attempt AND ExecutionId=@execution AND Generation=@generation AND WorkerBootId=@boot AND State=@previousState
                     AND (@previousState<>N'Running' OR (@expired=1 AND LeaseExpiresUtc<=SYSUTCDATETIME()) OR (@expired=0 AND LeaseExpiresUtc>SYSUTCDATETIME()))
@@ -177,19 +177,19 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
         {
             if (data.State is "Queued" or "RetryWaiting" && !data.GateOpen)
             {
-                await using var held = Command(c, t, "UPDATE dbo.Outbox SET ProjectionState=N'Held' WHERE EntityId=@id AND EventType=N'ExecutionDispatch' AND ProjectionState<>N'Retired'");
+                await using var held = Command(c, t, "UPDATE [workerdock].Outbox SET ProjectionState=N'Held' WHERE EntityId=@id AND EventType=N'ExecutionDispatch' AND ProjectionState<>N'Retired'");
                 Add(held, "@id", SqlDbType.UniqueIdentifier, data.Descriptor.ExecutionId); await held.ExecuteNonQueryAsync(ct);
             }
             return;
         }
-        await using var update = Command(c, t, "UPDATE dbo.Executions SET State=@state,Certainty=@certainty,AvailableAtUtc=@due,StopRequested=@stop,ForceStop=@force WHERE ExecutionId=@id; IF @release=1 DELETE FROM dbo.JobPermits WHERE ExecutionId=@id;");
+        await using var update = Command(c, t, "UPDATE [workerdock].Executions SET State=@state,Certainty=@certainty,AvailableAtUtc=@due,StopRequested=@stop,ForceStop=@force WHERE ExecutionId=@id; IF @release=1 DELETE FROM [workerdock].JobPermits WHERE ExecutionId=@id;");
         Add(update, "@id", SqlDbType.UniqueIdentifier, data.Descriptor.ExecutionId); Add(update, "@state", SqlDbType.NVarChar, data.State, 30);
         Add(update, "@certainty", SqlDbType.NVarChar, data.Uncertain ? "Unknown" : "Known", 10); Add(update, "@due", SqlDbType.DateTime2, data.Intent.DueUtc.UtcDateTime);
         Add(update, "@stop", SqlDbType.Bit, data.StopRequested); Add(update, "@force", SqlDbType.Bit, data.Force); Add(update, "@release", SqlDbType.Bit, !data.PermitRetained);
         await update.ExecuteNonQueryAsync(ct);
         foreach (var state in data.Events)
         {
-            await using var ev = Command(c, t, "INSERT INTO dbo.AttemptStatusEvents(EventId,ExecutionId,AttemptId,State,OccurredAtUtc) VALUES(NEWID(),@id,@attempt,@state,SYSUTCDATETIME())");
+            await using var ev = Command(c, t, "INSERT INTO [workerdock].AttemptStatusEvents(EventId,ExecutionId,AttemptId,State,OccurredAtUtc) VALUES(NEWID(),@id,@attempt,@state,SYSUTCDATETIME())");
             Add(ev, "@id", SqlDbType.UniqueIdentifier, data.Descriptor.ExecutionId); Add(ev, "@attempt", SqlDbType.UniqueIdentifier, data.Lease?.AttemptId); Add(ev, "@state", SqlDbType.NVarChar, state, 40);
             await ev.ExecuteNonQueryAsync(ct);
         }
@@ -197,7 +197,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
             await WorkerDock.Infrastructure.Dispatch.JobAdmission.AdmitAsync(c, t, data.JobId, ct);
         if (data.NewDispatch is { } intent)
         {
-            await using var outbox = Command(c, t, "INSERT INTO dbo.Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState) VALUES(@id,N'ExecutionDispatch',@payload,SYSUTCDATETIME(),@due,1,@execution,@revision,@digest,N'Pending')");
+            await using var outbox = Command(c, t, "INSERT INTO [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState) VALUES(@id,N'ExecutionDispatch',@payload,SYSUTCDATETIME(),@due,1,@execution,@revision,@digest,N'Pending')");
             Add(outbox, "@id", SqlDbType.UniqueIdentifier, intent.DeliveryId); Add(outbox, "@execution", SqlDbType.UniqueIdentifier, intent.ExecutionId);
             Add(outbox, "@revision", SqlDbType.BigInt, intent.EntityRevision); Add(outbox, "@due", SqlDbType.DateTime2, intent.DueUtc.UtcDateTime);
             Add(outbox, "@digest", SqlDbType.Char, ProjectionEnvelope.ExecutionDigest(intent.ExecutionId, intent.EntityRevision, intent.AttemptOrdinal), 64);

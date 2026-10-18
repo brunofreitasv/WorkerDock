@@ -25,8 +25,8 @@ public sealed class SqlExecutionControls(TenantDatabaseOptions options) : IExecu
         }, ct, async (connection, transaction, receipt, token) =>
         {
             await using var command = Command(connection, transaction, """
-                INSERT INTO dbo.Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc) VALUES(@command,@target,@kind,@state,SYSUTCDATETIME());
-                INSERT INTO dbo.AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson)
+                INSERT INTO [workerdock].Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc) VALUES(@command,@target,@kind,@state,SYSUTCDATETIME());
+                INSERT INTO [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson)
                     VALUES(NEWID(),@kind,@subject,@mode,@correlation,SYSUTCDATETIME(),@details);
                 """);
             Add(command, "@command", SqlDbType.UniqueIdentifier, receipt.CommandId); Add(command, "@target", SqlDbType.UniqueIdentifier, id);

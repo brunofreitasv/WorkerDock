@@ -2,7 +2,7 @@
 
 Use SQL Server 2022 or newer. The tenant database requires compatibility level 160. Set up a dedicated, disposable SQL instance for integration tests. The test login must be able to create and drop its own `WorkerDock_Test_<32 hex digits>` databases in `master`. `SqlDatabaseFixture` generates that name, creates the database, tests with `READ_COMMITTED_SNAPSHOT` both OFF and ON, and drops only that generated database. Never point the fixture at an existing user database.
 
-On Windows, install a local SQL Server 2022 Developer or Express instance, start its Database Engine service, and have an administrator provision a dedicated test login with permission to create databases. Use a connection string such as `Server=localhost;Integrated Security=true;TrustServerCertificate=true;Encrypt=true` when that Windows identity is authorized. If Windows authentication is rejected, use a dedicated SQL test login provisioned by the administrator; do not change server permissions as part of the test run.
+On Windows, install a local SQL Server 2022 Developer or Express instance, start its Database Engine service, and have an administrator provision a dedicated test login with permission to create databases. Use an integrated-authentication connection supplied through deployment secrets when that Windows identity is authorized. If Windows authentication is rejected, use a dedicated SQL test login provisioned by the administrator; do not change server permissions as part of the test run.
 
 For tests, set `WORKERDOCK_TEST_SQL` to a connection string for that disposable instance. Do not include a database name that should be preserved: the fixture overrides Initial Catalog with `master` and its generated test database. Then run:
 
@@ -25,7 +25,7 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifie
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~QuartzCapacityTests|FullyQualifiedName~QuartzSqlTopologyTests'
 ```
 
-For local manual setup, create an empty tenant database at compatibility level 160. Supply a deployment-only migrator connection string in `WORKERDOCK_SQL` and a newly generated, stable GUID in `WORKERDOCK_INSTANCE_ID`; the GUID binds this database to one tenant context. Run `dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0002_quartz`. The migrator applies `0001_bootstrap` first, checks both script checksums before connecting, records them in `SchemaHistory`, and verifies the stored instance ID on later runs. Only the migrator login needs DDL rights. Add the runtime database user to `WorkerDockRuntime`, which grants settings/audit rights plus DML on both Quartz table sets. Configure `Tenant__ConnectionString` and `Tenant__InstanceId` for the web host from deployment secrets/configuration, never a browser selector.
+For local manual setup, create an empty tenant database at compatibility level 160. Supply a deployment-only migrator connection string in `WORKERDOCK_SQL` and a newly generated, stable GUID in `WORKERDOCK_INSTANCE_ID`; the GUID binds this database to one tenant context. Run `dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0003c_capacity`. The migrator applies all earlier manifest entries through `0003c_capacity`, starting with `0001_bootstrap`, checks both script checksums before connecting, records them in `SchemaHistory`, and verifies the stored instance ID on later runs. Only the migrator login needs DDL rights. Add the runtime database user to `WorkerDockRuntime`, which grants settings/audit rights plus DML on both Quartz table sets. Configure `Tenant__ConnectionString` and `Tenant__InstanceId` for the web host from deployment secrets/configuration, never a browser selector.
 
 Before any migration DDL, the runner reads the connected server's major version and the connected database's compatibility level. It requires SQL Server major version 16 or later and compatibility level exactly 160, returning `UnsupportedSqlServerVersion` or `UnsupportedCompatibilityLevel` otherwise. This check and the scripts still require live verification on the disposable SQL test instance.
 
@@ -44,7 +44,7 @@ The migration script is checked into `database/tenant` with its SHA-256 values i
 
 ## Same application ports with real SQL
 
-The memory instance and SQL deployment both use `ITenantSettingsService` and the same `/api/session`, `/api/settings` and antiforgery/policy routes. The React build is the same. No Task02 schema change or grant change is required. Do not reuse the disposable memory GUID for an existing tenant database: use that database's provisioned instance ID.
+The memory instance and SQL deployment both use `ITenantSettingsService` and the same `/api/session`, `/api/settings` and antiforgery/policy routes. The React build is the same. Do not reuse the disposable memory GUID for an existing tenant database: use that database's provisioned instance ID.
 
 For a newly provisioned, dedicated empty local tenant database, run these exact steps with values supplied through deployment configuration; keep credentials out of source and shell history:
 
@@ -53,7 +53,7 @@ For a newly provisioned, dedicated empty local tenant database, run these exact 
 $env:WORKERDOCK_INSTANCE_ID='<new-stable-instance-guid>'
 $env:WORKERDOCK_SQL='<dedicated-local-tenant-migrator-connection-string>'
 dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0001_bootstrap
-dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0002_quartz
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0003c_capacity
 $env:Tenant__Adapter='SqlServer'
 $env:Tenant__InstanceId=$env:WORKERDOCK_INSTANCE_ID
 $env:Tenant__ConnectionString='<dedicated-local-tenant-runtime-connection-string>'
@@ -238,8 +238,7 @@ execution demonstrations use test-only handlers from the test projects.
 The suffix pair adds durable worker acknowledgement/readiness, policy catalog
 identity, command policy revisions and a per-job admission sequence. It grants
 only the DML needed on existing policy/worker/permit tables. The down script
-refuses used policy/worker/permit state and restores the preceding schema. No
-existing numbered migration or released checksum is changed.
+refuses used policy/worker/permit state and restores the preceding schema. Task 09A subsequently rewrites the unpublished fresh-install pairs for the custom schema.
 
 Run these exact SQL checks against the separate disposable test SQL instance,
 with its pre-provisioned distinct restricted SQL login:
@@ -262,9 +261,67 @@ acknowledgements, lowering 3-to-1-to-0-to-2 with active attempts, rejoining an
 old boot, and retaining retry/review permits. That full live-policy SQL proof is
 still pending; probe and memory passes cannot substitute for it.
 
-The Task 09 full run has no configured SQL test connection and reports the SQL
-fixtures as SQL_TEST_BLOCKED. Real migration/rollback, permission and SQL
-capacity proofs remain pending. All Task 09 SQL references deliberately remain
-in the existing `dbo` schema; the requested complete `workerdock` schema
-conversion, including both Quartz stores and migration history, is a separate
-follow-up before Stage 03.
+SQL_TEST_BLOCKED: WORKERDOCK_TEST_SQL is absent. Real custom-schema migration/rollback, grants, SQL durability and clustering proofs remain pending; memory and source-contract checks cannot establish them.
+
+## Custom schema fresh installation (Task 09A)
+
+Every WorkerDock-owned SQL object is in `[workerdock]`. The bootstrap migration
+creates it before any table and drops it only after dependent migrations and
+objects have been removed. The schema owner `[dbo]` is a database principal;
+`sys.*` and `sys.sp_getapplock` remain SQL Server system objects. Runtime grants
+remain per object, with no schema-wide DDL permission or runtime auto-provisioning.
+Both Quartz stores are preinstalled by `0002_quartz`, and all scheduler, worker
+and publisher paths use the shared `QuartzTopology` configuration with
+`TablePrefix = "[workerdock].WDS_QRTZ_"` or `"[workerdock].WDE_QRTZ_"` and
+`SchemaProvisioning.Validate`. Quartz 4.5.1 exposes these through the public
+`AdoJobStoreOptions` / `ConfigureStore` API; see the
+[Quartz configuration reference](https://www.quartz-scheduler.net/documentation/quartz-4.x/configuration/reference.html#persistent-job-store).
+The attributed upstream SQL snapshot remains unmodified; only WorkerDock's
+executable copies are transformed.
+
+This is an authorized pre-release rewrite for fresh installation. Existing
+unpublished prototype `dbo` databases are not automatically converted. Use a new
+empty database or a separately reviewed data-move upgrade preserving data and
+history. Do not apply rewritten checksums as an in-place upgrade to an applied
+prototype or released database. Future tenant and central database migrations
+must create/use their own `[workerdock]` namespace.
+
+After installing SQL Server 2022 Developer/Express and starting its Database
+Engine service, an authorized administrator can create a dedicated empty local
+database using `sqlcmd` (install SQL Server command-line utilities if needed):
+
+```powershell
+sqlcmd -S localhost -E -C -b -Q "CREATE DATABASE [WorkerDock_Local]; ALTER DATABASE [WorkerDock_Local] SET COMPATIBILITY_LEVEL = 160;"
+$env:WORKERDOCK_SQL='<deployment-only-connection-for-WorkerDock_Local>'
+$env:WORKERDOCK_INSTANCE_ID=[guid]::NewGuid().ToString()
+# Persist this instance ID in deployment configuration before starting hosts.
+dotnet run --project src/WorkerDock.DatabaseMigrator -c Release -- apply tenant 0003c_capacity
+# The distinct restricted server login WorkerDockRuntimeLocal must be provisioned by the administrator first.
+sqlcmd -S localhost -E -C -b -d WorkerDock_Local -Q "CREATE USER [WorkerDockRuntimeLocal] FOR LOGIN [WorkerDockRuntimeLocal]; ALTER ROLE [WorkerDockRuntime] ADD MEMBER [WorkerDockRuntimeLocal];"
+```
+
+Use the restricted login's connection from deployment secrets for runtime hosts,
+and the stored instance ID for `Tenant__InstanceId`. Only the migrator has DDL
+rights. The disposable integration fixture separately needs the provisioner to
+create/drop generated databases; do not use `WorkerDock_Local` as fixture data.
+With `WORKERDOCK_TEST_SQL` and `WORKERDOCK_TEST_SQL_RUNTIME` supplied securely as
+above, run the entire real SQL suite, including all-pairs up/down/up verification:
+
+```powershell
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'Store=Sql'
+dotnet test WorkerDock.slnx -c Release
+dotnet build WorkerDock.slnx -c Release
+```
+
+For an unused disposable database, stop every host and remove its runtime role
+membership before rollback. After backup and the documented empty-data checks,
+reverse the pairs explicitly; the runner rolls back only the named pair:
+
+```powershell
+'0003c_capacity','0003b_attempts','0003a_projection','0003_execution','0002_quartz','0001_bootstrap' | ForEach-Object {
+    dotnet run --project src/WorkerDock.DatabaseMigrator -c Release -- rollback tenant $_
+    if ($LASTEXITCODE -ne 0) { throw 'Rollback failed; inspect the safe error code before continuing.' }
+}
+```
+
+SQL_TEST_BLOCKED remains the expected result while `WORKERDOCK_TEST_SQL` is absent.

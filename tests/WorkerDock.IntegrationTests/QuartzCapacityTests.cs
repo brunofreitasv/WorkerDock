@@ -17,7 +17,7 @@ public sealed class QuartzCapacityTests
         var publisher = await fixture.StartAsync("publisher");
         var workers = new[] { await fixture.StartAsync("execution"), await fixture.StartAsync("execution"), await fixture.StartAsync("execution") };
         await Task.WhenAll(workers.Select(fixture.ArmAsync));
-        Assert.Equal(3, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.WDE_QRTZ_SCHEDULER_STATE WHERE SCHED_NAME = 'WorkerDock.Execute'"));
+        Assert.Equal(3, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].WDE_QRTZ_SCHEDULER_STATE WHERE SCHED_NAME = 'WorkerDock.Execute'"));
         var deliveries = Enumerable.Range(0, 6).Select(_ => Guid.NewGuid().ToString("N")).ToArray();
         foreach (var delivery in deliveries) await fixture.PublishAsync(publisher, delivery);
         for (var index = 0; index < deliveries.Length; index++)
@@ -47,7 +47,7 @@ public sealed class QuartzCapacityTests
         Assert.Equal(6, await fixture.EndedRowsAsync());
         Assert.Equal(6, fixture.Deliveries.Count);
         Assert.All(fixture.Deliveries.Values, count => Assert.Equal(1, count));
-        Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.WDS_QRTZ_JOB_DETAILS"));
+        Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].WDS_QRTZ_JOB_DETAILS"));
         foreach (var worker in workers) await fixture.StopAsync(worker);
     }
 }
@@ -65,7 +65,7 @@ public sealed class QuartzSqlTopologyTests
         var publisher = await fixture.StartAsync("publisher");
         var delivery = Guid.NewGuid().ToString("N");
         await fixture.PublishAsync(publisher, delivery);
-        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.WDE_QRTZ_TRIGGERS"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].WDE_QRTZ_TRIGGERS"));
         var refused = await Assert.ThrowsAsync<WorkerDock.Application.Common.WorkerDockException>(async () => await fixture.Runner.RollbackAsync("tenant", "0002_quartz", default));
         Assert.Equal("UnsafeRollback", refused.Code);
         await fixture.StopAsync(publisher);
@@ -84,7 +84,7 @@ public sealed class QuartzSqlTopologyTests
         Assert.Equal(1, fixture.Deliveries[delivery]);
         Assert.Equal(1, await fixture.StartedRowsAsync());
         Assert.Equal(1, await fixture.EndedRowsAsync());
-        Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.WDE_QRTZ_TRIGGERS"));
+        Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].WDE_QRTZ_TRIGGERS"));
     }
 
     [Theory]
@@ -95,9 +95,9 @@ public sealed class QuartzSqlTopologyTests
     {
         await using var fixture = new QuartzProcessFixture();
         await fixture.CreateAsync(snapshot);
-        Assert.Equal(30, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE name LIKE 'WD[SE][_]QRTZ[_]%'"));
+        Assert.Equal(30, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name LIKE 'WD[SE][_]QRTZ[_]%'"));
         await fixture.Runner.RollbackAsync("tenant", "0002_quartz", default);
-        Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE name LIKE 'WD[SE][_]QRTZ[_]%'"));
+        Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name LIKE 'WD[SE][_]QRTZ[_]%'"));
         await fixture.Runner.ApplyAsync("tenant", "0002_quartz", default);
         await using var topology = new QuartzTopology(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
         var options = new QuartzNodeOptions(fixture.Database.InstanceId, Guid.NewGuid().ToString("N"), 1);

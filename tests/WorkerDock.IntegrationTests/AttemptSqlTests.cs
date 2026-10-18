@@ -27,7 +27,7 @@ public sealed class AttemptSqlTests
             new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, "Queue", 100, 5));
         var actor = new ActorContext("operator", "Anonymous", Guid.NewGuid());
         await commands.SaveAsync(job, null, actor, default);
-        await fixture.Database.ExecuteAsync($"UPDATE dbo.Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         await SqlCapacityTestSetup.ReadyAsync(options,"boot-a","boot-b");
         var run = await commands.RunNowAsync(job.JobId, "sql-fence", actor, default);
         var projections = new SqlProjectionStore(options);
@@ -49,23 +49,23 @@ public sealed class AttemptSqlTests
         Assert.True((await second.ReadSignalAsync(lease, default)).StopRequested);
         var success = new TemplateResult("Success", "Ok", false, JsonSerializer.SerializeToElement(new { }), null);
         await first.CompleteAsync(lease, new(success, "Completed", true, false), default);
-        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM dbo.Executions WHERE ExecutionId='{run.TargetId}' AND State=N'Stopped' AND StopRequested=1"));
-        Assert.Equal(0, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM dbo.Outbox WHERE EntityId='{run.TargetId}' AND JSON_VALUE(PayloadJson,'$.attemptOrdinal')='2'"));
-        Assert.Equal(0, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM dbo.JobPermits WHERE ExecutionId='{run.TargetId}'"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{run.TargetId}' AND State=N'Stopped' AND StopRequested=1"));
+        Assert.Equal(0, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Outbox WHERE EntityId='{run.TargetId}' AND JSON_VALUE(PayloadJson,'$.attemptOrdinal')='2'"));
+        Assert.Equal(0, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].JobPermits WHERE ExecutionId='{run.TargetId}'"));
         Assert.Equal("Completed", (await second.BeginAsync(intent, "boot-b", default)).Decision);
 
         var crash = await commands.RunNowAsync(job.JobId, "crash-before-launch", actor, default);
         var nextEnvelope = (await projections.ReadPendingAsync(10, default)).Single(x => x.EntityId == crash.TargetId);
         var nextIntent = (await projections.ReadAsync(nextEnvelope, 1, default)).Intent;
         var abandoned = (await first.BeginAsync(nextIntent, "boot-a", default)).Lease!;
-        await fixture.Database.ExecuteAsync($"UPDATE dbo.Attempts SET LeaseExpiresUtc=DATEADD(second,-1,SYSUTCDATETIME()) WHERE AttemptId='{abandoned.AttemptId}'");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Attempts SET LeaseExpiresUtc=DATEADD(second,-1,SYSUTCDATETIME()) WHERE AttemptId='{abandoned.AttemptId}'");
         Assert.Null(await second.RenewAsync(abandoned, default));
         var reviews = await Task.WhenAll(first.ReviewExpiredAsync(10, default).AsTask(), second.ReviewExpiredAsync(10, default).AsTask());
         Assert.Equal(1, reviews.Sum());
         await first.CompleteAsync(abandoned, new(success, "Completed", true, false), default);
-        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM dbo.Executions WHERE ExecutionId='{crash.TargetId}' AND State=N'NeedsReview' AND Certainty=N'Unknown'"));
-        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM dbo.AttemptStatusEvents WHERE ExecutionId='{crash.TargetId}' AND State=N'NeedsReview'"));
-        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM dbo.JobPermits WHERE ExecutionId='{crash.TargetId}'"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{crash.TargetId}' AND State=N'NeedsReview' AND Certainty=N'Unknown'"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].AttemptStatusEvents WHERE ExecutionId='{crash.TargetId}' AND State=N'NeedsReview'"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].JobPermits WHERE ExecutionId='{crash.TargetId}'"));
         var rejected = await Assert.ThrowsAsync<WorkerDockException>(async () => await fixture.Runner.RollbackAsync("tenant", "0003c_capacity", default));
         Assert.Equal("UnsafeRollback", rejected.Code);
     }
@@ -78,6 +78,6 @@ public sealed class AttemptSqlTests
         await runner.ApplyAsync("tenant", "0003b_attempts", default);
         await runner.RollbackAsync("tenant", "0003b_attempts", default);
         await runner.ApplyAsync("tenant", "0003b_attempts", default);
-        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE name=N'AttemptStatusEvents'"));
+        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name=N'AttemptStatusEvents'"));
     }
 }

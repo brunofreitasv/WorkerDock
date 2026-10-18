@@ -1,5 +1,7 @@
 # WorkerDock Implementation Plan
 
+All WorkerDock-owned tables, triggers, keys, indexes and explicit SQL references belong to `[workerdock]` in each database. Each independent tenant database and the separate central registry database owns its own schema; this is not a shared multitenant database or browser-supplied tenant selector. Quartz uses `[workerdock].WDS_QRTZ_` and `[workerdock].WDE_QRTZ_`. System `sys.*` objects and database principals retain their SQL Server names. New objects require paired migrations, checksums and explicit least-privilege grants; runtime startup never creates schema.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver the approved WorkerDock platform through six reviewable, independently verifiable stages.
@@ -26,7 +28,7 @@ The following requirements apply to every stage; quoted sentences retain the spe
 - "On a decrease, existing work drains; no new attempt starts until capacity is below the new limit. Zero pauses admission."
 - "Defaults: safe execution logs 30 days, execution history 90 days, audit 365 days."
 - "Provide English and Brazilian Portuguese from the first release, including validation text and dates/numbers."
-- Quartz baseline is 4.5.1; two stores use `WDS_QRTZ_` and `WDE_QRTZ_`; string-only opaque job data, locked acquisition, no direct runtime Quartz-table mutations or automatic schema creation.
+- Quartz baseline is 4.5.1; two stores use `[workerdock].WDS_QRTZ_` and `[workerdock].WDE_QRTZ_`; string-only opaque job data, locked acquisition, no direct runtime Quartz-table mutations or automatic schema creation.
 - Secrets resolve at execution time; never persist their values or emit raw driver errors/bodies. Anonymous read/manage mode and optional Entra management-role protection must match spec section 7 exactly.
 - Infinite timeout remains renewable/stoppable. A 10-second application heartbeat, 60-second lease and 30-second cancellation grace are the initial defaults; shutdown/startup/network setup remain bounded.
 - WorkerDock uses MIT; preserve Apache-2.0 and other dependency notices. Do not reuse Milvaion code, branding or UI.
@@ -150,3 +152,5 @@ Selected method: **Subagent-driven** by explicit user invocation. The managed wo
 - [x] User selects Subagent-driven execution (explicit skill invocation, 2026-10-17).
 - [x] Reuse the user-requested managed worktree prepared with the plan set; verified detached linked worktree at 9339d87 with only reviewed plan edits and no implementation baseline to test.
 - [x] Began Task 01 after approval on 2026-10-17; continue in dependency order with per-task review and separate unresolved real-SQL evidence.
+
+Task 09A (2026-10-18): the user requested a pre-release fresh-install rewrite of all existing tenant migration pairs and runtime references to [workerdock]. No deployed/applied database was available. Unpublished prototype dbo databases require a fresh database or a separately reviewed additive data-move upgrade; rewriting released/applied history remains prohibited. Real SQL migration, permissions and clustering evidence is still pending.

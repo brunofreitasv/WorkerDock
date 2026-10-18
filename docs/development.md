@@ -156,9 +156,34 @@ To run every integration case that does not need SQL, including non-connection
 migration validation, use:
 
 ```powershell
-dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'Store!=Sql&FullyQualifiedName!~WorkerDock.IntegrationTests.TenantSettingsTests.&FullyQualifiedName!~WorkerDock.IntegrationTests.JobSqlIntegrationTests.&FullyQualifiedName!~WorkerDock.IntegrationTests.MigrationTests.Checksum_tamper&FullyQualifiedName!~WorkerDock.IntegrationTests.MigrationTests.Up_down_up'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'Store!=Sql'
 ```
 
 Memory success does not establish SQL transactions, migrations, grants, restart
 recovery or three-node capacity. Use the real-SQL commands in database.md before
 claiming those properties have been demonstrated.
+
+## Task 09A custom schema verification
+
+Production and local SQL installations use `[workerdock]` for business tables,
+migration history, both Quartz stores and test probes. Fresh database setup,
+least-privilege runtime user setup, migration, rollback and all real SQL test
+commands are in [database.md](database.md#custom-schema-fresh-installation-task-09a).
+Existing unpublished prototype `dbo` databases require a fresh database or a
+separately reviewed data-move upgrade; there is no automatic conversion.
+
+These exact commands run every SQL-independent integration case, all unit and
+Windows process cases, and the Release build without a SQL login:
+
+```powershell
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'Store!=Sql'
+dotnet test tests/WorkerDock.UnitTests -c Release
+dotnet test tests/WorkerDock.ProcessTests -c Release
+dotnet build WorkerDock.slnx -c Release
+```
+
+`CustomSqlSchemaTests` checks the source SQL contract, paired manifest bytes and
+public Quartz prefix option; these are not proof of actual SQL execution. Run
+`MigrationTests.Fresh_custom_schema_installs_and_rolls_back_all_pairs` and the
+other database.md SQL suites on real SQL Server with RCSI OFF and ON before
+claiming migrations, rollback, grants or clustering are validated.

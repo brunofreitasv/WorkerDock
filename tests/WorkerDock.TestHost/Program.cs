@@ -59,7 +59,7 @@ static async Task WaitForRegistrationAsync(string connectionString, string boot)
     while (true)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM dbo.WDE_QRTZ_SCHEDULER_STATE WHERE SCHED_NAME = N'WorkerDock.Execute' AND INSTANCE_NAME = @Boot";
+        command.CommandText = "SELECT COUNT(*) FROM [workerdock].WDE_QRTZ_SCHEDULER_STATE WHERE SCHED_NAME = N'WorkerDock.Execute' AND INSTANCE_NAME = @Boot";
         command.Parameters.Add(new SqlParameter("@Boot", System.Data.SqlDbType.NVarChar, 200) { Value = boot });
         if (Convert.ToInt32(await command.ExecuteScalarAsync(timeout.Token)) == 1) return;
         await Task.Delay(100, timeout.Token);

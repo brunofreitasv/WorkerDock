@@ -26,14 +26,14 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
             {
                 await CheckInstanceAsync(connection, transaction, token);
                 await using var catalog = Command(connection, transaction,
-                    "SELECT Enabled FROM dbo.TemplateCatalog WHERE TemplateId=@template AND TemplateVersion=@version");
+                    "SELECT Enabled FROM [workerdock].TemplateCatalog WHERE TemplateId=@template AND TemplateVersion=@version");
                 Add(catalog, "@template", SqlDbType.NVarChar, proposed.TemplateId, 100);
                 Add(catalog, "@version", SqlDbType.NVarChar, proposed.TemplateVersion, 40);
                 if (await catalog.ExecuteScalarAsync(token) is not bool enabled || !enabled)
                     throw new WorkerDockException("UnknownTemplate", "templateId");
 
                 await using var read = Command(connection, transaction,
-                    "SELECT CurrentRevision,Version FROM dbo.Jobs WHERE JobId=@jobId");
+                    "SELECT CurrentRevision,Version FROM [workerdock].Jobs WHERE JobId=@jobId");
                 Add(read, "@jobId", SqlDbType.UniqueIdentifier, proposed.JobId);
                 await using var reader = await read.ExecuteReaderAsync(token);
                 long? currentRevision = null;
@@ -53,12 +53,12 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 if (currentVersion is null)
                 {
                     await using var insertJob = Command(connection, transaction,
-                        "INSERT INTO dbo.Jobs(JobId,CurrentRevision,Enabled,Archived,ConcurrencyLimit) VALUES (@id,NULL,0,0,1)");
+                        "INSERT INTO [workerdock].Jobs(JobId,CurrentRevision,Enabled,Archived,ConcurrencyLimit) VALUES (@id,NULL,0,0,1)");
                     Add(insertJob, "@id", SqlDbType.UniqueIdentifier, proposed.JobId);
                     await insertJob.ExecuteNonQueryAsync(token);
                 }
                 await using var insertRevision = Command(connection, transaction,
-                    "INSERT INTO dbo.JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc) VALUES (@job,@rev,@name,@template,@version,@config,@profile,@policy,SYSUTCDATETIME())");
+                    "INSERT INTO [workerdock].JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc) VALUES (@job,@rev,@name,@template,@version,@config,@profile,@policy,SYSUTCDATETIME())");
                 Add(insertRevision, "@job", SqlDbType.UniqueIdentifier, proposed.JobId);
                 Add(insertRevision, "@rev", SqlDbType.BigInt, number);
                 Add(insertRevision, "@name", SqlDbType.NVarChar, proposed.Name, 200);
@@ -70,8 +70,8 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 await insertRevision.ExecuteNonQueryAsync(token);
                 await using var update = Command(connection, transaction,
                     currentVersion is null
-                        ? "UPDATE dbo.Jobs SET CurrentRevision=@rev WHERE JobId=@id"
-                        : "UPDATE dbo.Jobs SET CurrentRevision=@rev WHERE JobId=@id AND Version=@expected");
+                        ? "UPDATE [workerdock].Jobs SET CurrentRevision=@rev WHERE JobId=@id"
+                        : "UPDATE [workerdock].Jobs SET CurrentRevision=@rev WHERE JobId=@id AND Version=@expected");
                 Add(update, "@rev", SqlDbType.BigInt, number);
                 Add(update, "@id", SqlDbType.UniqueIdentifier, proposed.JobId);
                 if (currentVersion is not null) Add(update, "@expected", SqlDbType.Binary, expectedVersion!, 8);
@@ -100,7 +100,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 var keyHash = Hash(requestKey);
                 var requestHash = Hash("RunNow|" + jobId.ToString("N"));
                 await using var dedup = Command(connection, transaction,
-                    "SELECT ActorMode,ActorSubject,RequestKey,RequestHash,ExecutionId,CommandId,ResponseState,ExpiresAtUtc FROM dbo.ManualRequestDedup WITH (UPDLOCK,HOLDLOCK) WHERE JobId=@job AND ActorScopeHash=@scope AND RequestKeyHash=@key");
+                    "SELECT ActorMode,ActorSubject,RequestKey,RequestHash,ExecutionId,CommandId,ResponseState,ExpiresAtUtc FROM [workerdock].ManualRequestDedup WITH (UPDLOCK,HOLDLOCK) WHERE JobId=@job AND ActorScopeHash=@scope AND RequestKeyHash=@key");
                 Add(dedup, "@job", SqlDbType.UniqueIdentifier, jobId);
                 Add(dedup, "@scope", SqlDbType.Char, scopeHash, 64);
                 Add(dedup, "@key", SqlDbType.Char, keyHash, 64);
@@ -125,14 +125,14 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 if (oldExecution is not null)
                 {
                     await using var remove = Command(connection, transaction,
-                        "DELETE FROM dbo.ManualRequestDedup WHERE JobId=@job AND ActorScopeHash=@scope AND RequestKeyHash=@key");
+                        "DELETE FROM [workerdock].ManualRequestDedup WHERE JobId=@job AND ActorScopeHash=@scope AND RequestKeyHash=@key");
                     Add(remove, "@job", SqlDbType.UniqueIdentifier, jobId);
                     Add(remove, "@scope", SqlDbType.Char, scopeHash, 64);
                     Add(remove, "@key", SqlDbType.Char, keyHash, 64);
                     await remove.ExecuteNonQueryAsync(token);
                 }
                 await using var job = Command(connection, transaction,
-                    "SELECT CurrentRevision,Enabled,Archived FROM dbo.Jobs WHERE JobId=@id");
+                    "SELECT CurrentRevision,Enabled,Archived FROM [workerdock].Jobs WHERE JobId=@id");
                 Add(job, "@id", SqlDbType.UniqueIdentifier, jobId);
                 await using var jobReader = await job.ExecuteReaderAsync(token);
                 if (!await jobReader.ReadAsync(token)) throw new WorkerDockException("JobNotFound");
@@ -143,7 +143,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 if (archived) throw new WorkerDockException("JobArchived");
                 if (!enabled) throw new WorkerDockException("JobDisabled");
                 await using var profile = Command(connection, transaction,
-                    "SELECT ProfileId FROM dbo.JobRevisions WHERE JobId=@job AND Revision=@rev");
+                    "SELECT ProfileId FROM [workerdock].JobRevisions WHERE JobId=@job AND Revision=@rev");
                 Add(profile, "@job", SqlDbType.UniqueIdentifier, jobId);
                 Add(profile, "@rev", SqlDbType.BigInt, revision);
                 if (await profile.ExecuteScalarAsync(token) is Guid)
@@ -152,7 +152,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 var executionId = Guid.NewGuid();
                 var receipt = new CommandReceipt(Guid.NewGuid(), executionId, "Pending");
                 await using var execution = Command(connection, transaction,
-                    "INSERT INTO dbo.Executions(ExecutionId,JobId,JobRevision,TriggerKind,RequestKey,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc) VALUES (@execution,@job,@rev,N'Manual',@key,@idempotency,N'Queued',N'Known',@now,@correlation,@now)");
+                    "INSERT INTO [workerdock].Executions(ExecutionId,JobId,JobRevision,TriggerKind,RequestKey,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc) VALUES (@execution,@job,@rev,N'Manual',@key,@idempotency,N'Queued',N'Known',@now,@correlation,@now)");
                 Add(execution, "@execution", SqlDbType.UniqueIdentifier, executionId);
                 Add(execution, "@job", SqlDbType.UniqueIdentifier, jobId);
                 Add(execution, "@rev", SqlDbType.BigInt, revision);
@@ -163,7 +163,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 await execution.ExecuteNonQueryAsync(token);
                 await InsertCommandAsync(connection, transaction, receipt, "ManualRun", token);
                 await using var saveKey = Command(connection, transaction,
-                    "INSERT INTO dbo.ManualRequestDedup(JobId,ActorScopeHash,RequestKeyHash,ActorMode,ActorSubject,RequestKey,RequestHash,ExecutionId,CommandId,ResponseState,AcceptedAtUtc,ExpiresAtUtc) VALUES (@job,@scope,@keyHash,@mode,@subject,@key,@hash,@execution,@command,@state,@now,DATEADD(hour,24,@now))");
+                    "INSERT INTO [workerdock].ManualRequestDedup(JobId,ActorScopeHash,RequestKeyHash,ActorMode,ActorSubject,RequestKey,RequestHash,ExecutionId,CommandId,ResponseState,AcceptedAtUtc,ExpiresAtUtc) VALUES (@job,@scope,@keyHash,@mode,@subject,@key,@hash,@execution,@command,@state,@now,DATEADD(hour,24,@now))");
                 Add(saveKey, "@job", SqlDbType.UniqueIdentifier, jobId);
                 Add(saveKey, "@scope", SqlDbType.Char, scopeHash, 64);
                 Add(saveKey, "@keyHash", SqlDbType.Char, keyHash, 64);
@@ -180,7 +180,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                     revision, revision, "Accepted", actor, token);
                 var payload = JsonSerializer.Serialize(new { executionId, jobRevision = revision });
                 await using var outbox = Command(connection, transaction,
-                    "INSERT INTO dbo.Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState) VALUES (@id,N'ExecutionDispatch',@payload,@now,@now,1,@execution,@revision,@digest,N'Pending')");
+                    "INSERT INTO [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState) VALUES (@id,N'ExecutionDispatch',@payload,@now,@now,1,@execution,@revision,@digest,N'Pending')");
                 Add(outbox, "@id", SqlDbType.UniqueIdentifier, Guid.NewGuid());
                 Add(outbox, "@payload", SqlDbType.NVarChar, payload, -1);
                 Add(outbox, "@now", SqlDbType.DateTime2, now);
@@ -228,7 +228,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
 
     private async ValueTask CheckInstanceAsync(DbConnection connection, DbTransaction transaction, CancellationToken ct)
     {
-        await using var command = Command(connection, transaction, "SELECT InstanceId FROM dbo.TenantSettings");
+        await using var command = Command(connection, transaction, "SELECT InstanceId FROM [workerdock].TenantSettings");
         if ((Guid?)await command.ExecuteScalarAsync(ct) != options.InstanceId)
             throw new WorkerDockException("TenantInstanceMismatch");
     }
@@ -237,7 +237,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
         CommandReceipt receipt, string kind, CancellationToken ct)
     {
         await using var command = Command(connection, transaction,
-            "INSERT INTO dbo.Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc) VALUES (@id,@target,@kind,@state,SYSUTCDATETIME())");
+            "INSERT INTO [workerdock].Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc) VALUES (@id,@target,@kind,@state,SYSUTCDATETIME())");
         Add(command, "@id", SqlDbType.UniqueIdentifier, receipt.CommandId);
         Add(command, "@target", SqlDbType.UniqueIdentifier, receipt.TargetId);
         Add(command, "@kind", SqlDbType.NVarChar, kind, 40);
@@ -250,7 +250,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
         ActorContext actor, CancellationToken ct)
     {
         await using var command = Command(connection, transaction,
-            "INSERT INTO dbo.AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson) VALUES (@id,@kind,@subject,@mode,@correlation,SYSUTCDATETIME(),@details)");
+            "INSERT INTO [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson) VALUES (@id,@kind,@subject,@mode,@correlation,SYSUTCDATETIME(),@details)");
         Add(command, "@id", SqlDbType.UniqueIdentifier, Guid.NewGuid());
         Add(command, "@kind", SqlDbType.NVarChar, kind, 100);
         Add(command, "@subject", SqlDbType.NVarChar, actor.Subject, 300);

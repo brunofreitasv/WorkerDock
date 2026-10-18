@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <InternalsVisibleTo Include="WorkerDock.IntegrationTests" />
     <PackageReference Include="Quartz" />
     <PackageReference Include="Microsoft.Data.SqlClient" />
     <ProjectReference Include="../WorkerDock.Infrastructure/WorkerDock.Infrastructure.csproj" />

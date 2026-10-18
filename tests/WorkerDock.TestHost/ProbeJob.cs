@@ -33,11 +33,11 @@ public sealed class ProbeJob : IJob
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            UPDATE dbo.QuartzProbeState
+            UPDATE [workerdock].QuartzProbeState
             SET Active = Active + @Delta,
                 MaximumActive = CASE WHEN Active + @Delta > MaximumActive THEN Active + @Delta ELSE MaximumActive END
             WHERE Id = 1;
-            INSERT dbo.QuartzProbeEvents(DeliveryId, BootId, EventKind) VALUES (@Delivery, @Boot, @Kind);
+            INSERT [workerdock].QuartzProbeEvents(DeliveryId, BootId, EventKind) VALUES (@Delivery, @Boot, @Kind);
             """;
         command.Parameters.Add(new SqlParameter("@Delta", SqlDbType.Int) { Value = kind == 'S' ? 1 : -1 });
         command.Parameters.Add(new SqlParameter("@Delivery", SqlDbType.Char, 32) { Value = delivery });

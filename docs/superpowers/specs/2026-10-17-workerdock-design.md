@@ -1,5 +1,7 @@
 # WorkerDock design specification
 
+All WorkerDock-owned tables, triggers, keys, indexes and explicit SQL references belong to `[workerdock]` in each database. Each independent tenant database and the separate central registry database owns its own schema; this is not a shared multitenant database or browser-supplied tenant selector. Quartz uses `[workerdock].WDS_QRTZ_` and `[workerdock].WDE_QRTZ_`. System `sys.*` objects and database principals retain their SQL Server names. New objects require paired migrations, checksums and explicit least-privilege grants; runtime startup never creates schema.
+
 Date: 2026-10-17 (America/Sao_Paulo)
 
 Status: Revised to use Quartz.NET with SQL Server for scheduling and dispatch and approved by the user on 2026-10-17. Implementation planning is authorized; implementation remains gated on plan review and execution-method selection.

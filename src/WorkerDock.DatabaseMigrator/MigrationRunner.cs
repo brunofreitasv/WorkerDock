@@ -75,7 +75,7 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
         await ExecuteScriptAsync(connection, transaction, Path.Combine(directory, entry.Id + ".up.sql"), ct);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "INSERT INTO dbo.SchemaHistory(MigrationId,UpChecksum,DownChecksum,AppliedAtUtc) VALUES (@id,@up,@down,SYSUTCDATETIME())";
+        command.CommandText = "INSERT INTO [workerdock].SchemaHistory(MigrationId,UpChecksum,DownChecksum,AppliedAtUtc) VALUES (@id,@up,@down,SYSUTCDATETIME())";
         command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = entry.Id });
         command.Parameters.Add(new SqlParameter("@up", SqlDbType.Char, 64) { Value = entry.UpSha256 });
         command.Parameters.Add(new SqlParameter("@down", SqlDbType.Char, 64) { Value = entry.DownSha256 });
@@ -97,7 +97,7 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
         {
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "DELETE FROM dbo.SchemaHistory WHERE MigrationId=@id";
+            command.CommandText = "DELETE FROM [workerdock].SchemaHistory WHERE MigrationId=@id";
             command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = entry.Id });
             await command.ExecuteNonQueryAsync(ct);
         }
@@ -108,11 +108,11 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
     {
         await using var exists = connection.CreateCommand();
         exists.Transaction = transaction;
-        exists.CommandText = "SELECT OBJECT_ID(N'dbo.TenantSettings', N'U')";
+        exists.CommandText = "SELECT OBJECT_ID(N'[workerdock].TenantSettings', N'U')";
         if (await exists.ExecuteScalarAsync(ct) is DBNull) return false;
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT InstanceId FROM dbo.TenantSettings";
+        command.CommandText = "SELECT InstanceId FROM [workerdock].TenantSettings";
         if ((Guid?)await command.ExecuteScalarAsync(ct) != instanceId)
             throw new WorkerDockException("TenantInstanceMismatch");
         return true;
@@ -122,7 +122,7 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT UpChecksum, DownChecksum FROM dbo.SchemaHistory WHERE MigrationId=@id";
+        command.CommandText = "SELECT UpChecksum, DownChecksum FROM [workerdock].SchemaHistory WHERE MigrationId=@id";
         command.Parameters.Add(new SqlParameter("@id", SqlDbType.NVarChar, 100) { Value = id });
         await using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? (reader.GetString(0), reader.GetString(1)) : null;

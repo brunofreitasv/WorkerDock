@@ -1,25 +1,25 @@
-IF EXISTS (SELECT 1 FROM dbo.Jobs) OR EXISTS (SELECT 1 FROM dbo.Executions) OR
-   EXISTS (SELECT 1 FROM dbo.Attempts) OR EXISTS (SELECT 1 FROM dbo.JobPermits) OR
-   EXISTS (SELECT 1 FROM dbo.ManualRequestDedup) OR EXISTS (SELECT 1 FROM dbo.Commands) OR
-   EXISTS (SELECT 1 FROM dbo.Workers) OR EXISTS (SELECT 1 FROM dbo.ServiceHealth) OR
-   EXISTS (SELECT 1 FROM dbo.PolicyRevisions) OR
-   EXISTS (SELECT 1 FROM dbo.Outbox WHERE EventType = N'ExecutionDispatch')
+IF EXISTS (SELECT 1 FROM [workerdock].Jobs) OR EXISTS (SELECT 1 FROM [workerdock].Executions) OR
+   EXISTS (SELECT 1 FROM [workerdock].Attempts) OR EXISTS (SELECT 1 FROM [workerdock].JobPermits) OR
+   EXISTS (SELECT 1 FROM [workerdock].ManualRequestDedup) OR EXISTS (SELECT 1 FROM [workerdock].Commands) OR
+   EXISTS (SELECT 1 FROM [workerdock].Workers) OR EXISTS (SELECT 1 FROM [workerdock].ServiceHealth) OR
+   EXISTS (SELECT 1 FROM [workerdock].PolicyRevisions) OR
+   EXISTS (SELECT 1 FROM [workerdock].Outbox WHERE EventType = N'ExecutionDispatch')
     THROW 51002, 'Unsafe rollback: execution data requires backup and explicit removal', 1;
-DROP INDEX IX_Outbox_Projection ON dbo.Outbox;
-ALTER TABLE dbo.Outbox DROP CONSTRAINT DF_Outbox_SchemaVersion, DF_Outbox_ProjectionState;
-ALTER TABLE dbo.Outbox DROP COLUMN SchemaVersion, EntityId, EntityRevision, PayloadDigest, ProjectionState, RetryAtUtc;
-DROP TABLE dbo.ManualRequestDedup;
-DROP TABLE dbo.Commands;
-DROP TABLE dbo.JobPermits;
-DROP TABLE dbo.Attempts;
-DROP TABLE dbo.Executions;
-DROP TABLE dbo.PolicyRevisions;
-DROP TABLE dbo.ServiceHealth;
-DROP TABLE dbo.WorkerCapabilities;
-DROP TABLE dbo.Workers;
-ALTER TABLE dbo.Jobs DROP CONSTRAINT FK_Jobs_CurrentRevision;
-DROP TRIGGER dbo.JobRevisions_Immutable;
-DROP TABLE dbo.JobRevisions;
-DROP TABLE dbo.Jobs;
-DROP TABLE dbo.TemplatePolicies;
-DROP TABLE dbo.TemplateCatalog;
+DROP INDEX IX_Outbox_Projection ON [workerdock].Outbox;
+ALTER TABLE [workerdock].Outbox DROP CONSTRAINT DF_Outbox_SchemaVersion, DF_Outbox_ProjectionState;
+ALTER TABLE [workerdock].Outbox DROP COLUMN SchemaVersion, EntityId, EntityRevision, PayloadDigest, ProjectionState, RetryAtUtc;
+DROP TABLE [workerdock].ManualRequestDedup;
+DROP TABLE [workerdock].Commands;
+DROP TABLE [workerdock].JobPermits;
+DROP TABLE [workerdock].Attempts;
+DROP TABLE [workerdock].Executions;
+DROP TABLE [workerdock].PolicyRevisions;
+DROP TABLE [workerdock].ServiceHealth;
+DROP TABLE [workerdock].WorkerCapabilities;
+DROP TABLE [workerdock].Workers;
+ALTER TABLE [workerdock].Jobs DROP CONSTRAINT FK_Jobs_CurrentRevision;
+DROP TRIGGER [workerdock].JobRevisions_Immutable;
+DROP TABLE [workerdock].JobRevisions;
+DROP TABLE [workerdock].Jobs;
+DROP TABLE [workerdock].TemplatePolicies;
+DROP TABLE [workerdock].TemplateCatalog;

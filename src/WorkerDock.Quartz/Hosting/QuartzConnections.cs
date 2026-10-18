@@ -16,7 +16,7 @@ public sealed record QuartzConnections(string ConnectionString, Guid InstanceId)
             await connection.OpenAsync(ct);
             await using var command = connection.CreateCommand();
             command.CommandTimeout = 10;
-            command.CommandText = "SELECT InstanceId FROM dbo.TenantSettings; SELECT COUNT(*) FROM dbo.SchemaHistory WHERE MigrationId = N'0002_quartz';";
+            command.CommandText = "SELECT InstanceId FROM [workerdock].TenantSettings; SELECT COUNT(*) FROM [workerdock].SchemaHistory WHERE MigrationId = N'0002_quartz';";
             await using var reader = await command.ExecuteReaderAsync(ct);
             if (!await reader.ReadAsync(ct) || reader.GetGuid(0) != InstanceId || await reader.ReadAsync(ct))
                 throw new WorkerDockException("TenantInstanceMismatch");

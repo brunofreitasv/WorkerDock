@@ -28,29 +28,29 @@ public sealed class SqlCapacityCommands(TenantDatabaseOptions options) : ICapaci
         {
             return await new BusinessTransaction(options).RunAsync(async (c, t, token) =>
             {
-                await using var identity = Command(c, t, "SELECT InstanceId FROM dbo.TenantSettings");
+                await using var identity = Command(c, t, "SELECT InstanceId FROM [workerdock].TenantSettings");
                 if ((Guid?)await identity.ExecuteScalarAsync(token) != options.InstanceId) throw new WorkerDockException("TenantInstanceMismatch");
                 await using var update = Command(c, t, kind switch
                 {
                     "TemplateLimit" => """
-                        UPDATE dbo.TemplatePolicies SET DesiredLimit=@limit WHERE TemplateId=@template;
+                        UPDATE [workerdock].TemplatePolicies SET DesiredLimit=@limit WHERE TemplateId=@template;
                         IF @@ROWCOUNT=0 THROW 51010,'UnknownTemplate',1;
-                        UPDATE dbo.PolicyRevisions SET DesiredRevision=DesiredRevision+1,State=N'Pending' WHERE PolicyId=@id;
-                        UPDATE dbo.TemplatePolicies SET StartGateClosed=1,DesiredRevision=(SELECT DesiredRevision FROM dbo.PolicyRevisions WHERE PolicyId=@id);
-                        UPDATE dbo.Workers SET State=N'Standby' WHERE State=N'Ready';
-                        SELECT DesiredRevision FROM dbo.PolicyRevisions WHERE PolicyId=@id;
+                        UPDATE [workerdock].PolicyRevisions SET DesiredRevision=DesiredRevision+1,State=N'Pending' WHERE PolicyId=@id;
+                        UPDATE [workerdock].TemplatePolicies SET StartGateClosed=1,DesiredRevision=(SELECT DesiredRevision FROM [workerdock].PolicyRevisions WHERE PolicyId=@id);
+                        UPDATE [workerdock].Workers SET State=N'Standby' WHERE State=N'Ready';
+                        SELECT DesiredRevision FROM [workerdock].PolicyRevisions WHERE PolicyId=@id;
                         """,
-                    "JobLimit" => "UPDATE dbo.Jobs SET ConcurrencyLimit=@limit WHERE JobId=@id AND Archived=0; IF @@ROWCOUNT=0 THROW 51011,'JobNotFound',1; SELECT CAST(NULL AS bigint);",
-                    _ => "UPDATE dbo.Workers SET LiveLimit=@limit WHERE InstallationId=@id AND @limit<=CapacityCeiling; IF @@ROWCOUNT=0 THROW 51012,'WorkerLimitInvalid',1; SELECT CAST(NULL AS bigint);"
+                    "JobLimit" => "UPDATE [workerdock].Jobs SET ConcurrencyLimit=@limit WHERE JobId=@id AND Archived=0; IF @@ROWCOUNT=0 THROW 51011,'JobNotFound',1; SELECT CAST(NULL AS bigint);",
+                    _ => "UPDATE [workerdock].Workers SET LiveLimit=@limit WHERE InstallationId=@id AND @limit<=CapacityCeiling; IF @@ROWCOUNT=0 THROW 51012,'WorkerLimitInvalid',1; SELECT CAST(NULL AS bigint);"
                 });
                 Add(update, "@limit", SqlDbType.Int, limit); Add(update, "@id", SqlDbType.UniqueIdentifier, id); Add(update, "@template", SqlDbType.NVarChar, template, 100);
                 var revision = await update.ExecuteScalarAsync(token);
                 var receipt = new CommandReceipt(Guid.NewGuid(), id, kind == "TemplateLimit" ? "Pending" : "Applied");
                 await using var command = Command(c, t, """
-                    INSERT dbo.Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc,PolicyRevision) VALUES(@command,@id,@kind,@state,SYSUTCDATETIME(),@revision);
-                    INSERT dbo.AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson)
+                    INSERT [workerdock].Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc,PolicyRevision) VALUES(@command,@id,@kind,@state,SYSUTCDATETIME(),@revision);
+                    INSERT [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson)
                     VALUES(NEWID(),@kind,@actor,@mode,@correlation,SYSUTCDATETIME(),@details);
-                    UPDATE dbo.Outbox SET ProjectionState=N'Pending',DispatchedAtUtc=NULL,ReviewAtUtc=NULL,RetryAtUtc=NULL WHERE ProjectionState=N'Held';
+                    UPDATE [workerdock].Outbox SET ProjectionState=N'Pending',DispatchedAtUtc=NULL,ReviewAtUtc=NULL,RetryAtUtc=NULL WHERE ProjectionState=N'Held';
                     """);
                 Add(command, "@command", SqlDbType.UniqueIdentifier, receipt.CommandId); Add(command, "@id", SqlDbType.UniqueIdentifier, id);
                 Add(command, "@kind", SqlDbType.NVarChar, kind, 40); Add(command, "@state", SqlDbType.NVarChar, receipt.State, 20); Add(command, "@revision", SqlDbType.BigInt, revision);

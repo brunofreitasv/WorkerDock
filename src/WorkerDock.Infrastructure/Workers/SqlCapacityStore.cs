@@ -19,14 +19,14 @@ public sealed class SqlCapacityStore(TenantDatabaseOptions options) : ICapacityS
         {
             return await new BusinessTransaction(options).RunAsync(async (c, t, token) =>
             {
-                await using var identity = Command(c, t, "SELECT InstanceId FROM dbo.TenantSettings");
+                await using var identity = Command(c, t, "SELECT InstanceId FROM [workerdock].TenantSettings");
                 if ((Guid?)await identity.ExecuteScalarAsync(token) != options.InstanceId) throw new WorkerDockException("TenantInstanceMismatch");
                 await using var read = Command(c, t, """
                     SELECT SYSUTCDATETIME();
-                    SELECT TemplateId,TemplateVersion,MetadataDigest FROM dbo.TemplateCatalog WHERE Enabled=1 ORDER BY TemplateId COLLATE Latin1_General_100_BIN2,TemplateVersion COLLATE Latin1_General_100_BIN2;
-                    SELECT TemplateId,DesiredLimit FROM dbo.TemplatePolicies;
-                    SELECT DesiredRevision,EffectiveRevision,State FROM dbo.PolicyRevisions WHERE PolicyId=@id;
-                    SELECT InstallationId,BootId,CatalogDigest,CapacityCeiling,LiveLimit,AcknowledgedRevision,State,LastHeartbeatUtc,ReservationsRecovered FROM dbo.Workers;
+                    SELECT TemplateId,TemplateVersion,MetadataDigest FROM [workerdock].TemplateCatalog WHERE Enabled=1 ORDER BY TemplateId COLLATE Latin1_General_100_BIN2,TemplateVersion COLLATE Latin1_General_100_BIN2;
+                    SELECT TemplateId,DesiredLimit FROM [workerdock].TemplatePolicies;
+                    SELECT DesiredRevision,EffectiveRevision,State FROM [workerdock].PolicyRevisions WHERE PolicyId=@id;
+                    SELECT InstallationId,BootId,CatalogDigest,CapacityCeiling,LiveLimit,AcknowledgedRevision,State,LastHeartbeatUtc,ReservationsRecovered FROM [workerdock].Workers;
                     """);
                 Add(read, "@id", SqlDbType.UniqueIdentifier, PolicyId);
                 await using var reader = await read.ExecuteReaderAsync(token);
@@ -44,24 +44,24 @@ public sealed class SqlCapacityStore(TenantDatabaseOptions options) : ICapacityS
                 await reader.CloseAsync();
                 var data = new CapacityState(digest, limits, desired, effective, state, workers);
                 var result = change(data, now);
-                await using var policy = Command(c, t, "UPDATE dbo.PolicyRevisions SET DesiredRevision=@desired,EffectiveRevision=@effective,State=@state,CatalogDigest=@digest WHERE PolicyId=@id;");
+                await using var policy = Command(c, t, "UPDATE [workerdock].PolicyRevisions SET DesiredRevision=@desired,EffectiveRevision=@effective,State=@state,CatalogDigest=@digest WHERE PolicyId=@id;");
                 Add(policy, "@desired", SqlDbType.BigInt, data.DesiredRevision); Add(policy, "@effective", SqlDbType.BigInt, data.EffectiveRevision);
                 Add(policy, "@state", SqlDbType.NVarChar, data.State, 30); Add(policy, "@digest", SqlDbType.Char, digest, 64); Add(policy, "@id", SqlDbType.UniqueIdentifier, PolicyId);
                 await policy.ExecuteNonQueryAsync(token);
                 foreach (var limit in data.Limits)
                 {
-                    await using var update = Command(c, t, "UPDATE dbo.TemplatePolicies SET DesiredLimit=@limit,DesiredRevision=@desired,EffectiveRevision=@effective,StartGateClosed=@closed,EffectiveLimit=CASE WHEN @closed=0 THEN @limit ELSE EffectiveLimit END WHERE TemplateId=@template");
+                    await using var update = Command(c, t, "UPDATE [workerdock].TemplatePolicies SET DesiredLimit=@limit,DesiredRevision=@desired,EffectiveRevision=@effective,StartGateClosed=@closed,EffectiveLimit=CASE WHEN @closed=0 THEN @limit ELSE EffectiveLimit END WHERE TemplateId=@template");
                     Add(update, "@limit", SqlDbType.Int, limit.Value); Add(update, "@desired", SqlDbType.BigInt, data.DesiredRevision); Add(update, "@effective", SqlDbType.BigInt, data.EffectiveRevision);
                     Add(update, "@closed", SqlDbType.Bit, data.State != "Effective"); Add(update, "@template", SqlDbType.NVarChar, limit.Key, 100); await update.ExecuteNonQueryAsync(token);
                 }
                 foreach (var w in data.Workers.Values)
                 {
                     await using var update = Command(c, t, """
-                        UPDATE dbo.Workers SET BootId=@boot,CatalogDigest=@digest,CapacityCeiling=@ceiling,LiveLimit=@live,AcknowledgedRevision=@revision,State=@state,LastHeartbeatUtc=@now,ReservationsRecovered=@recovered WHERE InstallationId=@id;
-                        IF @@ROWCOUNT=0 INSERT dbo.Workers(InstallationId,BootId,CatalogDigest,CapacityCeiling,LiveLimit,AcknowledgedRevision,State,LastHeartbeatUtc,ReservationsRecovered)
+                        UPDATE [workerdock].Workers SET BootId=@boot,CatalogDigest=@digest,CapacityCeiling=@ceiling,LiveLimit=@live,AcknowledgedRevision=@revision,State=@state,LastHeartbeatUtc=@now,ReservationsRecovered=@recovered WHERE InstallationId=@id;
+                        IF @@ROWCOUNT=0 INSERT [workerdock].Workers(InstallationId,BootId,CatalogDigest,CapacityCeiling,LiveLimit,AcknowledgedRevision,State,LastHeartbeatUtc,ReservationsRecovered)
                             VALUES(@id,@boot,@digest,@ceiling,@live,@revision,@state,@now,@recovered);
-                        DELETE FROM dbo.WorkerCapabilities WHERE InstallationId=@id;
-                        IF @state<>N'CatalogMismatch' INSERT dbo.WorkerCapabilities SELECT @id,TemplateId,TemplateVersion FROM dbo.TemplateCatalog WHERE Enabled=1;
+                        DELETE FROM [workerdock].WorkerCapabilities WHERE InstallationId=@id;
+                        IF @state<>N'CatalogMismatch' INSERT [workerdock].WorkerCapabilities SELECT @id,TemplateId,TemplateVersion FROM [workerdock].TemplateCatalog WHERE Enabled=1;
                         """);
                     Add(update, "@id", SqlDbType.UniqueIdentifier, w.InstallationId); Add(update, "@boot", SqlDbType.NVarChar, w.BootId, 100);
                     Add(update, "@digest", SqlDbType.Char, w.CatalogDigest, 64); Add(update, "@ceiling", SqlDbType.Int, w.Ceiling); Add(update, "@live", SqlDbType.Int, w.LiveLimit);
@@ -70,7 +70,7 @@ public sealed class SqlCapacityStore(TenantDatabaseOptions options) : ICapacityS
                 }
                 if (data.State == "Effective")
                 {
-                    await using var reopen = Command(c, t, "UPDATE dbo.Commands SET State=N'Applied' WHERE CommandKind=N'TemplateLimit' AND State=N'Pending' AND PolicyRevision<=@revision;");
+                    await using var reopen = Command(c, t, "UPDATE [workerdock].Commands SET State=N'Applied' WHERE CommandKind=N'TemplateLimit' AND State=N'Pending' AND PolicyRevision<=@revision;");
                     Add(reopen, "@revision", SqlDbType.BigInt, data.EffectiveRevision); await reopen.ExecuteNonQueryAsync(token);
                 }
                 return result;

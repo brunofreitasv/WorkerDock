@@ -126,20 +126,20 @@ public sealed class QuartzProcessFixture : IAsyncDisposable
         await using var connection = new SqlConnection(Database.ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Active, MaximumActive FROM dbo.QuartzProbeState WHERE Id = 1";
+        command.CommandText = "SELECT Active, MaximumActive FROM [workerdock].QuartzProbeState WHERE Id = 1";
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
         return (reader.GetInt32(0), reader.GetInt32(1));
     }
-    public Task<int> DistinctWorkersAsync() => Database.ScalarAsync("SELECT COUNT(DISTINCT BootId) FROM dbo.QuartzProbeEvents WHERE EventKind = 'S'");
-    public Task<int> StartedRowsAsync() => Database.ScalarAsync("SELECT COUNT(*) FROM dbo.QuartzProbeEvents WHERE EventKind = 'S'");
-    public Task<int> EndedRowsAsync() => Database.ScalarAsync("SELECT COUNT(*) FROM dbo.QuartzProbeEvents WHERE EventKind = 'E'");
+    public Task<int> DistinctWorkersAsync() => Database.ScalarAsync("SELECT COUNT(DISTINCT BootId) FROM [workerdock].QuartzProbeEvents WHERE EventKind = 'S'");
+    public Task<int> StartedRowsAsync() => Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].QuartzProbeEvents WHERE EventKind = 'S'");
+    public Task<int> EndedRowsAsync() => Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].QuartzProbeEvents WHERE EventKind = 'E'");
     public async Task<IReadOnlyDictionary<string, long>> ClusterCheckinsAsync(CancellationToken ct = default)
     {
         await using var connection = new SqlConnection(Database.ConnectionString);
         await connection.OpenAsync(ct);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT INSTANCE_NAME, LAST_CHECKIN_TIME FROM dbo.WDE_QRTZ_SCHEDULER_STATE WHERE SCHED_NAME = N'WorkerDock.Execute'";
+        command.CommandText = "SELECT INSTANCE_NAME, LAST_CHECKIN_TIME FROM [workerdock].WDE_QRTZ_SCHEDULER_STATE WHERE SCHED_NAME = N'WorkerDock.Execute'";
         await using var reader = await command.ExecuteReaderAsync(ct);
         var checkins = new Dictionary<string, long>();
         while (await reader.ReadAsync(ct)) checkins.Add(reader.GetString(0), reader.GetInt64(1));

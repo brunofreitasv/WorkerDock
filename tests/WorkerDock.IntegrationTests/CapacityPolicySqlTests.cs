@@ -23,10 +23,10 @@ public sealed class CapacityPolicySqlTests
         await SqlCapacityTestSetup.ReadyAsync(options,"capacity-worker");
         var jobs=new SqlJobCommands(options); var actor=new ActorContext("manager","Anonymous",Guid.NewGuid());
         var job=new JobRevision(Guid.NewGuid(),0,"capacity","workerdock.http","1.0.0",JsonSerializer.SerializeToElement(new {}),null,AttemptLifecycleTests.Policy());
-        await jobs.SaveAsync(job,null,actor,default); await fixture.Database.ExecuteAsync($"UPDATE dbo.Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
+        await jobs.SaveAsync(job,null,actor,default); await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         var first=await jobs.RunNowAsync(job.JobId,"first",actor,default);
         var second=await jobs.RunNowAsync(job.JobId,"second",actor,default);
-        Assert.Equal(1,await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM dbo.JobPermits WHERE JobId='{job.JobId}'"));
+        Assert.Equal(1,await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].JobPermits WHERE JobId='{job.JobId}'"));
         var projections=new SqlProjectionStore(options);
         var firstEnvelope=(await projections.ReadPendingAsync(20,default)).Single(x => x.EntityId==first.TargetId);
         var acquired=(await projections.ReadAsync(firstEnvelope,1,default)).Intent;
@@ -36,13 +36,13 @@ public sealed class CapacityPolicySqlTests
         var capacity=new SqlCapacityStore(options);
         await capacity.TransactAsync((state,now) => { foreach(var worker in state.Workers.Values.ToArray()) state.Acknowledge(worker.InstallationId,worker.BootId,state.DesiredRevision,now); Assert.True(state.Promote(now)); return true; },default);
         Assert.Equal("Held",(await attempts.BeginAsync(acquired,"capacity-worker",default)).Decision);
-        Assert.Equal(0,await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.Attempts"));
+        Assert.Equal(0,await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Attempts"));
         var current=(await projections.ReadPendingAsync(20,default)).Single(x => x.EntityId==first.TargetId);
         var fresh=(await projections.ReadAsync(current,1,default)).Intent;
         Assert.NotEqual(acquired.DeliveryId,fresh.DeliveryId); Assert.True(fresh.CapacityRevision>acquired.CapacityRevision);
         Assert.Equal("Started",(await attempts.BeginAsync(fresh,"capacity-worker",default)).Decision);
         Assert.Equal("Held",(await projections.ReadAsync((await projections.ReadPendingAsync(20,default)).Single(x => x.EntityId==second.TargetId),1,default)).State);
-        Assert.Equal(1,await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.Attempts WHERE State=N'Running'"));
+        Assert.Equal(1,await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Attempts WHERE State=N'Running'"));
     }
     [Fact]
     public async Task Empty_capacity_migration_round_trip_preserves_paired_schema()
@@ -51,6 +51,6 @@ public sealed class CapacityPolicySqlTests
         var runner=new MigrationRunner(database.ConnectionString,database.InstanceId,database.ScriptsRoot);
         await runner.ApplyAsync("tenant","0003c_capacity",default); await runner.RollbackAsync("tenant","0003c_capacity",default);
         await runner.ApplyAsync("tenant","0003c_capacity",default);
-        Assert.Equal(1,await database.ScalarAsync("SELECT COUNT(*) FROM dbo.PolicyRevisions WHERE PolicyKind=N'Capacity' AND State=N'Pending'"));
+        Assert.Equal(1,await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].PolicyRevisions WHERE PolicyKind=N'Capacity' AND State=N'Pending'"));
     }
 }

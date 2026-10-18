@@ -77,14 +77,7 @@ public sealed class QuartzTopology(QuartzConnections connections) : IAsyncDispos
                     store.UseSqlServer(SqlClientFactory.Instance, settings.ConnectionString);
                     store.UseSystemTextJsonSerializer(json => json.AddCalendarSerializer(new Scheduling.WorkerDockPolicyCalendarSerializer()));
                     store.UseClustering();
-                    store.ConfigureStore(settings =>
-                    {
-                        settings.TablePrefix = execution ? "WDE_QRTZ_" : "WDS_QRTZ_";
-                        settings.StoreJobDataAsStrings = true;
-                        settings.AcquireTriggersWithinLock = true;
-                        settings.SchemaProvisioning = SchemaProvisioning.Validate;
-                        settings.CommandTimeout = TimeSpan.FromSeconds(10);
-                    });
+                    store.ConfigureStore(settings => ConfigurePersistentStore(settings, execution));
                 });
             }).Build();
             try
@@ -102,6 +95,15 @@ public sealed class QuartzTopology(QuartzConnections connections) : IAsyncDispos
         }
         catch (SchedulerException) { throw new WorkerDockException("QuartzStoreUnavailable"); }
         finally { gate.Release(); }
+    }
+
+    internal static void ConfigurePersistentStore(AdoJobStoreOptions settings, bool execution)
+    {
+        settings.TablePrefix = execution ? "[workerdock].WDE_QRTZ_" : "[workerdock].WDS_QRTZ_";
+        settings.StoreJobDataAsStrings = true;
+        settings.AcquireTriggersWithinLock = true;
+        settings.SchemaProvisioning = SchemaProvisioning.Validate;
+        settings.CommandTimeout = TimeSpan.FromSeconds(10);
     }
 
     public async ValueTask DisposeAsync()

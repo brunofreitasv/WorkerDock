@@ -131,7 +131,7 @@ Schedule validation codes for the later editor use these English / pt-BR texts:
 
 ## Dispatch publication and reconciliation
 
-One common `ProjectionEnvelope` reads the existing `dbo.Outbox`; its `IntentId`
+One common `ProjectionEnvelope` reads the existing `[workerdock].Outbox`; its `IntentId`
 is the outbox EventId, distinct from ExecutionId. Version 1 allowlists
 ExecutionDispatch, ScheduleProjection and AlertDispatch. Only ExecutionDispatch
 has a decoder in Task06. Unknown kinds, the two deferred kinds and unsupported
@@ -276,6 +276,4 @@ Current verification establishes memory policy races, actual local Quartz
 containment. Real SQL adapter/migration tests, restricted-runtime grants,
 three-service live policy propagation, and capacity-one across real SQL workers
 remain pending until an authorized disposable SQL instance and runtime login run
-the commands in database.md. SQL sources remain consistently in `dbo` for this
-task; the separately requested complete conversion to `workerdock` schema is
-pending before Stage 03.
+the commands in database.md. Task 09A converts all executable tenant SQL, history and both Quartz stores to `[workerdock]` for fresh installation. Unpublished prototype `dbo` databases require a fresh database or a separately reviewed data-move upgrade.

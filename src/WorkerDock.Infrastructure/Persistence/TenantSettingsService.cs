@@ -31,13 +31,13 @@ public sealed class TenantSettingsService(TenantDatabaseOptions options) : ITena
             {
                 await using var identity = connection.CreateCommand();
                 identity.Transaction = transaction;
-                identity.CommandText = "SELECT InstanceId FROM dbo.TenantSettings";
+                identity.CommandText = "SELECT InstanceId FROM [workerdock].TenantSettings";
                 var storedId = (Guid?)await identity.ExecuteScalarAsync(token);
                 if (storedId != options.InstanceId) throw new WorkerDockException("TenantInstanceMismatch");
 
                 await using var update = connection.CreateCommand();
                 update.Transaction = transaction;
-                update.CommandText = "UPDATE dbo.TenantSettings SET DisplayName=@name, DisplayTimeZone=@zone OUTPUT inserted.Version WHERE InstanceId=@id AND Version=@version";
+                update.CommandText = "UPDATE [workerdock].TenantSettings SET DisplayName=@name, DisplayTimeZone=@zone OUTPUT inserted.Version WHERE InstanceId=@id AND Version=@version";
                 Add(update, "@name", SqlDbType.NVarChar, desired.DisplayName, 200);
                 Add(update, "@zone", SqlDbType.NVarChar, desired.DisplayTimeZone, 100);
                 Add(update, "@id", SqlDbType.UniqueIdentifier, options.InstanceId);
@@ -47,7 +47,7 @@ public sealed class TenantSettingsService(TenantDatabaseOptions options) : ITena
 
                 await using var audit = connection.CreateCommand();
                 audit.Transaction = transaction;
-                audit.CommandText = "INSERT INTO dbo.AuditEvents (EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson) VALUES (@eventId,N'TenantSettingsUpdated',@actor,@mode,@correlation,SYSUTCDATETIME(),N'{}')";
+                audit.CommandText = "INSERT INTO [workerdock].AuditEvents (EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson) VALUES (@eventId,N'TenantSettingsUpdated',@actor,@mode,@correlation,SYSUTCDATETIME(),N'{}')";
                 Add(audit, "@eventId", SqlDbType.UniqueIdentifier, Guid.NewGuid());
                 Add(audit, "@actor", SqlDbType.NVarChar, actor.Subject, 300);
                 Add(audit, "@mode", SqlDbType.NVarChar, actor.AuthenticationMode, 40);

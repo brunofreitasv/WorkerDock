@@ -25,7 +25,7 @@ public sealed class ProjectionSqlTests
         var commands = new SqlJobCommands(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
         var job = Job();
         await commands.SaveAsync(job, null, Actor(), default);
-        await fixture.Database.ExecuteAsync($"UPDATE dbo.Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         var receipt = await commands.RunNowAsync(job.JobId, "publication", Actor(), default);
         var store = new SqlProjectionStore(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
         var envelope = Assert.Single(await store.ReadPendingAsync(10, default));
@@ -43,12 +43,12 @@ public sealed class ProjectionSqlTests
         await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => publisher.PublishAsync(state.Intent, default).AsTask()));
         Assert.Equal(1, await new DispatchReconciler(store, store, publisher, TimeProvider.System).ReconcileAsync(20, default));
         Assert.Empty(await store.ReadPendingAsync(10, default));
-        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.WDE_QRTZ_JOB_DETAILS"));
-        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.WDE_QRTZ_TRIGGERS"));
-        await fixture.Database.ExecuteAsync($"UPDATE dbo.Executions SET State=N'Succeeded' WHERE ExecutionId='{envelope.EntityId}'; UPDATE dbo.Outbox SET ReviewAtUtc=NULL;");
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].WDE_QRTZ_JOB_DETAILS"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].WDE_QRTZ_TRIGGERS"));
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET State=N'Succeeded' WHERE ExecutionId='{envelope.EntityId}'; UPDATE [workerdock].Outbox SET ReviewAtUtc=NULL;");
         Assert.Equal(1, await new DispatchReconciler(store, store, publisher, TimeProvider.System).ReconcileAsync(20, default));
         Assert.Empty(await store.ReadPublishedAsync(10, default));
-        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.Outbox WHERE ProjectionState=N'Retired' AND DispatchedAtUtc IS NOT NULL"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Outbox WHERE ProjectionState=N'Retired' AND DispatchedAtUtc IS NOT NULL"));
     }
 
     [Theory]
@@ -63,13 +63,13 @@ public sealed class ProjectionSqlTests
         var id = Guid.NewGuid();
         var entity = Guid.NewGuid();
         var digest = ProjectionEnvelope.ExecutionDigest(entity, 1);
-        await fixture.Database.ExecuteAsync($"INSERT dbo.Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,EntityId,EntityRevision,PayloadDigest) VALUES('{id}',N'Unknown',N'{{}}',SYSUTCDATETIME(),SYSUTCDATETIME(),'{entity}',1,'{digest}')");
+        await fixture.Database.ExecuteAsync($"INSERT [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,EntityId,EntityRevision,PayloadDigest) VALUES('{id}',N'Unknown',N'{{}}',SYSUTCDATETIME(),SYSUTCDATETIME(),'{entity}',1,'{digest}')");
         var envelope = Assert.Single(await store.ReadPendingAsync(10, default));
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await store.AcknowledgeAsync(envelope.IntentId, new string('0',64), default));
         Assert.Equal("ProjectionIntegrityError", error.Code);
         await store.RecordFailureAsync(id, "UnsupportedProjection", DateTimeOffset.UtcNow.AddHours(1), default);
         Assert.Empty(await store.ReadPendingAsync(10, default));
-        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM dbo.Outbox WHERE ProjectionState=N'Failed' AND LastErrorCode=N'UnsupportedProjection' AND DispatchedAtUtc IS NULL AND RetryAtUtc>SYSUTCDATETIME()"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Outbox WHERE ProjectionState=N'Failed' AND LastErrorCode=N'UnsupportedProjection' AND DispatchedAtUtc IS NULL AND RetryAtUtc>SYSUTCDATETIME()"));
         var wrongTenant = new SqlProjectionStore(new(fixture.RuntimeConnectionString, Guid.NewGuid()));
         var mismatch = await Assert.ThrowsAsync<WorkerDockException>(async () => await wrongTenant.ReadPendingAsync(10, default));
         Assert.Equal("TenantInstanceMismatch", mismatch.Code);
@@ -84,7 +84,7 @@ public sealed class ProjectionSqlTests
         await runner.ApplyAsync("tenant", "0003a_projection", default);
         await runner.RollbackAsync("tenant", "0003a_projection", default);
         await runner.ApplyAsync("tenant", "0003a_projection", default);
-        await database.ExecuteAsync("INSERT dbo.Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,LastErrorCode) VALUES(NEWID(),N'Unknown',N'{}',SYSUTCDATETIME(),SYSUTCDATETIME(),N'UnsupportedProjection')");
+        await database.ExecuteAsync("INSERT [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,LastErrorCode) VALUES(NEWID(),N'Unknown',N'{}',SYSUTCDATETIME(),SYSUTCDATETIME(),N'UnsupportedProjection')");
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.RollbackAsync("tenant", "0003a_projection", default));
         Assert.Equal("UnsafeRollback", error.Code);
     }
