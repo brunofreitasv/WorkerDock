@@ -22,3 +22,11 @@ Verification:
 - Live SQL acceptance: **SQL_TEST_BLOCKED**. The real SQL environment is not provisioned in this run; memory/integration tests do not prove SQL durability or grants.
 
 Self-review found no migration, raw credential value input, or browser-side package/secret/execution endpoint. Build-generated assets and Playwright outputs are excluded from the commit.
+
+## Reviewer fix round
+
+- Confirmed the manual run endpoint already has `Manage` authorization. Added regression coverage proving a signed-in Read-only viewer with a valid CSRF token and request key receives 403 and queues no execution.
+- Missing catalogs now fail closed with `TemplateCatalogUnavailable` before job save, manual activation, or run-now. Existing job command tests now provide a registered test catalog explicitly.
+- TemplateForm root field paths now use the server's `configuration` prefix, so server issues bind to matching controls; added a focused field-level regression test.
+- Focused reviewer tests: 3/3 passed (two authorization/catalog tests and one UI path test).
+- Updated full verification: SQL-independent Release integration suite 250/250, Release unit suite 31/31, frontend tests 11/11, frontend build passed, and full Release solution build passed with 0 warnings/errors.

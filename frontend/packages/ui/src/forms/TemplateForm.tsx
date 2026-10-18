@@ -13,7 +13,7 @@ export function TemplateForm({ descriptor, value, onChange, errors }: Props) {
   return <Box component="fieldset" sx={{ border: 0, p: 0, m: 0, minWidth: 0 }}>
     <Typography component="legend" variant="h6">{descriptor.displayName}</Typography>
     <Typography color="text.secondary" sx={{ mb: 2 }}>{descriptor.description}</Typography>
-    <Node schema={descriptor.configurationSchema} value={value} path="$" onChange={(next) => onChange(next as Record<string, unknown>)} errors={errors} descriptor={descriptor} />
+    <Node schema={descriptor.configurationSchema} value={value} path="configuration" onChange={(next) => onChange(next as Record<string, unknown>)} errors={errors} descriptor={descriptor} />
   </Box>;
 }
 

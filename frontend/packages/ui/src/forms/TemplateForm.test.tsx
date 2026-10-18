@@ -25,3 +25,10 @@ it("renders secret references without ever rendering secret value controls", asy
   expect(value).toEqual({ credential: "logical.key" });
   expect(screen.queryByLabelText(/password value|token value/i)).not.toBeInTheDocument();
 });
+
+it("shows server validation paths on their matching schema fields", () => {
+  const descriptor = { id: "test", version: "1", displayName: "Test", description: "Test", configurationSchema: { type: "object", properties: { count: { type: "integer", minimum: 1 } } } };
+  render(<TemplateForm descriptor={descriptor} value={{ count: 0 }} onChange={() => {}} errors={{ "configuration.count": "Minimum" }} />);
+  expect(screen.getByLabelText("Count")).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByText("Minimum")).toBeInTheDocument();
+});

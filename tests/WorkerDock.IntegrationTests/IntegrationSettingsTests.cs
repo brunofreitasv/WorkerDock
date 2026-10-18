@@ -46,7 +46,7 @@ public sealed class IntegrationSettingsTests
         var actor = new ActorContext("manager", "Anonymous", Guid.NewGuid());
         var job = new WorkerDock.Domain.Jobs.JobRevision(Guid.NewGuid(), 1, "HTTP", "workerdock.http", "1.0.0",
             JsonSerializer.SerializeToElement(new { }), null, AttemptLifecycleTests.Policy());
-        var jobs = new InMemoryJobCommands(TimeProvider.System, [job], integrationSettings: settings);
+        var jobs = new InMemoryJobCommands(TimeProvider.System, [job], integrationSettings: settings, templateCatalog: JobCommandTestCatalog.Create());
         var firstReceipt = await jobs.RunNowAsync(job.JobId, "before-settings-update", actor, default);
         var firstStore = jobs.GetAttemptStore(firstReceipt.TargetId)!;
         var firstLease = await firstStore.BeginAsync(firstStore.Intent, "boot", default);
@@ -137,7 +137,7 @@ public sealed class IntegrationSettingsTests
         var actor = new ActorContext("manager", "Anonymous", Guid.NewGuid());
         var job = new WorkerDock.Domain.Jobs.JobRevision(Guid.NewGuid(), 1, "HTTP", "workerdock.http", "1.0.0",
             JsonSerializer.SerializeToElement(new { }), null, AttemptLifecycleTests.Policy(attempts: 2));
-        var jobs = new InMemoryJobCommands(clock, [job], integrationSettings: settings);
+        var jobs = new InMemoryJobCommands(clock, [job], integrationSettings: settings, templateCatalog: JobCommandTestCatalog.Create());
         var receipt = await jobs.RunNowAsync(job.JobId, "same-execution-retry", actor, default);
         var store = jobs.GetAttemptStore(receipt.TargetId)!;
         var firstLease = (await store.BeginAsync(store.Intent, "boot", default)).Lease!;

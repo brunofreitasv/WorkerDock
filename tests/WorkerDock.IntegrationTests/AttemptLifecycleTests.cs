@@ -24,7 +24,7 @@ public sealed class AttemptLifecycleTests
     public async Task Memory_job_commands_and_execution_controls_share_the_same_execution_and_receipt()
     {
         var revision = new JobRevision(Guid.NewGuid(), 1, "test", "workerdock.http", "1.0.0", JsonSerializer.SerializeToElement(new { }), null, Policy());
-        var commands = new InMemoryJobCommands(new Clock(), [revision]);
+        var commands = new InMemoryJobCommands(new Clock(), [revision], templateCatalog: JobCommandTestCatalog.Create());
         var run = await commands.RunNowAsync(revision.JobId, "memory-control", Actor, default);
         var controls = Assert.IsAssignableFrom<IExecutionControls>(commands);
         var stop = await controls.StopAsync(run.TargetId, false, "queued stop", Actor, default);

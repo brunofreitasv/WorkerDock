@@ -41,7 +41,7 @@ public sealed class SqlProfileEndpointTests
         var profiles=new InMemoryConnectionProfiles();var original=SqlTemplateTests.Profile();var actor=new WorkerDock.Application.Common.ActorContext("manager","Anonymous",Guid.NewGuid());
         await profiles.SaveAsync(original,null,actor,default);var first=await profiles.GetCurrentAsync(original.ProfileId,default);
         var job=new WorkerDock.Domain.Jobs.JobRevision(Guid.NewGuid(),1,"SQL job","workerdock.sql-server","1.0.0",SqlTemplateTests.Json(SqlTemplateTests.Config(original.ProfileId)),original.ProfileId,AttemptLifecycleTests.Policy());
-        var jobs=new InMemoryJobCommands(TimeProvider.System,[job],profiles:profiles);var receipt=await jobs.RunNowAsync(job.JobId,"pin",actor,default);
+        var jobs=new InMemoryJobCommands(TimeProvider.System,[job],profiles:profiles,templateCatalog:JobCommandTestCatalog.Create());var receipt=await jobs.RunNowAsync(job.JobId,"pin",actor,default);
         await profiles.SaveAsync(original with { Server="rotated" },first.Version,actor,default);
         var store=jobs.GetAttemptStore(receipt.TargetId)!;var started=await store.BeginAsync(store.Intent,"boot",default);Assert.NotNull(started.Lease);
         var execution=await store.GetDescriptorAsync(started.Lease!,default);

@@ -17,7 +17,7 @@ public sealed class JobSqlIntegrationTests
         await database.CreateAsync(false);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
             .ApplyAsync("tenant", "0003d_dispatch", default);
-        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
+        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), JobCommandTestCatalog.Create());
         var job = Job() with { Configuration = JsonDocument.Parse("{\"secret\":\"audit-must-not-copy-this\"}").RootElement.Clone() };
         var actor = Actor();
         await commands.SaveAsync(job, null, actor, default);
@@ -38,7 +38,7 @@ public sealed class JobSqlIntegrationTests
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
             .ApplyAsync("tenant", "0003d_dispatch", default);
         await database.ExecuteAsync("CREATE TRIGGER [workerdock].TestJobAuditFailure ON [workerdock].AuditEvents AFTER INSERT AS THROW 51000, 'Injected audit failure', 1;");
-        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
+        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), JobCommandTestCatalog.Create());
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () =>
             await commands.SaveAsync(Job(), null, Actor(), default));
         Assert.Equal("PersistenceUnavailable", error.Code);
@@ -56,7 +56,7 @@ public sealed class JobSqlIntegrationTests
         await database.CreateAsync(snapshot);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
             .ApplyAsync("tenant", "0003d_dispatch", default);
-        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
+        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), JobCommandTestCatalog.Create());
         var job = Job();
         await commands.SaveAsync(job, null, Actor(), default);
         await database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
@@ -84,7 +84,7 @@ public sealed class JobSqlIntegrationTests
         await database.CreateAsync(false);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
             .ApplyAsync("tenant", "0003d_dispatch", default);
-        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
+        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), JobCommandTestCatalog.Create());
         var job = Job();
         await commands.SaveAsync(job, null, Actor(), default);
         await database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");

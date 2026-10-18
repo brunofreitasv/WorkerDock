@@ -2,11 +2,13 @@ using System.Text.Json;
 using System.Net;
 using System.Net.Http.Json;
 using WorkerDock.Application.Common;
+using WorkerDock.Application.Jobs;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Jobs;
 using WorkerDock.Application.Templates;
 using WorkerDock.Infrastructure.Templates;
 using Microsoft.Extensions.DependencyInjection;
+using WorkerDock.Infrastructure.Persistence;
 
 namespace WorkerDock.IntegrationTests;
 
@@ -39,10 +41,48 @@ public sealed class JobCommandTests
     }
 
     [Fact]
+    public async Task Missing_template_catalog_fails_closed_before_job_save_or_run()
+    {
+        var job=Job("catalog required");
+        var commands=new InMemoryJobCommands(TimeProvider.System);
+        var save=await Assert.ThrowsAsync<WorkerDockException>(async()=>await commands.SaveAsync(job,null,Actor,default));
+        Assert.Equal("TemplateCatalogUnavailable",save.Code);
+
+        var enabled=new InMemoryJobCommands(TimeProvider.System,[job]);
+        var run=await Assert.ThrowsAsync<WorkerDockException>(async()=>await enabled.RunNowAsync(job.JobId,"no-catalog",Actor,default));
+        Assert.Equal("TemplateCatalogUnavailable",run.Code);
+        Assert.Equal(0,enabled.ExecutionCount);
+
+        var sql=new SqlJobCommands(new TenantDatabaseOptions("",Guid.NewGuid()));
+        var sqlSave=await Assert.ThrowsAsync<WorkerDockException>(async()=>await sql.SaveAsync(job,null,Actor,default));
+        Assert.Equal("TemplateCatalogUnavailable",sqlSave.Code);
+    }
+
+    [Fact]
+    public async Task Read_only_viewer_cannot_queue_run_now_even_with_valid_csrf_and_request_key()
+    {
+        var descriptor=WorkerDock.Infrastructure.Templates.TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor("""{"type":"object"}""") with { Id="workerdock.http" });
+        var catalog=new TemplateCatalog([descriptor]); await catalog.RegisterAsync([descriptor],default);
+        var job=Job("viewer denied run");
+        var commands=new InMemoryJobCommands(TimeProvider.System,[job],templateCatalog:catalog);
+        using var issuer=new LocalOidcIssuer("Viewer");
+        await using var baseHost=new AccessHost(issuer,"Manager");
+        await using var host=baseHost.WithWebHostBuilder(builder=>builder.ConfigureServices(services=>{ services.AddSingleton<ITemplateCatalog>(catalog); services.AddSingleton<IJobCommands>(commands); }));
+        using var client=host.CreateClient(new() { BaseAddress=new("https://localhost"),AllowAutoRedirect=false });
+        await issuer.SignIn(client);
+        var token=(await client.GetFromJsonAsync<CsrfView>("/api/antiforgery"))!.RequestToken;
+        using var request=new HttpRequestMessage(HttpMethod.Post,$"/api/jobs/{job.JobId}/runs") { Content=JsonContent.Create(new { requestKey="valid-viewer-key" }) };
+        request.Headers.Add("Origin","https://localhost"); request.Headers.Add("X-WorkerDock-CSRF",token);
+        using var response=await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Forbidden,response.StatusCode);
+        Assert.Equal(0,commands.ExecutionCount);
+    }
+
+    [Fact]
     public async Task Receipt_kind_survives_request_key_expiry_while_execution_is_still_queued()
     {
         var clock = new MutableClock(DateTimeOffset.UtcNow); var job = Job("long backlog");
-        var commands = new InMemoryJobCommands(clock, [job]);
+        var commands = new InMemoryJobCommands(clock, [job], templateCatalog: JobCommandTestCatalog.Create());
         var first = await commands.RunNowAsync(job.JobId, "expires", Actor, default);
         clock.Advance(TimeSpan.FromHours(25));
         var second = await commands.RunNowAsync(job.JobId, "expires", Actor, default);
@@ -59,7 +99,7 @@ public sealed class JobCommandTests
     public async Task Manual_and_stop_receipts_follow_authoritative_attempt_commits(bool stopFirst)
     {
         var job = Job("receipts");
-        var commands = new InMemoryJobCommands(TimeProvider.System, [job]);
+        var commands = new InMemoryJobCommands(TimeProvider.System, [job], templateCatalog: JobCommandTestCatalog.Create());
         var run = await commands.RunNowAsync(job.JobId, "stable-key", Actor, default);
         Assert.Equal("Pending", (await commands.GetCommandAsync(run.CommandId, default)).State);
         var attempts = commands.GetAttemptStore(run.TargetId)!;
@@ -86,7 +126,7 @@ public sealed class JobCommandTests
     [Fact]
     public async Task Unconfirmed_stop_failure_and_unpublished_cancellation_settle_receipts()
     {
-        var job = Job("receipt failures"); var commands = new InMemoryJobCommands(TimeProvider.System, [job]);
+        var job = Job("receipt failures"); var commands = new InMemoryJobCommands(TimeProvider.System, [job], templateCatalog: JobCommandTestCatalog.Create());
         var run = await commands.RunNowAsync(job.JobId, "cancel", Actor, default);
         await commands.StopAsync(run.TargetId, false, "cancel before launch", Actor, default);
         Assert.Equal("Failed", (await commands.GetCommandAsync(run.CommandId, default)).State);
@@ -106,7 +146,7 @@ public sealed class JobCommandTests
     public async Task Save_bounds_the_serialized_execution_envelope(int length, bool accepted)
     {
         var job = Job("bounded") with { Configuration = JsonDocument.Parse("{\"value\":\"" + new string(length == 30000 ? '<' : 'x', length) + "\"}").RootElement.Clone() };
-        var commands = new InMemoryJobCommands(TimeProvider.System);
+        var commands = new InMemoryJobCommands(TimeProvider.System, templateCatalog: JobCommandTestCatalog.Create());
         if (accepted) await commands.SaveAsync(job, null, Actor, default);
         else
         {
@@ -120,7 +160,7 @@ public sealed class JobCommandTests
     [Fact]
     public async Task Stale_edit_returns_412_without_revision_or_audit()
     {
-        var service = new InMemoryJobCommands(TimeProvider.System);
+        var service = new InMemoryJobCommands(TimeProvider.System, templateCatalog: JobCommandTestCatalog.Create());
         var draft = Job("First");
         var created = await service.SaveAsync(draft, null, Actor, default);
         var original = await service.GetEditableAsync(draft.JobId, default);
@@ -142,7 +182,7 @@ public sealed class JobCommandTests
     [Fact]
     public async Task Revision_audit_identifies_transition_and_outcome_without_configuration()
     {
-        var service = new InMemoryJobCommands(TimeProvider.System);
+        var service = new InMemoryJobCommands(TimeProvider.System, templateCatalog: JobCommandTestCatalog.Create());
         var draft = Job("First") with { Configuration = JsonDocument.Parse("{\"secret\":\"audit-must-not-copy-this\"}").RootElement.Clone() };
         await service.SaveAsync(draft, null, Actor, default);
         var editor = await service.GetEditableAsync(draft.JobId, default);
@@ -169,7 +209,7 @@ public sealed class JobCommandTests
     {
         var clock = new MutableClock(new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero));
         var job = Job("Scheduled");
-        var service = new InMemoryJobCommands(clock, [job]);
+        var service = new InMemoryJobCommands(clock, [job], templateCatalog: JobCommandTestCatalog.Create());
         var requests = await Task.WhenAll(
             service.RunNowAsync(job.JobId, "same-key", Actor, default).AsTask(),
             service.RunNowAsync(job.JobId, "same-key", Actor, default).AsTask());
@@ -192,7 +232,7 @@ public sealed class JobCommandTests
     public async Task Repeated_key_returns_original_after_job_edit()
     {
         var job = Job("Original");
-        var service = new InMemoryJobCommands(TimeProvider.System, [job]);
+        var service = new InMemoryJobCommands(TimeProvider.System, [job], templateCatalog: JobCommandTestCatalog.Create());
         var first = await service.RunNowAsync(job.JobId, "retry-key", Actor, default);
         var editor = await service.GetEditableAsync(job.JobId, default);
         await service.SaveAsync(editor.Revision with { Name = "Edited" }, editor.Version, Actor, default);
@@ -207,7 +247,7 @@ public sealed class JobCommandTests
     {
         var disabled = Job("Disabled");
         var enabled = Job("Enabled");
-        var service = new InMemoryJobCommands(TimeProvider.System, [enabled]);
+        var service = new InMemoryJobCommands(TimeProvider.System, [enabled], templateCatalog: JobCommandTestCatalog.Create());
         await service.SaveAsync(disabled, null, Actor, default);
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () =>
             await service.RunNowAsync(disabled.JobId, "request", Actor, default));
@@ -224,7 +264,7 @@ public sealed class JobCommandTests
     public async Task Archived_job_rejects_manual_run()
     {
         var archived = Job("Archived");
-        var service = new InMemoryJobCommands(TimeProvider.System, archivedSeeds: [archived]);
+        var service = new InMemoryJobCommands(TimeProvider.System, archivedSeeds: [archived], templateCatalog: JobCommandTestCatalog.Create());
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () =>
             await service.RunNowAsync(archived.JobId, "request", Actor, default));
         Assert.Equal("JobArchived", error.Code);
@@ -235,7 +275,7 @@ public sealed class JobCommandTests
     public async Task Execution_pins_immutable_job_revision()
     {
         var job = Job("Original");
-        var service = new InMemoryJobCommands(TimeProvider.System, [job]);
+        var service = new InMemoryJobCommands(TimeProvider.System, [job], templateCatalog: JobCommandTestCatalog.Create());
         var first = await service.RunNowAsync(job.JobId, "first", Actor, default);
         var editable = await service.GetEditableAsync(job.JobId, default);
         await service.SaveAsync(job with { Name = "Updated" }, editable.Version, Actor, default);
@@ -254,7 +294,7 @@ public sealed class JobCommandTests
     {
         var job = Job("Uncommitted");
         var service = new InMemoryJobCommands(TimeProvider.System, phase == "Outbox" ? [job] : null, beforeCommit: (part, _) =>
-            part == phase ? throw new InvalidOperationException("injected") : ValueTask.CompletedTask);
+            part == phase ? throw new InvalidOperationException("injected") : ValueTask.CompletedTask, templateCatalog: JobCommandTestCatalog.Create());
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () =>
         {
             if (phase == "Audit") await service.SaveAsync(job, null, Actor, default);

@@ -20,7 +20,7 @@ public sealed class SecretProjectionTests
         var current=oldSentinel;
         var vault=new EnvironmentSecretVault(new Dictionary<string,string> { ["http.credential"]="SYNTHETIC_PROVIDER_SLOT" },_=>current);
         var job=new JobRevision(Guid.NewGuid(),0,"Rotation","workerdock.http","1.0.0",JsonSerializer.SerializeToElement(new { credentialReference="http.credential" }),null,AttemptLifecycleTests.Policy());
-        var commands=new InMemoryJobCommands(TimeProvider.System,[job]);
+        var commands=new InMemoryJobCommands(TimeProvider.System,[job],templateCatalog:JobCommandTestCatalog.Create());
         await using var baseHost=new AccessHost();
         await using var host=baseHost.WithWebHostBuilder(builder=>builder.ConfigureServices(services=>services.AddSingleton<IJobCommands>(commands)));
         using var client=host.CreateClient(new() { BaseAddress=new("https://localhost"),AllowAutoRedirect=false }); await client.GetAsync("/api/session");

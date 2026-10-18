@@ -21,7 +21,7 @@ public sealed class CapacityPolicySqlTests
         await fixture.Runner.ApplyAsync("tenant","0003d_dispatch",default);
         var options=new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString,fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options,"capacity-worker");
-        var jobs=new SqlJobCommands(options); var actor=new ActorContext("manager","Anonymous",Guid.NewGuid());
+        var jobs=new SqlJobCommands(options,JobCommandTestCatalog.Create()); var actor=new ActorContext("manager","Anonymous",Guid.NewGuid());
         var job=new JobRevision(Guid.NewGuid(),0,"capacity","workerdock.http","1.0.0",JsonSerializer.SerializeToElement(new {}),null,AttemptLifecycleTests.Policy());
         await jobs.SaveAsync(job,null,actor,default); await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         var first=await jobs.RunNowAsync(job.JobId,"first",actor,default);

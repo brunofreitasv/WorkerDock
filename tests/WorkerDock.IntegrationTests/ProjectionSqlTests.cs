@@ -22,7 +22,7 @@ public sealed class ProjectionSqlTests
         await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options);
-        var commands = new SqlJobCommands(options);
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
         var first = Job() with { JobId = Guid.Parse("00000000-0000-0000-0000-000000000001"), Policy = Job().Policy with { BacklogLimit = 10000 } };
         var second = Job() with { JobId = Guid.Parse("00000000-0000-0000-0000-000000000002") };
         foreach (var job in new[] { first, second })
@@ -62,7 +62,7 @@ public sealed class ProjectionSqlTests
         await fixture.CreateAsync(snapshot);
         await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
         await SqlCapacityTestSetup.ReadyAsync(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
-        var commands = new SqlJobCommands(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
+        var commands = new SqlJobCommands(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId), JobCommandTestCatalog.Create());
         var job = Job();
         await commands.SaveAsync(job, null, Actor(), default);
         await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");

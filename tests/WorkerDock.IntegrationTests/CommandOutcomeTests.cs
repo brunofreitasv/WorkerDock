@@ -21,7 +21,7 @@ public sealed class CommandOutcomeTests
     [InlineData(true)]
     public async Task Memory_publication_receipts_survive_failure_and_lost_ack(bool rejected)
     {
-        var job = Job(); var store = new InMemoryJobCommands(TimeProvider.System, [job]);
+        var job = Job(); var store = new InMemoryJobCommands(TimeProvider.System, [job], templateCatalog: JobCommandTestCatalog.Create());
         await AssertPublication(store, store, job.JobId, rejected);
         var settled = store.AuditEvents.Where(row => row.EventType == "CommandSettled").ToArray();
         Assert.Single(settled);
@@ -50,7 +50,7 @@ public sealed class CommandOutcomeTests
     {
         var fail = false; var job = Job();
         var store = new InMemoryJobCommands(TimeProvider.System, [job], (phase, _) =>
-            fail && phase == "Audit" ? ValueTask.FromException(new Exception("secret")) : ValueTask.CompletedTask);
+            fail && phase == "Audit" ? ValueTask.FromException(new Exception("secret")) : ValueTask.CompletedTask, templateCatalog: JobCommandTestCatalog.Create());
         var run = await store.RunNowAsync(job.JobId, "audit", Actor, default);
         var envelope = Assert.Single(await store.ReadPendingAsync(10, default)); fail = true;
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await store.AcknowledgeAsync(envelope.IntentId, envelope.PayloadDigest, default));
@@ -74,7 +74,7 @@ public sealed class CommandOutcomeSqlTests
         await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options, "command-worker");
-        var commands = new SqlJobCommands(options); var job = CommandOutcomeTests.Job();
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create()); var job = CommandOutcomeTests.Job();
         await commands.SaveAsync(job, null, CommandOutcomeTests.Actor, default);
         await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         var run = await commands.RunNowAsync(job.JobId, "unknown-stop", CommandOutcomeTests.Actor, default);
@@ -99,7 +99,7 @@ public sealed class CommandOutcomeSqlTests
         await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options);
-        var commands = new SqlJobCommands(options); var job = CommandOutcomeTests.Job();
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create()); var job = CommandOutcomeTests.Job();
         await commands.SaveAsync(job, null, CommandOutcomeTests.Actor, default);
         await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         var run = await commands.RunNowAsync(job.JobId, "audit", CommandOutcomeTests.Actor, default);
@@ -125,7 +125,7 @@ public sealed class CommandOutcomeSqlTests
         await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options);
-        var commands = new SqlJobCommands(options); var job = CommandOutcomeTests.Job();
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create()); var job = CommandOutcomeTests.Job();
         await commands.SaveAsync(job, null, CommandOutcomeTests.Actor, default);
         await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         await CommandOutcomeTests.AssertPublication(commands, new SqlProjectionStore(options), job.JobId, rejected);
@@ -143,7 +143,7 @@ public sealed class CommandOutcomeSqlTests
         await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options, "command-worker");
-        var commands = new SqlJobCommands(options); var job = CommandOutcomeTests.Job();
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create()); var job = CommandOutcomeTests.Job();
         await commands.SaveAsync(job, null, CommandOutcomeTests.Actor, default);
         await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         var run = await commands.RunNowAsync(job.JobId, "stop", CommandOutcomeTests.Actor, default);
