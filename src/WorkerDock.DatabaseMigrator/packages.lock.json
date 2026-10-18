@@ -237,7 +237,14 @@
           "Microsoft.EntityFrameworkCore.SqlServer": "[10.0.13, )",
           "System.Security.Cryptography.Pkcs": "[10.0.13, )",
           "WorkerDock.Application": "[1.0.0, )",
+          "WorkerDock.Templates.Http": "[1.0.0, )",
           "WorkerDock.Templates.SqlServer": "[1.0.0, )"
+        }
+      },
+      "workerdock.templates.http": {
+        "type": "Project",
+        "dependencies": {
+          "WorkerDock.Contracts": "[1.0.0, )"
         }
       },
       "workerdock.templates.sqlserver": {

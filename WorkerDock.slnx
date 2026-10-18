@@ -1,6 +1,6 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/WorkerDock.Templates.SqlServer/WorkerDock.Templates.SqlServer.csproj" /><Project Path="src/WorkerDock.Application/WorkerDock.Application.csproj" />
+    <Project Path="src/WorkerDock.Templates.SqlServer/WorkerDock.Templates.SqlServer.csproj" /><Project Path="src/WorkerDock.Templates.Http/WorkerDock.Templates.Http.csproj" /><Project Path="src/WorkerDock.Application/WorkerDock.Application.csproj" />
     <Project Path="src/WorkerDock.Contracts/WorkerDock.Contracts.csproj" />
     <Project Path="src/WorkerDock.DatabaseMigrator/WorkerDock.DatabaseMigrator.csproj" />
     <Project Path="src/WorkerDock.Domain/WorkerDock.Domain.csproj" />

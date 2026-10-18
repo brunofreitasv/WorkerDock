@@ -181,6 +181,12 @@
       "workerdock.domain": {
         "type": "Project"
       },
+      "workerdock.templates.http": {
+        "type": "Project",
+        "dependencies": {
+          "WorkerDock.Contracts": "[1.0.0, )"
+        }
+      },
       "workerdock.templates.sqlserver": {
         "type": "Project",
         "dependencies": {

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><IsTestProject>true</IsTestProject><IsPackable>false</IsPackable></PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/WorkerDock.Quartz/WorkerDock.Quartz.csproj" />
+    <ProjectReference Include="../../src/WorkerDock.Quartz/WorkerDock.Quartz.csproj" /><ProjectReference Include="../../src/WorkerDock.Templates.Http/WorkerDock.Templates.Http.csproj" /><ProjectReference Include="../../src/WorkerDock.Application/WorkerDock.Application.csproj" /><ProjectReference Include="../../src/WorkerDock.Infrastructure/WorkerDock.Infrastructure.csproj" />
     <ProjectReference Include="../WorkerDock.TestHost/WorkerDock.TestHost.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../../src/WorkerDock.DatabaseMigrator/WorkerDock.DatabaseMigrator.csproj" />
     <ProjectReference Include="../../src/WorkerDock.Web/WorkerDock.Web.csproj" />
