@@ -187,6 +187,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
         Add(update, "@certainty", SqlDbType.NVarChar, data.Uncertain ? "Unknown" : "Known", 10); Add(update, "@due", SqlDbType.DateTime2, data.Intent.DueUtc.UtcDateTime);
         Add(update, "@stop", SqlDbType.Bit, data.StopRequested); Add(update, "@force", SqlDbType.Bit, data.Force); Add(update, "@release", SqlDbType.Bit, !data.PermitRetained);
         await update.ExecuteNonQueryAsync(ct);
+        await SqlCommandOutcomes.SettleAsync(c, t, data.Descriptor.ExecutionId, ct);
         foreach (var state in data.Events)
         {
             await using var ev = Command(c, t, "INSERT INTO [workerdock].AttemptStatusEvents(EventId,ExecutionId,AttemptId,State,OccurredAtUtc) VALUES(NEWID(),@id,@attempt,@state,SYSUTCDATETIME())");

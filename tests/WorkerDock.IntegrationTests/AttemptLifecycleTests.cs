@@ -30,7 +30,9 @@ public sealed class AttemptLifecycleTests
         var stop = await controls.StopAsync(run.TargetId, false, "queued stop", Actor, default);
         Assert.Equal("Stopped", commands.GetExecution(run.TargetId)!.State);
         Assert.Equal(stop, await commands.GetCommandAsync(stop.CommandId, default));
-        Assert.Equal(2, commands.AuditCount);
+        Assert.Equal(3, commands.AuditCount);
+        Assert.Equal("Failed", (await commands.GetCommandAsync(run.CommandId, default)).State);
+        Assert.Equal("Failed", Assert.Single(commands.AuditEvents, row => row.EventType == "CommandSettled").Outcome);
     }
 
     [Fact]

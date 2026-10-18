@@ -16,7 +16,7 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0003c_capacity", default);
+            .ApplyAsync("tenant", "0003d_dispatch", default);
         var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
         var job = Job() with { Configuration = JsonDocument.Parse("{\"secret\":\"audit-must-not-copy-this\"}").RootElement.Clone() };
         var actor = Actor();
@@ -36,7 +36,7 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0003c_capacity", default);
+            .ApplyAsync("tenant", "0003d_dispatch", default);
         await database.ExecuteAsync("CREATE TRIGGER [workerdock].TestJobAuditFailure ON [workerdock].AuditEvents AFTER INSERT AS THROW 51000, 'Injected audit failure', 1;");
         var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () =>
@@ -55,7 +55,7 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0003c_capacity", default);
+            .ApplyAsync("tenant", "0003d_dispatch", default);
         var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
         var job = Job();
         await commands.SaveAsync(job, null, Actor(), default);
@@ -83,7 +83,7 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0003c_capacity", default);
+            .ApplyAsync("tenant", "0003d_dispatch", default);
         var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
         var job = Job();
         await commands.SaveAsync(job, null, Actor(), default);

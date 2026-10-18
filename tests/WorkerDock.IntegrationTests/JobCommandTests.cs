@@ -12,6 +12,85 @@ public sealed class JobCommandTests
     private static readonly ActorContext Actor = new("issuer:subject", "Entra", Guid.NewGuid());
 
     [Fact]
+    public async Task Receipt_kind_survives_request_key_expiry_while_execution_is_still_queued()
+    {
+        var clock = new MutableClock(DateTimeOffset.UtcNow); var job = Job("long backlog");
+        var commands = new InMemoryJobCommands(clock, [job]);
+        var first = await commands.RunNowAsync(job.JobId, "expires", Actor, default);
+        clock.Advance(TimeSpan.FromHours(25));
+        var second = await commands.RunNowAsync(job.JobId, "expires", Actor, default);
+        Assert.NotEqual(first.CommandId, second.CommandId);
+        var attempts = commands.GetAttemptStore(first.TargetId)!;
+        await attempts.BeginAsync(attempts.Intent, "boot", default);
+        Assert.Equal("Applied", (await commands.GetCommandAsync(first.CommandId, default)).State);
+        Assert.Equal("Pending", (await commands.GetCommandAsync(second.CommandId, default)).State);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Manual_and_stop_receipts_follow_authoritative_attempt_commits(bool stopFirst)
+    {
+        var job = Job("receipts");
+        var commands = new InMemoryJobCommands(TimeProvider.System, [job]);
+        var run = await commands.RunNowAsync(job.JobId, "stable-key", Actor, default);
+        Assert.Equal("Pending", (await commands.GetCommandAsync(run.CommandId, default)).State);
+        var attempts = commands.GetAttemptStore(run.TargetId)!;
+        var lease = (await attempts.BeginAsync(attempts.Intent, "boot", default)).Lease!;
+        Assert.Equal("Applied", (await commands.GetCommandAsync(run.CommandId, default)).State);
+        WorkerDock.Application.Common.CommandReceipt? stop = null;
+        if (stopFirst)
+        {
+            stop = await commands.StopAsync(run.TargetId, false, "secret-audit-only", Actor, default);
+            Assert.Equal("Pending", (await commands.GetCommandAsync(stop.CommandId, default)).State);
+        }
+        await attempts.CompleteAsync(lease, new(new WorkerDock.Contracts.Templates.TemplateResult("Success", "Ok", false,
+            JsonSerializer.SerializeToElement(new { }), null), "Completed", true, false), default);
+        stop ??= await commands.StopAsync(run.TargetId, false, "secret-audit-only", Actor, default);
+        Assert.Equal("Applied", (await commands.GetCommandAsync(stop.CommandId, default)).State);
+        Assert.Equal(stopFirst ? "Stopped" : "Succeeded", attempts.Snapshot.State);
+        var replay = await commands.RunNowAsync(job.JobId, "stable-key", Actor, default);
+        Assert.Equal(run.CommandId, replay.CommandId);
+        Assert.Equal("Applied", replay.State);
+        Assert.Equal(1, commands.ExecutionCount);
+        Assert.DoesNotContain("secret-audit-only", JsonSerializer.Serialize(await commands.GetCommandAsync(stop.CommandId, default)));
+    }
+
+    [Fact]
+    public async Task Unconfirmed_stop_failure_and_unpublished_cancellation_settle_receipts()
+    {
+        var job = Job("receipt failures"); var commands = new InMemoryJobCommands(TimeProvider.System, [job]);
+        var run = await commands.RunNowAsync(job.JobId, "cancel", Actor, default);
+        await commands.StopAsync(run.TargetId, false, "cancel before launch", Actor, default);
+        Assert.Equal("Failed", (await commands.GetCommandAsync(run.CommandId, default)).State);
+        var second = await commands.RunNowAsync(job.JobId, "running", Actor, default);
+        var attempts = commands.GetAttemptStore(second.TargetId)!;
+        var lease = (await attempts.BeginAsync(attempts.Intent, "boot", default)).Lease!;
+        var stop = await commands.StopAsync(second.TargetId, true, "terminate", Actor, default);
+        await attempts.CompleteAsync(lease, new(null, "ProcessFailed", false, true), default);
+        Assert.Equal("NeedsReview", attempts.Snapshot.State);
+        Assert.Equal("Failed", (await commands.GetCommandAsync(stop.CommandId, default)).State);
+    }
+
+    [Theory]
+    [InlineData(65500, false)]
+    [InlineData(54000, true)]
+    [InlineData(30000, false)]
+    public async Task Save_bounds_the_serialized_execution_envelope(int length, bool accepted)
+    {
+        var job = Job("bounded") with { Configuration = JsonDocument.Parse("{\"value\":\"" + new string(length == 30000 ? '<' : 'x', length) + "\"}").RootElement.Clone() };
+        var commands = new InMemoryJobCommands(TimeProvider.System);
+        if (accepted) await commands.SaveAsync(job, null, Actor, default);
+        else
+        {
+            var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await commands.SaveAsync(job, null, Actor, default));
+            Assert.Equal("ValidationFailed", error.Code);
+            Assert.Equal(0, commands.AuditCount);
+            Assert.Equal(0, commands.ExecutionCount);
+        }
+    }
+
+    [Fact]
     public async Task Stale_edit_returns_412_without_revision_or_audit()
     {
         var service = new InMemoryJobCommands(TimeProvider.System);

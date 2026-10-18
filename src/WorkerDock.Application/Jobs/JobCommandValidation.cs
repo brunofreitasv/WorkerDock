@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Text;
 using WorkerDock.Application.Common;
 using WorkerDock.Domain.Jobs;
 
@@ -22,7 +21,7 @@ public static class JobCommandValidation
         if (!((revision.TemplateId, revision.TemplateVersion) is ("workerdock.sql-server", "1.0.0") or ("workerdock.http", "1.0.0")))
             throw new WorkerDockException("UnknownTemplate", "templateId");
         if (revision.Configuration.ValueKind != System.Text.Json.JsonValueKind.Object ||
-            Encoding.UTF8.GetByteCount(revision.Configuration.GetRawText()) > 65536)
+            !WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(revision.TemplateId, revision.TemplateVersion, revision.Configuration))
             throw new WorkerDockException("ValidationFailed", "configuration");
         var policy = revision.Policy;
         if (policy is null || (policy.Timeout is { } timeout && timeout <= TimeSpan.Zero) ||

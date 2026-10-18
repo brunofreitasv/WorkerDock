@@ -149,6 +149,15 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options) : IJobCommands
                 if (await profile.ExecuteScalarAsync(token) is Guid)
                     throw new WorkerDockException("ProfileUnavailable");
 
+                await using var configuration = Command(connection, transaction,
+                    "SELECT TemplateId,TemplateVersion,ConfigurationJson FROM [workerdock].JobRevisions WHERE JobId=@job AND Revision=@rev");
+                Add(configuration, "@job", SqlDbType.UniqueIdentifier, jobId); Add(configuration, "@rev", SqlDbType.BigInt, revision);
+                await using var pinned = await configuration.ExecuteReaderAsync(token); await pinned.ReadAsync(token);
+                using var json = JsonDocument.Parse(pinned.GetString(2));
+                if (!WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(pinned.GetString(0), pinned.GetString(1), json.RootElement))
+                    throw new WorkerDockException("ValidationFailed", "configuration");
+                await pinned.CloseAsync();
+
                 var executionId = Guid.NewGuid();
                 var receipt = new CommandReceipt(Guid.NewGuid(), executionId, "Pending");
                 await using var execution = Command(connection, transaction,

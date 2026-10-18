@@ -20,7 +20,7 @@ public sealed class AttemptSqlTests
     {
         await using var fixture = new QuartzProcessFixture();
         await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003c_capacity", default);
+        await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         var commands = new SqlJobCommands(options);
         var job = new JobRevision(Guid.NewGuid(), 0, "attempt", "workerdock.http", "1.0.0", JsonSerializer.SerializeToElement(new { }), null,

@@ -9,6 +9,20 @@ public sealed class JobAdmissionTests
 {
     private static AdmissionCandidate Work(string mode = "Allow", bool held = false, int backlog = 10) => new(Guid.NewGuid(), mode, backlog, held);
     [Fact]
+    public void Large_backlog_limits_each_commit_and_eventually_admits_in_order()
+    {
+        var queue = Enumerable.Range(0, 25000).Select(_ => Work("Queue", backlog: 10000)).ToList();
+        var holder = Work("Queue", true);
+        var first = JobAdmission.Decide(new[] { holder }.Concat(queue).ToArray(), 1);
+        Assert.InRange(first.Admit.Count + first.Skip.Count, 1, 32);
+        Assert.Equal(queue.Skip(10000).Take(32).Select(x => x.ExecutionId), first.Skip);
+        queue.RemoveAll(row => first.Skip.Contains(row.ExecutionId));
+        var second = JobAdmission.Decide(queue, 1);
+        Assert.Equal(queue[0].ExecutionId, Assert.Single(second.Admit));
+        Assert.InRange(second.Admit.Count + second.Skip.Count, 1, 32);
+    }
+
+    [Fact]
     public async Task Actual_retry_review_and_reconciliation_keep_later_shared_work_behind_exclusive_execution()
     {
         var clock=new AttemptLifecycleTests.Clock(); var descriptor=AttemptLifecycleTests.Descriptor();

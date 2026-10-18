@@ -16,11 +16,51 @@ public sealed class ProjectionSqlTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task Maintenance_cursor_survives_restart_and_bounds_large_job_backlog(bool snapshot)
+    {
+        await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
+        await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
+        var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
+        await SqlCapacityTestSetup.ReadyAsync(options);
+        var commands = new SqlJobCommands(options);
+        var first = Job() with { JobId = Guid.Parse("00000000-0000-0000-0000-000000000001"), Policy = Job().Policy with { BacklogLimit = 10000 } };
+        var second = Job() with { JobId = Guid.Parse("00000000-0000-0000-0000-000000000002") };
+        foreach (var job in new[] { first, second })
+        {
+            await commands.SaveAsync(job, null, Actor(), default);
+            await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
+            await commands.RunNowAsync(job.JobId, "maintenance", Actor(), default);
+        }
+        await fixture.Database.ExecuteAsync($"""
+            INSERT [workerdock].Jobs(JobId,CurrentRevision,Enabled,Archived,ConcurrencyLimit)
+                SELECT TOP (5000) NEWID(),NULL,1,0,1 FROM sys.all_objects a CROSS JOIN sys.all_objects b;
+            INSERT [workerdock].Executions(ExecutionId,JobId,JobRevision,TriggerKind,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc)
+                SELECT TOP (25000) NEWID(),'{first.JobId}',1,N'Manual',CONVERT(nvarchar(100),NEWID()),N'Queued',N'Known',SYSUTCDATETIME(),NEWID(),SYSUTCDATETIME()
+                FROM sys.all_objects a CROSS JOIN sys.all_objects b;
+            """);
+        var store = new SqlProjectionStore(options);
+        // Outbox reads do not visit 5,000 idle jobs or perform admission ahead of existing publication.
+        Assert.Equal(2, (await store.ReadPendingAsync(10, default)).Count);
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].ProjectionMaintenance WHERE AfterJobId IS NULL"));
+        await store.MaintainAsync(default);
+        Assert.Equal(32, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Executions WHERE State=N'Skipped'"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].ProjectionMaintenance WHERE AfterJobId='{first.JobId}'"));
+        await new SqlProjectionStore(options).MaintainAsync(default);
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].ProjectionMaintenance WHERE AfterJobId='{second.JobId}'"));
+        await new SqlProjectionStore(options).MaintainAsync(default);
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].ProjectionMaintenance WHERE AfterJobId IS NULL"));
+        await store.MaintainAsync(default);
+        Assert.Equal(64, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Executions WHERE State=N'Skipped'"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task Publication_survives_sql_handle_restart_and_concurrent_publishers(bool snapshot)
     {
         await using var fixture = new QuartzProcessFixture();
         await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003c_capacity", default);
+        await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
         await SqlCapacityTestSetup.ReadyAsync(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
         var commands = new SqlJobCommands(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
         var job = Job();
@@ -58,7 +98,7 @@ public sealed class ProjectionSqlTests
     {
         await using var fixture = new QuartzProcessFixture();
         await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003c_capacity", default);
+        await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
         var store = new SqlProjectionStore(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
         var id = Guid.NewGuid();
         var entity = Guid.NewGuid();

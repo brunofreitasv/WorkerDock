@@ -93,6 +93,11 @@ public sealed class OwnershipMonitor(IAttemptStore store, IAttemptSignals signal
                 await Task.WhenAny(completion, Task.Delay(TimeSpan.FromMilliseconds(200)));
             }
         }
+        catch (WorkerDock.Runtime.Processes.ExecutionProcessException error) when (error.NoExternalEffects && child is null)
+        {
+            exitConfirmed = true; effects = false;
+            result = new TemplateResult("PermanentFailure", error.SafeCode, false, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null);
+        }
         catch
         {
             if (child is not null)

@@ -21,7 +21,7 @@ public sealed class SqlExecutionControls(TenantDatabaseOptions options) : IExecu
         return new SqlAttemptStore(options).TransactAsync(id, null, (data, now) =>
         {
             action(data, now);
-            return new CommandReceipt(Guid.NewGuid(), id, data.State == "Running" ? "Pending" : "Applied");
+            return new CommandReceipt(Guid.NewGuid(), id, data.State == "Running" ? "Pending" : data.State == "NeedsReview" ? "Failed" : "Applied");
         }, ct, async (connection, transaction, receipt, token) =>
         {
             await using var command = Command(connection, transaction, """

@@ -17,6 +17,57 @@ namespace WorkerDock.ProcessTests;
 
 public sealed class ExecutionControlTests
 {
+    [Fact]
+    public void Accepted_near_limit_configuration_leaves_room_for_pinned_settings_and_full_envelope()
+    {
+        var descriptor = FixtureProgram.Descriptor("spawn", "unused") with
+        {
+            AttemptOrdinal = int.MaxValue, IdempotencyKey = new string('x', 100), ProfileRevisionId = Guid.NewGuid(),
+            Configuration = System.Text.Json.JsonSerializer.SerializeToElement(new { value = new string('x', 54000) }),
+            ProfileConfiguration = System.Text.Json.JsonSerializer.SerializeToElement(new { value = new string('x', 4000) }),
+            IntegrationConfiguration = System.Text.Json.JsonSerializer.SerializeToElement(new { value = new string('x', 4000) }),
+            DeadlineUtc = DateTimeOffset.MaxValue
+        };
+        Assert.True(ExecutionPayloadLimits.FitsJobConfiguration(descriptor.TemplateId, descriptor.TemplateVersion, descriptor.Configuration));
+        var bytes = WorkerDock.Runtime.Ipc.ExecutionProtocol.Serialize(new WorkerDock.Runtime.Ipc.ExecuteRequest(1, Guid.NewGuid(), long.MaxValue, new string('x', 64), descriptor));
+        Assert.InRange(bytes.Length, 62000, WorkerDock.Runtime.Ipc.ExecutionProtocol.MaximumMessageBytes);
+    }
+
+    [Fact]
+    public async Task Ambiguous_startup_failure_preserves_uncertainty()
+    {
+        var descriptor = FixtureProgram.Descriptor("spawn", "unused");
+        var store = new InMemoryAttemptStore(TimeProvider.System, descriptor, new(null, 1, TimeSpan.Zero, TimeSpan.Zero, 0, [], false, "Queue", 100, 5));
+        var lease = (await store.BeginAsync(store.Intent, "boot", default)).Lease!;
+        var monitor = new OwnershipMonitor(store, store, new AmbiguousSupervisor(), TimeProvider.System);
+        await monitor.RunAsync(lease, descriptor, TimeProvider.System.GetTimestamp(), default);
+        Assert.Equal("NeedsReview", store.Snapshot.State); Assert.True(store.Snapshot.EffectsMayHaveOccurred);
+    }
+    private sealed class AmbiguousSupervisor : IExecutionSupervisor
+    {
+        public ValueTask<IExecutionChild> StartAsync(Guid attemptId, long generation, ExecutionDescriptor descriptor, CancellationToken ct) =>
+            ValueTask.FromException<IExecutionChild>(new WorkerDock.Runtime.Processes.ExecutionProcessException("ExecutorStartupFailed"));
+    }
+
+    [Fact]
+    public async Task Oversized_prelaunch_request_fails_with_known_no_effects_and_safe_code()
+    {
+        var descriptor = FixtureProgram.Descriptor("spawn", "secret-must-not-leak") with
+        { Configuration = System.Text.Json.JsonSerializer.SerializeToElement(new { secret = new string('x', 65500) }) };
+        var rejection = await Assert.ThrowsAsync<WorkerDock.Runtime.Processes.ExecutionProcessException>(async () =>
+            await FixtureProgram.Supervisor().StartAsync(Guid.NewGuid(), 1, descriptor, default));
+        Assert.True(rejection.NoExternalEffects); Assert.Equal("IpcMessageTooLarge", rejection.SafeCode);
+        Assert.DoesNotContain("secret-must-not-leak", rejection.ToString());
+        var store = new InMemoryAttemptStore(TimeProvider.System, descriptor, new(null, 1, TimeSpan.Zero, TimeSpan.Zero, 0, [], false, "Queue", 100, 5));
+        var lease = (await store.BeginAsync(store.Intent, "boot", default)).Lease!;
+        var monitor = new OwnershipMonitor(store, store, FixtureProgram.Supervisor(), TimeProvider.System);
+        await monitor.RunAsync(lease, descriptor, TimeProvider.System.GetTimestamp(), default);
+        Assert.Equal("Failed", store.Snapshot.State);
+        Assert.False(store.Snapshot.EffectsMayHaveOccurred);
+        Assert.False(store.Snapshot.PermitRetained);
+        Assert.Empty(store.Retries);
+    }
+
     [Theory]
     [InlineData(1999, "Succeeded")]
     [InlineData(2000, "TimedOut")]

@@ -187,3 +187,24 @@ public Quartz prefix option; these are not proof of actual SQL execution. Run
 `MigrationTests.Fresh_custom_schema_installs_and_rolls_back_all_pairs` and the
 other database.md SQL suites on real SQL Server with RCSI OFF and ON before
 claiming migrations, rollback, grants or clustering are validated.
+
+## Stage 02 final review regression checks
+
+Run the focused memory/process regressions, then the complete SQL-independent suite and Release build:
+
+```powershell
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifiedName~JobCommandTests|FullyQualifiedName~CommandOutcomeTests|FullyQualifiedName~JobAdmissionTests|FullyQualifiedName~CustomSqlSchemaTests'
+dotnet test tests/WorkerDock.ProcessTests -c Release --filter FullyQualifiedName~Oversized_prelaunch_request
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'Store!=Sql'
+dotnet test tests/WorkerDock.UnitTests -c Release
+dotnet test tests/WorkerDock.ProcessTests -c Release
+dotnet build WorkerDock.slnx -c Release
+```
+
+Manual run commands become Applied when publication or attempt admission commits; a permanent projection rejection or cancellation before publication becomes Failed. Transient publication failures leave Pending for retry. Running stop commands remain Pending until local completion confirms termination; unconfirmed abandonment becomes Failed. Command outcomes and their audit append commit together. Request-key replays return the original command identity with its current outcome.
+
+`0003d_dispatch` adds the durable maintenance cursor and indexes. Reconciliation publishes/reviews its bounded outbox batch first, then allows two seconds for one eligible job's admission maintenance. The indexed cursor cycles over jobs with queued/retry work, including across restarts. Each job reads at most 10,032 unpermitted candidates (10,000 is the maximum supported backlog) and changes at most 32 admission decisions, held deliveries, and capacity bindings per pass. Existing permits are counted separately. Quartz remains the only acquisition owner.
+
+Job validation budgets the serialized descriptor, 1 KiB of execute-envelope overhead and 8 KiB for future pinned nonsecret profile/settings fields inside the 64 KiB frame. Runtime checks the actual complete frame before launching. A proven rejection before handler permission records known no effects; ambiguous permission writes remain uncertain.
+
+Memory/source-contract passes do not establish SQL latency, durability or grants. Follow database.md for real SQL setup; live SQL remains SQL_TEST_BLOCKED until its credentials are available.

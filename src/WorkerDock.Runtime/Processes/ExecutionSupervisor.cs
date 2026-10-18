@@ -13,9 +13,10 @@ public sealed record ExecutionSupervisorOptions(string ExecutablePath, IReadOnly
 {
     public TimeSpan StartupTimeout { get; init; } = TimeSpan.FromSeconds(10);
 }
-public sealed class ExecutionProcessException(string safeCode) : Exception(safeCode)
+public sealed class ExecutionProcessException(string safeCode, bool noExternalEffects = false) : Exception(safeCode)
 {
     public string SafeCode { get; } = safeCode;
+    public bool NoExternalEffects { get; } = noExternalEffects;
 }
 public sealed class ExecutionSupervisor : IExecutionSupervisor
 {
@@ -31,20 +32,23 @@ public sealed class ExecutionSupervisor : IExecutionSupervisor
     public async ValueTask<IExecutionChild> StartAsync(Guid attemptId, long generation, ExecutionDescriptor descriptor, CancellationToken ct)
     {
         if (attemptId == Guid.Empty || generation <= 0 || descriptor.ExecutionId == Guid.Empty || descriptor.AttemptOrdinal <= 0)
-            throw new ExecutionProcessException("InvalidExecutionIdentity");
+            throw new ExecutionProcessException("InvalidExecutionIdentity", true);
         var digest = options.MetadataDigests.GetValueOrDefault(descriptor.TemplateId + "@" + descriptor.TemplateVersion) ?? "";
         var request = new ExecuteRequest(1, attemptId, generation, digest, descriptor);
-        _ = ExecutionProtocol.Serialize(request); // Reject oversized descriptors before starting any child.
+        try { _ = ExecutionProtocol.Serialize(request); } // No child has been started.
+        catch (ExecutionProcessException error) { throw new ExecutionProcessException(error.SafeCode, true); }
+        catch (System.Text.Json.JsonException) { throw new ExecutionProcessException("IpcInvalidMessage", true); }
         var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var name = "WorkerDock_" + Guid.NewGuid().ToString("N");
         var pipe = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, 4096, 4096);
         Process? process = null; ContainedProcess? containment = null;
+        var permissionAttempted = false;
         using var startup = CancellationTokenSource.CreateLinkedTokenSource(ct);
         startup.CancelAfter(options.StartupTimeout);
         if (descriptor.DeadlineUtc is { } deadline)
         {
             var remaining = deadline - DateTimeOffset.UtcNow;
-            if (remaining <= TimeSpan.Zero) { await pipe.DisposeAsync(); throw new ExecutionProcessException("ExecutorDeadlineExpired"); }
+            if (remaining <= TimeSpan.Zero) { await pipe.DisposeAsync(); throw new ExecutionProcessException("ExecutorDeadlineExpired", true); }
             if (remaining < options.StartupTimeout) startup.CancelAfter(remaining);
         }
         try
@@ -71,6 +75,7 @@ public sealed class ExecutionSupervisor : IExecutionSupervisor
                 hello.Nonce is null || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(hello.Nonce), Encoding.UTF8.GetBytes(nonce)))
                 throw new ExecutionProcessException("ExecutorIdentityRejected");
             // This frame is the sole permission to enter the installed handler composition root.
+            permissionAttempted = true;
             await ExecutionProtocol.WriteAsync(pipe, request, startup.Token);
             return new ChildHandle(process, containment, pipe, stdout, stderr);
         }
@@ -85,8 +90,7 @@ public sealed class ExecutionSupervisor : IExecutionSupervisor
                 await process.WaitForExitAsync(cleanup.Token);
             }
             process?.Dispose();
-            if (ct.IsCancellationRequested) throw new OperationCanceledException(ct);
-            throw new ExecutionProcessException("ExecutorStartupFailed");
+            throw new ExecutionProcessException("ExecutorStartupFailed", !permissionAttempted);
         }
     }
     private static async Task DiscardAsync(Stream stream)

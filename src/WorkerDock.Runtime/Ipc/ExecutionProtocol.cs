@@ -13,7 +13,7 @@ public sealed record ExecutionControl(string Kind);
 /// <summary>Version 1: bounded little-endian length-prefixed UTF-8 JSON, one attempt per pipe.</summary>
 public static class ExecutionProtocol
 {
-    public const int MaximumMessageBytes = 64 * 1024;
+    public const int MaximumMessageBytes = ExecutionPayloadLimits.MaximumMessageBytes;
     private static readonly JsonSerializerOptions JsonOptions = new() { MaxDepth = 32 };
     public static byte[] Serialize<T>(T message)
     {

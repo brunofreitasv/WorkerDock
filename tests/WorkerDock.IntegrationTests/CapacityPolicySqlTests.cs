@@ -18,7 +18,7 @@ public sealed class CapacityPolicySqlTests
     public async Task Sql_epoch_fences_acquired_delivery_and_preserves_exclusive_order(bool snapshot)
     {
         await using var fixture=new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant","0003c_capacity",default);
+        await fixture.Runner.ApplyAsync("tenant","0003d_dispatch",default);
         var options=new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString,fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options,"capacity-worker");
         var jobs=new SqlJobCommands(options); var actor=new ActorContext("manager","Anonymous",Guid.NewGuid());
@@ -37,6 +37,7 @@ public sealed class CapacityPolicySqlTests
         await capacity.TransactAsync((state,now) => { foreach(var worker in state.Workers.Values.ToArray()) state.Acknowledge(worker.InstallationId,worker.BootId,state.DesiredRevision,now); Assert.True(state.Promote(now)); return true; },default);
         Assert.Equal("Held",(await attempts.BeginAsync(acquired,"capacity-worker",default)).Decision);
         Assert.Equal(0,await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Attempts"));
+        await projections.MaintainAsync(default); // Bounded maintenance now runs after the publication pass.
         var current=(await projections.ReadPendingAsync(20,default)).Single(x => x.EntityId==first.TargetId);
         var fresh=(await projections.ReadAsync(current,1,default)).Intent;
         Assert.NotEqual(acquired.DeliveryId,fresh.DeliveryId); Assert.True(fresh.CapacityRevision>acquired.CapacityRevision);

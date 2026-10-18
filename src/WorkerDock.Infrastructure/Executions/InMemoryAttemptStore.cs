@@ -15,13 +15,14 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
 {
     private readonly TimeProvider clock;
     private readonly ICapacityStore? capacity;
+    private readonly Action<AttemptSnapshot>? committed;
     private readonly object gate = new();
     private readonly AttemptLifecycle data;
     private readonly List<DispatchIntent> retries = [];
     private readonly List<MemoryExecutionAudit> audits = [];
-    public InMemoryAttemptStore(TimeProvider clock, ExecutionDescriptor descriptor, ExecutionPolicy policy, ICapacityStore? capacity = null)
+    public InMemoryAttemptStore(TimeProvider clock, ExecutionDescriptor descriptor, ExecutionPolicy policy, ICapacityStore? capacity = null, Action<AttemptSnapshot>? committed = null)
     {
-        this.clock = clock; this.capacity = capacity;
+        this.clock = clock; this.capacity = capacity; this.committed = committed;
         Intent = new(Guid.NewGuid(), descriptor.ExecutionId, 1, descriptor.TemplateId, clock.GetUtcNow(), policy.Priority, 1, "");
         Intent = Intent with { PayloadDigest = Intent.ComputeDigest() };
         data = new() { Descriptor = descriptor, Policy = policy, Intent = Intent, JobId = Guid.NewGuid() };
@@ -37,7 +38,8 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
         {
             data.GateOpen = state.CanStart(workerBootId, intent.TemplateId, now);
             data.EffectiveCapacityRevision = state.EffectiveRevision;
-            return data.Begin(intent, workerBootId, now);
+            var result = data.Begin(intent, workerBootId, now);
+            Notify(); return result;
         }
     }, ct);
     public ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct) => Run(() => data.GetDescriptor(lease, clock.GetUtcNow()), ct);
@@ -58,9 +60,10 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
         {
             if (id != data.Descriptor.ExecutionId) throw new WorkerDockException("ExecutionNotFound");
             action(); audits.Add(new(kind, reason, actor, clock.GetUtcNow()));
-            return new CommandReceipt(Guid.NewGuid(), id, data.State == "Running" ? "Pending" : "Applied");
+            return new CommandReceipt(Guid.NewGuid(), id, data.State == "Running" ? "Pending" : data.State == "NeedsReview" ? "Failed" : "Applied");
         }, ct);
     }
+    private void Notify() => committed?.Invoke(new(data.State, data.Ordinal, data.PermitRetained, data.StopRequested, data.AttemptState, data.Uncertain));
     internal static void ValidateControl(Guid id, string reason, ActorContext actor)
     {
         JobCommandValidation.ValidateActor(actor);
@@ -75,6 +78,7 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
             var oldIntent = data.Intent;
             var result = action();
             if (oldIntent != data.Intent && data.NewDispatch is { } intent) retries.Add(intent);
+            Notify();
             return ValueTask.FromResult(result);
         }
     }

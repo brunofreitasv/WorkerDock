@@ -18,6 +18,21 @@ namespace WorkerDock.IntegrationTests;
 public sealed class PublicationRecoveryTests
 {
     [Fact]
+    public async Task Slow_admission_maintenance_cannot_delay_publication_or_its_acknowledgement()
+    {
+        await using var fixture = await Fixture.Create();
+        var entered = false;
+        fixture.Store.Maintenance = async ct =>
+        {
+            entered = true; Assert.True(fixture.Store.Acknowledged);
+            Assert.NotNull(await fixture.Execution.GetTrigger(QuartzPublisher.TriggerKey(fixture.Intent)));
+            await Task.Delay(Timeout.Infinite, ct);
+        };
+        Assert.Equal(1, await fixture.Reconcile().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(entered); Assert.True(fixture.Store.Acknowledged);
+    }
+
+    [Fact]
     public async Task Reissued_epoch_has_deterministic_distinct_delivery_and_does_not_rewrite_acquired_job()
     {
         await using var fixture=await Fixture.Create(); var original=fixture.Intent;
@@ -401,8 +416,10 @@ public sealed class PublicationRecoveryTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
-    private sealed class Store(Clock clock) : IProjectionStore, IDispatchStateStore, IProjectionReviewStore
+    private sealed class Store(Clock clock) : IProjectionStore, IDispatchStateStore, IProjectionReviewStore, IProjectionMaintenanceStore
     {
+        public Func<CancellationToken, ValueTask>? Maintenance;
+        public ValueTask MaintainAsync(CancellationToken ct) => Maintenance?.Invoke(ct) ?? ValueTask.CompletedTask;
         public ProjectionEnvelope Envelope = CreateEnvelope(clock.Now);
         public bool Acknowledged;
         public readonly TaskCompletionSource Ack = new(TaskCreationOptions.RunContinuationsAsynchronously);

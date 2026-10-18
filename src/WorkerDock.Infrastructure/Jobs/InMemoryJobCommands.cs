@@ -1,8 +1,7 @@
 using System.Collections.Immutable;
-using System.Security.Cryptography;
-using System.Text;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Jobs;
+using WorkerDock.Application.Dispatch;
 using WorkerDock.Application.Executions;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Infrastructure.Executions;
@@ -14,7 +13,7 @@ namespace WorkerDock.Infrastructure.Jobs;
 public sealed record MemoryExecution(Guid ExecutionId, Guid JobId, long JobRevision, Guid? ProfileId,
     string State, string IdempotencyKey);
 
-public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
+public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IProjectionStore
 {
     private readonly TimeProvider clock;
     private readonly Func<string, CancellationToken, ValueTask>? beforeCommit;
@@ -80,12 +79,13 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
             var audit = new MemoryJobAudit(Guid.NewGuid(), "JobRevisionSaved", proposed.JobId,
                 exists ? editor!.Revision.Revision : null, number, "Applied", actor.Subject,
                 actor.AuthenticationMode, actor.CorrelationId, clock.GetUtcNow());
-            Volatile.Write(ref state, before with
+            ImmutableInterlocked.Update(ref state, current => before with
             {
                 Jobs = before.Jobs.SetItem(proposed.JobId, next),
                 Revisions = before.Revisions.Add((proposed.JobId, number), revision),
-                Commands = before.Commands.Add(receipt.CommandId, receipt),
-                Audits = before.Audits.Add(audit)
+                Commands = current.Commands.Add(receipt.CommandId, receipt),
+                CommandKinds = current.CommandKinds.Add(receipt.CommandId, "JobSave"),
+                Audits = current.Audits.Add(audit)
             });
             return receipt;
         }
@@ -102,7 +102,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
             var now = clock.GetUtcNow();
             var scope = (jobId, actor.AuthenticationMode, actor.Subject, requestKey);
             if (before.Dedup.TryGetValue(scope, out var old) && now < old.ExpiresUtc)
-                return old.Receipt;
+                return before.Commands.GetValueOrDefault(old.Receipt.CommandId, old.Receipt);
             if (!before.Jobs.TryGetValue(jobId, out var editor)) throw new WorkerDockException("JobNotFound");
             if (editor.Archived) throw new WorkerDockException("JobArchived");
             if (!editor.Enabled) throw new WorkerDockException("JobDisabled");
@@ -113,13 +113,14 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
                 editor.Revision.ProfileId, "Queued", executionId.ToString("N"));
             await CheckPhaseAsync("Audit", ct);
             await CheckPhaseAsync("Outbox", ct);
-            var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("ExecutionDispatch|" + executionId.ToString("N"))));
-            Volatile.Write(ref state, before with
+            var digest = ProjectionEnvelope.ExecutionDigest(executionId, editor.Revision.Revision);
+            ImmutableInterlocked.Update(ref state, current => before with
             {
                 Executions = before.Executions.Add(executionId, execution),
-                Commands = before.Commands.Add(receipt.CommandId, receipt),
+                Commands = current.Commands.Add(receipt.CommandId, receipt),
+                CommandKinds = current.CommandKinds.Add(receipt.CommandId, "ManualRun"),
                 Dedup = before.Dedup.SetItem(scope, new(receipt, now.AddHours(24))),
-                Audits = before.Audits.Add(new(Guid.NewGuid(), "ManualRunAccepted", executionId,
+                Audits = current.Audits.Add(new(Guid.NewGuid(), "ManualRunAccepted", executionId,
                     editor.Revision.Revision, editor.Revision.Revision, "Accepted", actor.Subject,
                     actor.AuthenticationMode, actor.CorrelationId, now)),
                 Outbox = before.Outbox.Add(new(Guid.NewGuid(), "ExecutionDispatch", executionId,
@@ -127,8 +128,68 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
             });
             attemptStores[executionId] = new InMemoryAttemptStore(clock,
                 new ExecutionDescriptor(executionId, 1, editor.Revision.TemplateId, editor.Revision.TemplateVersion,
-                    execution.IdempotencyKey, editor.Revision.Configuration, null, null, JsonSerializer.SerializeToElement(new { }), null), editor.Revision.Policy);
+                    execution.IdempotencyKey, editor.Revision.Configuration, null, null, JsonSerializer.SerializeToElement(new { }), null), editor.Revision.Policy, committed: snapshot => SettleCommands(executionId, snapshot));
             return receipt;
+        }
+        finally { gate.Release(); }
+    }
+
+    private void SettleCommands(Guid executionId, AttemptSnapshot snapshot) =>
+        ImmutableInterlocked.Update(ref state, before => Settle(before, executionId, snapshot));
+
+    private State Settle(State before, Guid executionId, AttemptSnapshot snapshot, bool rejected = false)
+    {
+        var commands = before.Commands; var audits = before.Audits;
+        var published = before.Outbox.Any(row => row.EntityId == executionId && row.State == "Published");
+        foreach (var receipt in before.Commands.Values.Where(row => row.TargetId == executionId && row.State == "Pending"))
+        {
+            var manual = before.CommandKinds.GetValueOrDefault(receipt.CommandId) == "ManualRun";
+            var outcome = manual ? snapshot.Ordinal > 0 || published ? "Applied" : rejected || snapshot.State is "Stopped" or "Skipped" or "Failed" ? "Failed" : "Pending"
+                : snapshot.State == "Running" ? "Pending" : snapshot.State == "NeedsReview" ? "Failed" : "Applied";
+            if (outcome == "Pending") continue;
+            commands = commands.SetItem(receipt.CommandId, receipt with { State = outcome });
+            audits = audits.Add(new(Guid.NewGuid(), "CommandSettled", executionId, null, 1, outcome,
+                "workerdock", "System", receipt.CommandId, clock.GetUtcNow()));
+        }
+        return before with { Commands = commands, Audits = audits };
+    }
+
+    public ValueTask<IReadOnlyList<ProjectionEnvelope>> ReadPendingAsync(int limit, CancellationToken ct)
+    {
+        if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
+        ct.ThrowIfCancellationRequested();
+        IReadOnlyList<ProjectionEnvelope> result = Volatile.Read(ref state).Outbox
+            .Where(row => row.State is "Pending" or "Failed" && (row.RetryAtUtc is null || row.RetryAtUtc <= clock.GetUtcNow()))
+            .OrderBy(row => row.AvailableUtc).Take(limit).Select(row => new ProjectionEnvelope(row.EventId, row.Kind, 1,
+                row.EntityId, row.Revision, row.PayloadDigest, row.AvailableUtc,
+                JsonSerializer.SerializeToElement(new { executionId = row.EntityId, jobRevision = row.Revision }))).ToArray();
+        return ValueTask.FromResult(result);
+    }
+
+    public ValueTask AcknowledgeAsync(Guid intentId, string payloadDigest, CancellationToken ct) =>
+        UpdateProjectionAsync(intentId, payloadDigest, "Published", null, false, ct);
+    public ValueTask RecordFailureAsync(Guid intentId, string safeCode, DateTimeOffset retryAtUtc, CancellationToken ct)
+    {
+        if (safeCode is not ("UnsupportedProjection" or "ProjectionIntegrityError" or "ProjectionTriggerError" or
+            "ProjectionPublicationRace" or "ProjectionHeld" or "QuartzStoreUnavailable" or "ProjectionStoreUnavailable"))
+            throw new ArgumentException("Unknown projection failure code.", nameof(safeCode));
+        return UpdateProjectionAsync(intentId, null, safeCode == "ProjectionHeld" ? "Held" : "Failed", retryAtUtc,
+            safeCode is "UnsupportedProjection" or "ProjectionIntegrityError", ct);
+    }
+    private async ValueTask UpdateProjectionAsync(Guid intentId, string? digest, string outcome, DateTimeOffset? retry,
+        bool rejected, CancellationToken ct)
+    {
+        await gate.WaitAsync(ct);
+        try
+        {
+            var row = state.Outbox.SingleOrDefault(row => row.EventId == intentId);
+            if (row is null || digest is not null && row.PayloadDigest != digest) throw new WorkerDockException("ProjectionIntegrityError");
+            await CheckPhaseAsync("Audit", ct); await CheckPhaseAsync("Outbox", ct);
+            var snapshot = attemptStores[row.EntityId].Snapshot;
+            ImmutableInterlocked.Update(ref state, before => Settle(before with
+            {
+                Outbox = before.Outbox.Replace(row, row with { State = row.State == "Published" ? "Published" : outcome, RetryAtUtc = retry })
+            }, row.EntityId, snapshot, rejected));
         }
         finally { gate.Release(); }
     }
@@ -154,12 +215,14 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
             if (!attemptStores.TryGetValue(id, out var store)) throw new WorkerDockException("ExecutionNotFound");
             await CheckPhaseAsync("Audit", ct);
             var receipt = await action(store);
-            Volatile.Write(ref state, state with
+            ImmutableInterlocked.Update(ref state, current => current with
             {
-                Commands = state.Commands.Add(receipt.CommandId, receipt),
-                Audits = state.Audits.Add(new(Guid.NewGuid(), kind, id, null, 1, receipt.State, actor.Subject,
+                Commands = current.Commands.Add(receipt.CommandId, receipt),
+                CommandKinds = current.CommandKinds.Add(receipt.CommandId, kind),
+                Audits = current.Audits.Add(new(Guid.NewGuid(), kind, id, null, 1, receipt.State, actor.Subject,
                     actor.AuthenticationMode, actor.CorrelationId, clock.GetUtcNow()))
             });
+            SettleCommands(id, store.Snapshot);
             return receipt;
         }
         finally { gate.Release(); }
@@ -193,10 +256,13 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
         ImmutableDictionary<Guid, CommandReceipt> Commands,
         ImmutableDictionary<(Guid JobId, string Mode, string Subject, string Key), DedupRecord> Dedup,
         ImmutableArray<MemoryJobAudit> Audits,
-        ImmutableArray<MemoryJobOutbox> Outbox);
+        ImmutableArray<MemoryJobOutbox> Outbox)
+    {
+        public ImmutableDictionary<Guid, string> CommandKinds { get; init; } = ImmutableDictionary<Guid, string>.Empty;
+    }
     private sealed record DedupRecord(CommandReceipt Receipt, DateTimeOffset ExpiresUtc);
     private sealed record MemoryJobOutbox(Guid EventId, string Kind, Guid EntityId, long Revision,
-        string PayloadDigest, DateTimeOffset AvailableUtc);
+        string PayloadDigest, DateTimeOffset AvailableUtc, string State = "Pending", DateTimeOffset? RetryAtUtc = null);
 }
 
 public sealed record MemoryJobAudit(Guid EventId, string EventType, Guid TargetId,

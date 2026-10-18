@@ -12,6 +12,8 @@ public sealed record AdmissionCandidate(Guid ExecutionId, string Mode, int Backl
 public sealed record AdmissionDecision(IReadOnlyList<Guid> Admit, IReadOnlyList<Guid> Skip, IReadOnlyDictionary<Guid,string> SkipReasons);
 public sealed class JobAdmission(TenantDatabaseOptions options)
 {
+    public const int MaximumCandidates = 10032;
+    public const int MaximumChanges = 32;
     public async ValueTask<int> AdmitAsync(Guid jobId, CancellationToken ct)
     {
         try
@@ -33,20 +35,24 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
         if (!await jr.ReadAsync(ct)) throw new WorkerDockException("JobNotFound");
         var liveLimit = jr.GetBoolean(1) && !jr.GetBoolean(2) ? jr.GetInt32(0) : 0;
         await jr.CloseAsync();
+        await using var holders = Command(c, t, "SELECT COUNT(*),COALESCE(MAX(CASE WHEN Mode=N'Shared' THEN 0 ELSE 1 END),0) FROM [workerdock].JobPermits WHERE JobId=@job");
+        Add(holders, "@job", SqlDbType.UniqueIdentifier, jobId);
+        await using var hr = await holders.ExecuteReaderAsync(ct); await hr.ReadAsync(ct);
+        var holderCount = hr.GetInt32(0); var exclusiveHeld = hr.GetInt32(1) != 0; await hr.CloseAsync();
         await using var read = Command(c, t, """
-            SELECT e.ExecutionId,COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue'),
+            SELECT TOP (10032) e.ExecutionId,COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue'),
                 COALESCE(TRY_CONVERT(int,JSON_VALUE(r.PolicyJson,'$.BacklogLimit')),100),
                 CONVERT(bit,CASE WHEN p.ExecutionId IS NULL THEN 0 ELSE 1 END)
-            FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
+            FROM [workerdock].Executions e WITH(INDEX(IX_Executions_AdmissionActive)) JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
             LEFT JOIN [workerdock].JobPermits p ON p.ExecutionId=e.ExecutionId
-            WHERE e.JobId=@id AND e.State IN(N'Queued',N'Running',N'RetryWaiting',N'NeedsReview')
+            WHERE e.JobId=@id AND e.State IN(N'Queued',N'Running',N'RetryWaiting',N'NeedsReview') AND p.ExecutionId IS NULL
             ORDER BY e.AdmissionSequence
             """);
         Add(read, "@id", SqlDbType.UniqueIdentifier, jobId);
         await using var reader = await read.ExecuteReaderAsync(ct); var rows = new List<AdmissionCandidate>();
         while (await reader.ReadAsync(ct)) rows.Add(new(reader.GetGuid(0), reader.GetString(1), reader.GetInt32(2), reader.GetBoolean(3)));
         await reader.CloseAsync();
-        var decisions = Decide(rows, liveLimit);
+        var decisions = Decide(rows, liveLimit, holderCount, exclusiveHeld);
         foreach (var id in decisions.Admit)
         {
             await using var permit = Command(c, t, "INSERT [workerdock].JobPermits(PermitId,JobId,ExecutionId,Mode,AcquiredAtUtc) VALUES(NEWID(),@job,@id,@mode,SYSUTCDATETIME());");
@@ -61,9 +67,10 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
                 UPDATE [workerdock].Outbox SET ProjectionState=N'Retired' WHERE EntityId=@id AND EventType=N'ExecutionDispatch';
                 """);
             Add(skip, "@reason", SqlDbType.NVarChar, decisions.SkipReasons[id],40); Add(skip, "@id", SqlDbType.UniqueIdentifier, id); await skip.ExecuteNonQueryAsync(ct);
+            await WorkerDock.Infrastructure.Executions.SqlCommandOutcomes.SettleAsync(c, t, id, ct);
         }
         await using var enable = Command(c, t, """
-            UPDATE o SET ProjectionState=N'Pending',DispatchedAtUtc=NULL,ReviewAtUtc=NULL,RetryAtUtc=NULL
+            UPDATE TOP (32) o SET ProjectionState=N'Pending',DispatchedAtUtc=NULL,ReviewAtUtc=NULL,RetryAtUtc=NULL
             FROM [workerdock].Outbox o JOIN [workerdock].Executions e ON e.ExecutionId=o.EntityId JOIN [workerdock].Jobs j ON j.JobId=e.JobId
             JOIN [workerdock].JobPermits permit ON permit.ExecutionId=e.ExecutionId
             JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
@@ -84,7 +91,7 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
     private static async ValueTask BindDeliveriesAsync(DbConnection c, DbTransaction t, Guid jobId, CancellationToken ct)
     {
         await using var read = Command(c, t, """
-            SELECT o.EventId,e.ExecutionId,e.JobRevision,COALESCE(TRY_CONVERT(int,JSON_VALUE(o.PayloadJson,'$.attemptOrdinal')),1),
+            SELECT TOP (32) o.EventId,e.ExecutionId,e.JobRevision,COALESCE(TRY_CONVERT(int,JSON_VALUE(o.PayloadJson,'$.attemptOrdinal')),1),
                 e.AvailableAtUtc,p.EffectiveRevision
             FROM [workerdock].Outbox o JOIN [workerdock].Executions e ON e.ExecutionId=o.EntityId
             JOIN [workerdock].Jobs j ON j.JobId=e.JobId JOIN [workerdock].JobPermits permit ON permit.ExecutionId=e.ExecutionId
@@ -123,16 +130,15 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
             await bind.ExecuteNonQueryAsync(ct);
         }
     }
-    public static AdmissionDecision Decide(IReadOnlyList<AdmissionCandidate> ordered, int liveLimit)
+    public static AdmissionDecision Decide(IReadOnlyList<AdmissionCandidate> ordered, int liveLimit, int heldCount = 0, bool exclusiveHeld = false)
     {
         if (liveLimit < 0) throw new ArgumentOutOfRangeException(nameof(liveLimit));
         var holders = ordered.Where(x => x.HoldsPermit).ToArray();
-        var count = holders.Length; var exclusive = holders.Any(x => x.Mode != "Allow");
+        var count = heldCount + holders.Length; var exclusive = exclusiveHeld || holders.Any(x => x.Mode != "Allow");
         var admit = new List<Guid>(); var skip = new List<Guid>(); var reasons = new Dictionary<Guid,string>();
         var waiting = 0; var blocked = false; var outstanding = count > 0;
-        foreach (var work in ordered)
+        foreach (var work in ordered.Where(x => !x.HoldsPermit).Take(MaximumCandidates))
         {
-            if (work.HoldsPermit) { outstanding = true; continue; }
             if (work.Mode == "Skip" && outstanding) { skip.Add(work.ExecutionId); reasons[work.ExecutionId]="SkippedOverlap"; continue; }
             var canAdmit = !blocked && !exclusive && count < liveLimit && (work.Mode == "Allow" || count == 0);
             if (canAdmit)
@@ -142,6 +148,8 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
             else if (waiting >= work.BacklogLimit) { skip.Add(work.ExecutionId); reasons[work.ExecutionId]="SkippedBacklog"; }
             else { waiting++; blocked = true; outstanding = true; }
         }
-        return new(admit, skip, reasons);
+        var committedAdmit = admit.Take(MaximumChanges).ToArray();
+        var committedSkip = skip.Take(MaximumChanges - committedAdmit.Length).ToArray();
+        return new(committedAdmit, committedSkip, committedSkip.ToDictionary(id => id, id => reasons[id]));
     }
 }

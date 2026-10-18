@@ -13,18 +13,18 @@ public sealed class MigrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
         var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0003c_capacity", default);
-        Assert.Equal(6, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory"));
+        await runner.ApplyAsync("tenant", "0003d_dispatch", default);
+        Assert.Equal(7, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory"));
         Assert.Equal(30, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name LIKE 'WD[SE][_]QRTZ[_]%'"));
         Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM sys.objects WHERE is_ms_shipped=0 AND schema_id<>SCHEMA_ID(N'workerdock')"));
         var refused = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.RollbackAsync("tenant", "0001_bootstrap", default));
         Assert.Equal("UnsafeRollback", refused.Code);
-        Assert.Equal(6, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory"));
-        foreach (var id in new[] { "0003c_capacity", "0003b_attempts", "0003a_projection", "0003_execution", "0002_quartz", "0001_bootstrap" })
+        Assert.Equal(7, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory"));
+        foreach (var id in new[] { "0003d_dispatch", "0003c_capacity", "0003b_attempts", "0003a_projection", "0003_execution", "0002_quartz", "0001_bootstrap" })
             await runner.RollbackAsync("tenant", id, default);
         Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM sys.schemas WHERE name=N'workerdock'"));
-        await runner.ApplyAsync("tenant", "0003c_capacity", default);
-        Assert.Equal(6, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory"));
+        await runner.ApplyAsync("tenant", "0003d_dispatch", default);
+        Assert.Equal(7, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory"));
     }
 
     [Theory]

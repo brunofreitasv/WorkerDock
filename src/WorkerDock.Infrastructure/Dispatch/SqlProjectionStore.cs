@@ -1,4 +1,6 @@
 using System.Data;
+using System.Data.Common;
+using WorkerDock.Infrastructure.Executions;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
@@ -7,24 +9,35 @@ using WorkerDock.Infrastructure.Persistence;
 
 namespace WorkerDock.Infrastructure.Dispatch;
 
-public sealed class SqlProjectionStore(TenantDatabaseOptions options) : IProjectionStore, IDispatchStateStore, IProjectionReviewStore
+public sealed class SqlProjectionStore(TenantDatabaseOptions options) : IProjectionStore, IDispatchStateStore, IProjectionReviewStore, IProjectionMaintenanceStore
 {
     public ValueTask<IReadOnlyList<ProjectionEnvelope>> ReadPendingAsync(int limit, CancellationToken ct) => ReadAsync(limit, false, ct);
     public ValueTask<IReadOnlyList<ProjectionEnvelope>> ReadPublishedAsync(int limit, CancellationToken ct) => ReadAsync(limit, true, ct);
 
+    public async ValueTask MaintainAsync(CancellationToken ct)
+    {
+        Guid? job = null;
+        // Cursor movement commits independently: a slow/broken job cannot starve other jobs.
+        await TransactAsync(async (connection, transaction, token) =>
+        {
+            await using var select = SqlAttemptStore.Command(connection, transaction, """
+                DECLARE @after uniqueidentifier=(SELECT AfterJobId FROM [workerdock].ProjectionMaintenance WHERE Id=1);
+                SELECT TOP (1) e.JobId FROM [workerdock].Executions e WITH(INDEX(IX_Executions_Maintenance))
+                JOIN [workerdock].Jobs j ON j.JobId=e.JobId
+                WHERE e.State IN(N'Queued',N'RetryWaiting') AND j.Enabled=1 AND j.Archived=0 AND (@after IS NULL OR e.JobId>@after)
+                GROUP BY e.JobId ORDER BY e.JobId OPTION(RECOMPILE);
+                """);
+            job = await select.ExecuteScalarAsync(token) as Guid?;
+            await using var cursor = SqlAttemptStore.Command(connection, transaction, "UPDATE [workerdock].ProjectionMaintenance SET AfterJobId=@job WHERE Id=1");
+            SqlAttemptStore.Add(cursor, "@job", SqlDbType.UniqueIdentifier, job);
+            await cursor.ExecuteNonQueryAsync(token);
+        }, ct);
+        if (job is { } id) await new JobAdmission(options).AdmitAsync(id, ct);
+    }
+
     private async ValueTask<IReadOnlyList<ProjectionEnvelope>> ReadAsync(int limit, bool published, CancellationToken ct)
     {
         if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
-        await RunAsync(async connection =>
-        {
-            await using var jobs = connection.CreateCommand();
-            jobs.CommandText = "SELECT JobId FROM [workerdock].Jobs WHERE Archived=0";
-            var ids = new List<Guid>();
-            await using (var reader = await jobs.ExecuteReaderAsync(ct))
-                while (await reader.ReadAsync(ct)) ids.Add(reader.GetGuid(0));
-            foreach (var id in ids) await new JobAdmission(options).AdmitAsync(id, ct);
-            return true;
-        }, ct);
         return await RunAsync<IReadOnlyList<ProjectionEnvelope>>(async connection =>
         {
             await using var command = connection.CreateCommand();
@@ -49,14 +62,14 @@ public sealed class SqlProjectionStore(TenantDatabaseOptions options) : IProject
     public async ValueTask AcknowledgeAsync(Guid intentId, string payloadDigest, CancellationToken ct)
     {
         if (payloadDigest.Length != 64 || payloadDigest.Any(c => !Uri.IsHexDigit(c))) throw new WorkerDockException("ProjectionIntegrityError");
-        await RunAsync(async connection =>
+        await TransactAsync(async (connection, transaction, token) =>
         {
-            await using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE [workerdock].Outbox SET DispatchedAtUtc=COALESCE(DispatchedAtUtc,SYSUTCDATETIME()),ProjectionState=CASE WHEN ProjectionState=N'Retired' THEN N'Retired' ELSE N'Published' END,LastErrorCode=NULL,RetryAtUtc=NULL WHERE EventId=@id AND PayloadDigest=@digest";
-            command.Parameters.Add(new("@id", SqlDbType.UniqueIdentifier) { Value = intentId });
-            command.Parameters.Add(new("@digest", SqlDbType.Char, 64) { Value = payloadDigest });
-            if (await command.ExecuteNonQueryAsync(ct) != 1) throw new WorkerDockException("ProjectionIntegrityError");
-            return true;
+            await using var command = SqlAttemptStore.Command(connection, transaction,
+                "UPDATE [workerdock].Outbox SET DispatchedAtUtc=COALESCE(DispatchedAtUtc,SYSUTCDATETIME()),ProjectionState=CASE WHEN ProjectionState=N'Retired' THEN N'Retired' ELSE N'Published' END,LastErrorCode=NULL,RetryAtUtc=NULL OUTPUT inserted.EntityId WHERE EventId=@id AND PayloadDigest=@digest");
+            SqlAttemptStore.Add(command, "@id", SqlDbType.UniqueIdentifier, intentId);
+            SqlAttemptStore.Add(command, "@digest", SqlDbType.Char, payloadDigest, 64);
+            if (await command.ExecuteScalarAsync(token) is not Guid executionId) throw new WorkerDockException("ProjectionIntegrityError");
+            await SqlCommandOutcomes.SettleAsync(connection, transaction, executionId, token);
         }, ct);
     }
 
@@ -65,15 +78,30 @@ public sealed class SqlProjectionStore(TenantDatabaseOptions options) : IProject
         if (safeCode is not ("UnsupportedProjection" or "ProjectionIntegrityError" or "ProjectionTriggerError" or
             "ProjectionPublicationRace" or "ProjectionHeld" or "QuartzStoreUnavailable" or "ProjectionStoreUnavailable"))
             throw new ArgumentException("Unknown projection failure code.", nameof(safeCode));
-        await RunAsync(async connection =>
+        await TransactAsync(async (connection, transaction, token) =>
         {
-            await using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE [workerdock].Outbox SET ProjectionState=CASE WHEN @code=N'ProjectionHeld' THEN N'Held' WHEN DispatchedAtUtc IS NULL THEN N'Failed' ELSE N'Published' END,LastErrorCode=@code,RetryAtUtc=@retry,ReviewAtUtc=@retry WHERE EventId=@id AND ProjectionState<>N'Retired'";
-            command.Parameters.Add(new("@id", SqlDbType.UniqueIdentifier) { Value = intentId });
-            command.Parameters.Add(new("@code", SqlDbType.NVarChar, 40) { Value = safeCode });
-            command.Parameters.Add(new("@retry", SqlDbType.DateTime2) { Value = retryAtUtc.UtcDateTime });
-            return await command.ExecuteNonQueryAsync(ct);
+            await using var command = SqlAttemptStore.Command(connection, transaction,
+                "UPDATE [workerdock].Outbox SET ProjectionState=CASE WHEN @code=N'ProjectionHeld' THEN N'Held' WHEN DispatchedAtUtc IS NULL THEN N'Failed' ELSE N'Published' END,LastErrorCode=@code,RetryAtUtc=@retry,ReviewAtUtc=@retry OUTPUT inserted.EntityId WHERE EventId=@id AND ProjectionState<>N'Retired'");
+            SqlAttemptStore.Add(command, "@id", SqlDbType.UniqueIdentifier, intentId);
+            SqlAttemptStore.Add(command, "@code", SqlDbType.NVarChar, safeCode, 40);
+            SqlAttemptStore.Add(command, "@retry", SqlDbType.DateTime2, retryAtUtc.UtcDateTime);
+            if (await command.ExecuteScalarAsync(token) is Guid executionId)
+                await SqlCommandOutcomes.SettleAsync(connection, transaction, executionId, token, safeCode is "UnsupportedProjection" or "ProjectionIntegrityError");
         }, ct);
+    }
+
+    private async ValueTask TransactAsync(Func<DbConnection, DbTransaction, CancellationToken, ValueTask> action, CancellationToken ct)
+    {
+        try
+        {
+            await new BusinessTransaction(options).RunAsync(async (connection, transaction, token) =>
+            {
+                await using var identity = SqlAttemptStore.Command(connection, transaction, "SELECT InstanceId FROM [workerdock].TenantSettings");
+                if ((Guid?)await identity.ExecuteScalarAsync(token) != options.InstanceId) throw new WorkerDockException("TenantInstanceMismatch");
+                await action(connection, transaction, token); return true;
+            }, ct);
+        }
+        catch (SqlException) { throw new WorkerDockException("ProjectionStoreUnavailable"); }
     }
 
     public async ValueTask CompleteReviewAsync(Guid intentId, bool retired, DateTimeOffset reviewAtUtc, CancellationToken ct)

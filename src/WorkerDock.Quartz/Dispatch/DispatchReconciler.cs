@@ -47,6 +47,14 @@ public sealed class DispatchReconciler(IProjectionStore projections, IDispatchSt
                 await projections.RecordFailureAsync(envelope.IntentId, SafeCode(error.Code), clock.GetUtcNow().AddMinutes(1), ct);
             }
         }
+        if (projections is IProjectionMaintenanceStore maintenance)
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budget.CancelAfter(TimeSpan.FromSeconds(2));
+            try { await maintenance.MaintainAsync(budget.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+            catch (WorkerDockException) { } // Publication already committed; retry bounded maintenance on the next tick.
+        }
         return count;
     }
 
