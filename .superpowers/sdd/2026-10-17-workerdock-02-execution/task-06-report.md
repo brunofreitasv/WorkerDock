@@ -88,3 +88,18 @@ Every following case failed before database creation with:
 - WorkerDock.IntegrationTests.TenantSettingsTests.Audit_failure_rolls_back_setting(snapshot: True)
 - WorkerDock.IntegrationTests.TenantSettingsTests.Update_is_audited_and_stale_version_is_rejected(snapshot: False)
 - WorkerDock.IntegrationTests.TenantSettingsTests.Update_is_audited_and_stale_version_is_rejected(snapshot: True)
+
+## Review fix round 1 — reject later stored trigger due times
+
+Verified the Important finding: replay validated only that stored StartTimeUtc was not earlier than the authorized DueUtc. A corrupted trigger moved one year later passed identity verification and its pending outbox intent was acknowledged.
+
+Changed QuartzPublisher to require StartTimeUtc equal the immutable authorized DueUtc (DateTimeOffset instant equality), with no timing tolerance. Priority remains excluded from the immutable digest. A different stored start time now produces ProjectionIntegrityError; reconciliation records the safe error and leaves the intent unacknowledged, retaining the existing delivery identity rather than overwriting it. Updated the integration guide accordingly.
+
+Added PublicationRecoveryTests.Later_stored_trigger_is_integrity_failure_and_remains_unacknowledged. It publishes a valid future delivery, preserves the trigger identity/group/policy while moving only its start one year later through Quartz's public API, then checks reconciliation failure, the safe integrity code, no acknowledgement and one existing job/trigger identity.
+
+- RED: `dotnet test tests/WorkerDock.IntegrationTests -c Release --no-restore --filter FullyQualifiedName~Later_stored_trigger_is_integrity_failure_and_remains_unacknowledged` — Failed 1, Passed 0. Relevant output: `Assert.Equal() Failure: Values differ; Expected: 0; Actual: 1`. The original code incorrectly treated the delayed projection as a completed publication.
+- GREEN: `dotnet test tests/WorkerDock.IntegrationTests -c Release --no-restore --filter FullyQualifiedName~PublicationRecoveryTests` — Passed 30, Failed 0, Skipped 0. This includes concurrent/priority replay, future retry deadlines, actual consumed probe, startup maintenance and all prior publication faults.
+- `dotnet build WorkerDock.slnx -c Release --no-restore` — build succeeded, 0 warnings, 0 errors.
+- `git diff --check` — exit 0; only a working-copy line-ending notice, normalized before commit.
+
+Self-review: only the trigger-time comparison, its regression, matching documentation and this report changed. No new operations or automatic trigger repair were introduced. Existing SQL/cluster and Task08 runtime concerns remain pending as documented above; this round adds no further concern.

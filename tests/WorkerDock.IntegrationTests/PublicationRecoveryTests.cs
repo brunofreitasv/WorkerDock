@@ -281,6 +281,22 @@ public sealed class PublicationRecoveryTests
         Assert.Equal("ProjectionIntegrityError", error.Code);
     }
 
+    [Fact]
+    public async Task Later_stored_trigger_is_integrity_failure_and_remains_unacknowledged()
+    {
+        await using var fixture = await Fixture.Create();
+        fixture.Store.Due = fixture.Clock.Now.AddHours(1);
+        await fixture.Publisher().PublishAsync(fixture.Intent, default);
+        var original = await fixture.Execution.GetTrigger(QuartzPublisher.TriggerKey(fixture.Intent));
+        var delayed = original!.GetTriggerBuilder().StartAt(fixture.Store.Due.AddDays(365)).Build();
+        await fixture.Execution.RescheduleJob(delayed.Key, delayed);
+
+        Assert.Equal(0, await fixture.Reconcile());
+        Assert.Equal("ProjectionIntegrityError", fixture.Store.Code);
+        Assert.False(fixture.Store.Acknowledged);
+        Assert.Single(await fixture.Execution.GetJobKeys(GroupMatcher<JobKey>.AnyGroup()));
+        Assert.Single(await fixture.Execution.GetTriggerKeys(GroupMatcher<TriggerKey>.AnyGroup()));
+    }
     public sealed class PublicationProbe : IJob
     {
         public static readonly ConcurrentDictionary<string, Action> Callbacks = new();

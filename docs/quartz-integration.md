@@ -155,8 +155,8 @@ recovery-requesting job stores string ExecutionId, DeliveryId, AttemptOrdinal,
 TemplateId, EntityRevision, DueUtc and PayloadDigest. This second digest hashes
 canonical execution/delivery/ordinal/template/revision/UTC due ticks, excluding
 priority and Quartz fire bookkeeping. Replay verifies the stored identity and
-type before repairing a missing trigger. It rejects a stored trigger with an
-earlier due time, wrong template execution group, unexpected input, repeat
+type before repairing a missing trigger. It rejects a stored trigger with a
+different due time, wrong template execution group, unexpected input, repeat
 schedule or retry policy. Triggers explicitly use FireNow misfires and
 RetryPolicy.None. Guarded recovery means the future worker start gate decides
 whether an attempt may run; Quartz recovery never authorizes a business retry.

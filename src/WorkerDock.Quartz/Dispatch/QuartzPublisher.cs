@@ -49,7 +49,7 @@ public sealed class QuartzPublisher(IScheduler scheduler, JobType jobType)
                 if (existing is not null)
                 {
                     if (existing.JobKey != key || existing.JobDataMap.Count != 0 || existing.RetryPolicy != RetryPolicy.None ||
-                        existing.StartTimeUtc < intent.DueUtc || existing.ExecutionGroup != intent.TemplateId ||
+                        existing.StartTimeUtc != intent.DueUtc || existing.ExecutionGroup != intent.TemplateId ||
                         existing is not ISimpleTrigger { RepeatCount: 0, MisfireInstruction: SimpleTriggerMisfireInstruction.FireNow })
                         throw new WorkerDockException("ProjectionIntegrityError");
                     var state = await scheduler.GetTriggerState(trigger.Key, ct);
