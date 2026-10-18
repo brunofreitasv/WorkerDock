@@ -75,7 +75,7 @@ internal sealed class TenantSettingsDbContext(string connectionString) : DbConte
     {
         builder.Entity<TenantSettingsRow>(entity =>
         {
-            entity.ToTable("TenantSettings", "dbo");
+            entity.ToTable("TenantSettings", "workerdock");
             entity.HasKey(x => x.InstanceId);
             entity.Property(x => x.Version).IsRowVersion();
         });

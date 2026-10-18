@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using Quartz;
+using WorkerDock.Infrastructure.Persistence;
 using WorkerDock.Quartz.Hosting;
 
 namespace WorkerDock.IntegrationTests;
@@ -16,6 +18,19 @@ public sealed class CustomSqlSchemaTests
             while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "WorkerDock.slnx"))) directory = directory.Parent;
             return directory?.FullName ?? throw new InvalidOperationException("Repository root missing");
         }
+    }
+
+    [Theory]
+    [InlineData("WorkerDock.Infrastructure.Persistence.TenantSettingsDbContext", "TenantSettings")]
+    [InlineData("WorkerDock.Infrastructure.Jobs.JobDbContext", "Jobs")]
+    [InlineData("WorkerDock.Infrastructure.Jobs.JobDbContext", "JobRevisions")]
+    [InlineData("WorkerDock.Infrastructure.Jobs.JobDbContext", "Commands")]
+    public void Ef_relational_model_maps_each_tenant_table_to_custom_schema(string contextName, string tableName)
+    {
+        var contextType = typeof(TenantSettingsService).Assembly.GetType(contextName, throwOnError: true)!;
+        using var context = (DbContext)Activator.CreateInstance(contextType, "Server=unused")!;
+        var table = Assert.Single(context.Model.GetRelationalModel().Tables, table => table.Name == tableName);
+        Assert.Equal("workerdock", table.Schema);
     }
 
     [Fact]

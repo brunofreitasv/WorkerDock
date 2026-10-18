@@ -13,18 +13,18 @@ internal sealed class JobDbContext(string connectionString) : DbContext
     {
         builder.Entity<JobRow>(entity =>
         {
-            entity.ToTable("Jobs", "dbo");
+            entity.ToTable("Jobs", "workerdock");
             entity.HasKey(x => x.JobId);
             entity.Property(x => x.Version).IsRowVersion();
         });
         builder.Entity<JobRevisionRow>(entity =>
         {
-            entity.ToTable("JobRevisions", "dbo");
+            entity.ToTable("JobRevisions", "workerdock");
             entity.HasKey(x => new { x.JobId, x.Revision });
         });
         builder.Entity<CommandRow>(entity =>
         {
-            entity.ToTable("Commands", "dbo");
+            entity.ToTable("Commands", "workerdock");
             entity.HasKey(x => x.CommandId);
         });
     }
