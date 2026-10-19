@@ -157,6 +157,8 @@
   "confirmDeleteSchedule": "This removes future scheduled runs. The job remains available for manual runs.",
   "scheduleDeleted": "Schedule deleted. The job remains available for manual runs.",
   "scheduleDeleteFailed": "The saved schedule is still present. The draft is preserved; retry saving after resolving the schedule removal.",
+  "scheduleRemovalUnconfirmed": "Schedule removal could not be confirmed. The job may still run on its schedule; pause or disable it and verify before enabling manually.",
+  "scheduleStillPresent": "The saved schedule is still present and may continue to run.",
   "recurringSchedule": "Recurring (cron)",
   "oneTimeSchedule": "One time",
   "timeoutHelp": "Enter a positive number of seconds or select No timeout. Zero does not mean unlimited. A job without a timeout still occupies capacity until it completes, is stopped, or is interrupted.",

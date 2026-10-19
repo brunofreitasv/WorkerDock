@@ -5,7 +5,7 @@ import { StopDialog } from "../executions/StopDialog";
 import type { Labels } from "@workerdock/ui";
 
 export interface JobStateDto { jobId: string; etag?: string | null; enabled: boolean; archived: boolean; paused?: boolean; projectionPending?: boolean; executionId?: string }
-export function JobActions({ job, onRefresh, onDuplicate, onStale, blocked = false, t }: { job: JobStateDto; onRefresh(): void; onDuplicate?(jobId: string): void; onStale?(): void; blocked?: boolean; t: Labels }) {
+export function JobActions({ job, onRefresh, onDuplicate, onStale, blocked = false, safetyActions = false, t }: { job: JobStateDto; onRefresh(): void; onDuplicate?(jobId: string): void; onStale?(): void; blocked?: boolean; safetyActions?: boolean; t: Labels }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -32,7 +32,7 @@ export function JobActions({ job, onRefresh, onDuplicate, onStale, blocked = fal
   return <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
     {error && <Alert role="status" severity="info">{error}</Alert>}
     {job.executionId && <><Button onClick={() => setStopOpen(true)} disabled={busy || blocked}>{t.stopExecution}</Button><StopDialog open={stopOpen} executionId={job.executionId} onClose={() => setStopOpen(false)} t={t} /></>}
-    {!job.archived && (job.enabled ? <>
+    {!job.archived && (job.enabled || safetyActions ? <>
       {job.paused ? <Button disabled={busy || blocked} onClick={() => void action("ResumeSchedule")}>{t.resumeSchedule}</Button> : <Button disabled={busy || blocked} onClick={() => void action("PauseSchedule")}>{t.pauseSchedule}</Button>}
       <Button disabled={busy || blocked} onClick={() => setConfirm("Disable")}>{t.disableJob}</Button>
     </> : <Button disabled={busy || blocked} onClick={() => void action("Enable")}>{t.enableJobAction}</Button>)}
