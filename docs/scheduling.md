@@ -1,5 +1,38 @@
 # Durable schedules and lifecycle
 
+## Job flow
+
+```mermaid
+sequenceDiagram
+    actor Operator
+    participant API as Tenant API
+    participant DB as Tenant SQL
+    participant Scheduler
+    participant ScheduleQuartz as Schedule Quartz
+    participant ExecuteQuartz as Execution Quartz
+    participant Worker
+    participant Child as Execution child
+    Operator->>API: Save and enable job
+    API->>DB: Commit job, audit, outbox intent
+    Scheduler->>DB: Read pending intent
+    Scheduler->>ScheduleQuartz: Project schedule trigger
+    ScheduleQuartz-->>Scheduler: Wake for occurrence
+    Scheduler->>DB: Accept occurrence and execution
+    Scheduler->>ExecuteQuartz: Publish execution trigger
+    ExecuteQuartz-->>Worker: Dispatch execution trigger
+    Worker->>DB: Claim and renew attempt
+    Worker->>Child: Run trusted template
+    Child-->>Worker: Safe outcome
+    Worker->>DB: Commit attempt history
+```
+
+Both Quartz stores use SQL-backed tables in the same tenant database.
+WorkerDock keeps job definitions, accepted executions and audit in its own
+tables. A manual run starts at the API's execution-acceptance path without
+the schedule wake. A delayed projection or lost acknowledgement is reconciled
+from durable state, and an attempt may repeat after an uncertain failure. See
+[execution guarantees](execution-guarantees.md).
+
 Schedules are tenant business records in `[workerdock].Schedules`. Quartz is a projection target: a transactional `ScheduleProjection` outbox item is the only route that creates or removes a future trigger. The reconciler validates the envelope and rereads current business state before applying it, so delayed projections cannot revive an old revision. Quartz cron/simple trigger misfires wake `OccurrenceWriter`; Quartz does not decide which business occurrences are accepted.
 
 `OccurrenceWriter` takes a SQL application lock per schedule, locks and rechecks the current schedule and job, and advances `CursorUtc` in the same transaction that inserts queued scheduled executions and calls job admission. Each execution stores its scheduled UTC instant and the job/profile revisions accepted at materialization. Its idempotency key is derived from schedule ID, schedule revision, and occurrence instant. Outbox delivery remains at least once; no exactly-once guarantee is made. Accepted executions survive later schedule edits or removal, while the admission/start path still checks current disable, archive, stop, and capacity controls.

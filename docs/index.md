@@ -2,6 +2,10 @@
 
 Choose a path by what you need to do. The [Diátaxis framework](https://diataxis.fr/) separates learning by doing, task instructions, technical facts, and background explanations.
 
+For a visual introduction, start with the [deployment map](architecture.md#deployment-map),
+the [job flow](scheduling.md#job-flow), and the
+[runtime/test database map](how-to/setup-sql-server.md#runtime-and-test-databases).
+
 ## Tutorials: learn by running WorkerDock
 
 - [Run locally without SQL Server](tutorials/run-in-memory.md): start the disposable development instance and see what the memory adapter can do.

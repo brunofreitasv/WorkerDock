@@ -2,6 +2,22 @@
 
 The Control Center is an optional, separate ASP.NET Core application with its own React entry point and central SQL Server database. It stores tenant links, health observations and its own append-only audit events. It does not create tenants, change tenant configuration, or read tenant jobs. Each link opens the tenant's dashboard directly; the tenant's own authentication and authorization still apply.
 
+```mermaid
+flowchart LR
+    User["Operator browser"] --> Center["Control Center directory"]
+    Center --> CenterDb[("Central registry")]
+    Center -. "credential-limited /health/ready" .-> A["Tenant A"]
+    Center -. "credential-limited /health/ready" .-> B["Tenant B"]
+    User -->|"open link; tenant sign-in"| A
+    User -->|"open link; tenant sign-in"| B
+    A --> DbA[("Tenant A database")]
+    B --> DbB[("Tenant B database")]
+```
+
+The dotted paths are advisory health checks. The solid browser paths are
+direct tenant visits; central membership never grants tenant access. Each
+tenant uses its own database, runtime processes and vault identity.
+
 ## Run locally
 
 Follow the [memory-only tutorial](tutorials/run-in-memory.md) for a disposable Control Center UI or the [SQL Server tutorial](tutorials/run-with-sql-server.md) for a tenant with persistent execution. The local tenant URLs in those tutorials use a non-443 port, so they cannot serve as Control Center health-probe targets. A real health probe needs an HTTPS tenant URL on port 443, an allowlisted host, an expected instance ID and a secret reference resolved by the Center's vault identity.

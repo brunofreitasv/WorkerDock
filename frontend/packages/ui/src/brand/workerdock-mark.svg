@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>WorkerDock</title>
+  <defs>
+    <linearGradient id="dock" x1="12" y1="52" x2="52" y2="31" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#25B99D"/>
+      <stop offset="1" stop-color="#78E7D2"/>
+    </linearGradient>
+    <linearGradient id="worker" x1="14" y1="19" x2="50" y2="41" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#D5FFF4"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="17" fill="#102E40"/>
+  <path d="M12 33v7c0 8 5 13 13 13h14c8 0 13-5 13-13v-7" stroke="url(#dock)" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="m14 19 9 22 9-15 9 15 9-22" stroke="url(#worker)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="14" cy="19" r="3.5" fill="#7BE6D1"/>
+  <circle cx="50" cy="19" r="3.5" fill="#7BE6D1"/>
+</svg>

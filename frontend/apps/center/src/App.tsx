@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Box, Button, Container, FormControl, MenuItem, Select, Stack, Typography } from '@mui/material';
 import TenantDirectory, { type TenantEntry } from './TenantDirectory';
 import RegistrationEditor, { type TenantRegistrationInput } from './RegistrationEditor';
+import { BrandMark } from '@workerdock/ui';
 
 type Locale = 'en' | 'pt-BR';
 type SessionDto = {
@@ -202,7 +203,7 @@ export default function App() {
         <Container maxWidth="xl" sx={{ py: 2.25 }}>
           <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }} spacing={2}>
             <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
-              <Box aria-hidden="true" sx={{ width: 36, height: 36, display: 'grid', placeItems: 'center', borderRadius: 2, color: 'white', fontWeight: 800, bgcolor: 'primary.main' }}>W</Box>
+              <BrandMark size={36} />
               <Typography variant="subtitle1" sx={{ fontWeight: 750 }}>WorkerDock</Typography>
               <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>Control Center</Typography>
             </Stack>

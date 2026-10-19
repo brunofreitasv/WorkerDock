@@ -2,6 +2,31 @@
 
 WorkerDock is a self-hosted job platform. Its deployment boundary is a tenant: each tenant has an IIS application, SQL Server database, scheduler service, and one or more worker services. Tenants may share infrastructure, but shared Windows-host and SQL administrators remain trusted across tenants. A separate Control Center database stores tenant directory and health observations; it does not provision tenants, access their databases, or proxy their management sessions.
 
+## Deployment map
+
+```mermaid
+flowchart LR
+    Operator["Operator browser"] --> CenterWeb["Control Center UI"]
+    Operator --> TenantWeb["Tenant UI + API"]
+    subgraph Center["Optional Control Center deployment"]
+        CenterWeb --> CenterDb[("Central SQL database")]
+    end
+    subgraph Tenant["One independent tenant deployment"]
+        TenantWeb --> TenantDb[("Tenant SQL database")]
+        Scheduler["Scheduler service"] <--> TenantDb
+        Worker["Worker service(s)"] <--> TenantDb
+        Worker --> Executor["Isolated execution child"]
+        Executor --> Target["Approved SQL or HTTP target"]
+    end
+    CenterWeb -. "allowlisted health probe only" .-> TenantWeb
+```
+
+The Control Center holds links and health results. A browser opens the tenant
+directly, where that tenant's own sign-in and role policy apply. Quartz's two
+table sets and WorkerDock's business records live inside the tenant database;
+the execution child resolves secrets through that tenant's configured vault
+identity.
+
 ## Components
 
 - **Tenant web application (IIS):** serves the dashboard and management/read APIs, authentication, configuration, and audit transactions. It does not execute handlers.

@@ -1,5 +1,7 @@
 # WorkerDock
 
+<img src="frontend/packages/ui/src/brand/workerdock-mark.svg" alt="WorkerDock logo" width="72" height="72">
+
 WorkerDock is a self-hosted platform for creating, scheduling, running, monitoring, and auditing jobs. It includes a React operator dashboard, .NET services, SQL Server and Quartz.NET for deployed scheduling, and trusted SQL Server and HTTP worker templates. Each tenant has its own database and runtime services; the optional Control Center links to independently deployed tenants. No external message broker is required.
 
 ## Getting started
@@ -11,6 +13,8 @@ Choose the path that matches what you want to try:
 3. **Windows deployment:** [Deploy to production](docs/how-to/deploy-production.md), then [configure each tenant](docs/how-to/configure-tenants.md).
 
 The [documentation index](docs/index.md) groups tutorials, how-to guides, reference, and explanation using [Diátaxis](https://diataxis.fr/). It also links to template authoring, authentication, scheduling, monitoring, and troubleshooting.
+
+For a quick visual tour, see the [tenant and process map](docs/architecture.md#deployment-map), [job flow](docs/scheduling.md#job-flow), and [runtime versus test database map](docs/how-to/setup-sql-server.md#runtime-and-test-databases).
 
 ## Database scripts
 

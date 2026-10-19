@@ -13,6 +13,7 @@ import {
   Typography,
 } from "@mui/material";
 import type { Labels } from "./preferences";
+import { BrandMark } from "./BrandMark";
 interface Props {
   children: ReactNode;
   t: Labels;
@@ -63,21 +64,7 @@ export function AppShell({
         sx={{ borderBottom: "1px solid", borderColor: "divider" }}
       >
         <Toolbar sx={{ gap: 2 }}>
-          <Box
-            aria-hidden
-            sx={{
-              width: 30,
-              height: 30,
-              bgcolor: "primary.main",
-              color: "white",
-              display: "grid",
-              placeItems: "center",
-              borderRadius: 1.5,
-              fontWeight: 800,
-            }}
-          >
-            W
-          </Box>
+          <BrandMark size={36} />
           <Typography
             component="span"
             variant="h6"

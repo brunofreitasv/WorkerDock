@@ -2,6 +2,28 @@
 
 WorkerDock supports SQL Server 2022 or newer with database compatibility level 160. Provision a separate database for each tenant and a separate central database if using Control Center. Do not combine central and tenant data.
 
+## Runtime and test databases
+
+```mermaid
+flowchart LR
+    subgraph Runtime["Runtime installation"]
+        Manifest["Versioned migration manifests"] --> Migrator["Deployment-only migrator"]
+        Migrator --> TenantDb[("Tenant database<br/>[workerdock] + Quartz tables")]
+        Migrator --> CenterDb[("Optional central database<br/>[workerdock] registry")]
+        TenantApps["Tenant web, scheduler, workers"] -->|"restricted WorkerDockRuntime role"| TenantDb
+        CenterApp["Control Center"] -->|"restricted WorkerDockCentralRuntime role"| CenterDb
+    end
+    subgraph Tests["Disposable SQL integration tests only"]
+        Fixtures["tests/sql + integration fixture scripts"] --> TestDb[("Generated WorkerDock_Test_* database")]
+    end
+```
+
+The runtime manifests under `database/tenant` and `database/central` create
+application objects and include paired rollback scripts. The `tests/sql`
+scripts create only fixture objects in generated disposable databases; never
+apply them to a runtime tenant or central database. The in-memory tutorial
+needs none of these SQL objects.
+
 ## Provision a tenant database
 
 As a SQL Server administrator, create an empty database and set its compatibility level:
