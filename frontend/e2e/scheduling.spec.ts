@@ -10,12 +10,13 @@ test("switching locale preserves the selected repeated-hour instant and previews
   await page.goto("/#/jobs");
   await expect(page.getByRole("heading", { name: /create job/i })).toBeVisible();
   await page.getByLabel("Job name").fill("Draft survives locale change");
-  await page.getByRole("button", { name: "Next" }).click();
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByLabel("Use a schedule").check();
   await page.getByRole("tab", { name: /schedule/i }).click();
   await page.getByLabel("Schedule kind").click();
   await page.getByRole("option", { name: "One time" }).click();
-  await page.getByLabel("Time zone").click();
+  await page.getByRole("combobox", { name: "Time zone" }).first().click();
   await page.getByRole("option", { name: "America/New_York" }).click();
   await page.getByLabel(/local date and time/i).fill("2026-11-01T01:30");
   await page.getByLabel(/utc offset/i).fill("-05:00");
@@ -23,8 +24,8 @@ test("switching locale preserves the selected repeated-hour instant and previews
   const before = await page.getByTestId("resolved-utc").inputValue();
   await page.getByLabel("Wizard language").click();
   await page.getByRole("option", { name: "Português (Brasil)" }).click();
-  await expect(page.getByLabel("Local date and time")).toHaveValue("2026-11-01T01:30");
-  await expect(page.getByLabel("UTC offset")).toHaveValue("-05:00");
+  await expect(page.getByLabel("Data e hora local")).toHaveValue("2026-11-01T01:30");
+  await expect(page.getByLabel("Deslocamento UTC")).toHaveValue("-05:00");
   await expect(page.getByTestId("resolved-utc")).toHaveValue(before);
   await expect(page.getByText("2026-11-01T06:30:00Z")).toBeVisible();
   await expect(page.getByText("-05:00").last()).toBeVisible();

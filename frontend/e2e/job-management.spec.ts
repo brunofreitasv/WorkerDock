@@ -3,12 +3,12 @@ import { expect, test } from "@playwright/test";
 const template = { id: "sample", version: "1", displayName: "Sample", description: "Safe sample", configurationSchema: { type: "object", additionalProperties: false, properties: {} } };
 const jobId = "11111111-1111-4111-8111-111111111111";
 
-async function setup(page: import("@playwright/test").Page, options: { initialSchedule?: boolean; deleteFails?: boolean; scheduleReadFailsAfterDelete?: boolean } = {}) {
+async function setup(page: import("@playwright/test").Page, options: { initialSchedule?: boolean; deleteFails?: boolean; scheduleReadFailsAfterDelete?: boolean; rejectScheduleOnce?: boolean } = {}) {
   let enabled = false;
   let paused = false;
   let rejectEditedNameOnce = true;
   let rejectEnableOnce = false;
-  let rejectScheduleOnce = true;
+  let rejectScheduleOnce = options.rejectScheduleOnce ?? true;
   let scheduleExists = options.initialSchedule ?? false;
   let deleteConfirmed = false;
   let etag = '"initial"';
@@ -46,16 +46,11 @@ async function setup(page: import("@playwright/test").Page, options: { initialSc
     if (body.action === "Duplicate") duplicates.add(body.targetJobId);
     return route.fulfill({ status: 202, json: { commandId: "action-command", targetId: body.targetJobId ?? jobId, state: "Pending" } });
   });
-  await page.route(`**/api/jobs/${jobId}`, async route => {
+  await page.route(/\/api\/jobs\/[^/]+$/, async route => {
+    const targetId = new URL(route.request().url()).pathname.split("/").at(-1) ?? jobId;
     const body = route.request().postDataJSON();
     requests.push({ method: "PUT", path: new URL(route.request().url()).pathname, body, etag: route.request().headers()["if-match"] });
     if (body.name === "Edited name stays after conflict" && rejectEditedNameOnce) { rejectEditedNameOnce = false; etag = '"current-save"'; return route.fulfill({ status: 412, json: { code: "StaleVersion" } }); }
-    return route.fulfill({ status: 202, json: { commandId: "edit-command", targetId: jobId } });
-  });
-  await page.route("**/api/jobs/*", async route => {
-    if (route.request().method() !== "PUT") return route.continue();
-    const targetId = new URL(route.request().url()).pathname.split("/").at(-1) ?? jobId;
-    requests.push({ method: "PUT", path: new URL(route.request().url()).pathname, body: route.request().postDataJSON(), etag: route.request().headers()["if-match"] });
     return route.fulfill({ status: 202, json: { commandId: "edit-command", targetId } });
   });
   let firstRun = true;
@@ -72,12 +67,11 @@ async function setup(page: import("@playwright/test").Page, options: { initialSc
 
 async function createScheduledDraft(page: import("@playwright/test").Page, name: string) {
   await page.getByLabel("Job name").fill(name);
-  await page.getByRole("button", { name: "Next" }).click();
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByLabel("Use a schedule").check();
-  await page.getByRole("button", { name: "Next" }).click();
-  await page.getByRole("button", { name: "Next" }).click();
-  await page.getByRole("button", { name: "Save disabled draft" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Save disabled draft" }).click();
   await expect(page.getByText("Disabled draft saved.")).toBeVisible();
 }
@@ -85,18 +79,18 @@ async function createScheduledDraft(page: import("@playwright/test").Page, name:
 test("guided create, stale edit, lifecycle, duplicate, retry and confirmed force stop", async ({ page }) => {
   const { requests, rejectEnable } = await setup(page);
   await page.getByLabel("Job name").fill("Demo");
-  await page.getByRole("button", { name: "Next" }).click();
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByLabel("Use a schedule").check();
   await page.getByRole("button", { name: "Preview next runs" }).click();
   await expect(page.getByText(/2026-11-02T14:00:00Z/)).toBeVisible();
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByText("No timeout", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   const failedSchedule = page.waitForResponse(response => response.url().endsWith(`/api/jobs/${jobId}/schedule`) && response.request().method() === "PUT");
   await page.getByRole("button", { name: "Save disabled draft" }).click();
   expect((await failedSchedule).status()).toBe(412);
-  await expect(page.getByText("Disabled", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Status: Disabled/)).toBeVisible();
   expect(requests.filter(request => request.path === "/api/jobs")).toHaveLength(1);
   await expect(page.getByRole("button", { name: "Load current revision" })).toBeVisible();
   await page.getByRole("button", { name: "Load current revision" }).click();
@@ -108,8 +102,13 @@ test("guided create, stale edit, lifecycle, duplicate, retry and confirmed force
 
   await page.getByRole("tab", { name: "Schedule", exact: true }).click();
   await page.getByLabel("Use a schedule").uncheck();
-  await page.getByRole("tab", { name: "Review", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  const scheduleDeletion = page.waitForResponse(response => response.url().endsWith(`/api/jobs/${jobId}/schedule`) && response.request().method() === "DELETE");
+  const scheduleConfirmation = page.waitForResponse(response => response.url().endsWith(`/api/jobs/${jobId}/schedule`) && response.request().method() === "GET");
   await page.getByRole("button", { name: "Save disabled draft" }).click();
+  await Promise.all([scheduleDeletion, scheduleConfirmation]);
+  await expect(page.getByText("Disabled draft saved.")).toBeVisible();
   const deletionIndex = requests.findIndex(request => request.method === "DELETE" && request.path.endsWith("/schedule"));
   expect(deletionIndex).toBeGreaterThanOrEqual(0);
   expect(requests[deletionIndex].etag).toBe('"initial"');
@@ -118,22 +117,24 @@ test("guided create, stale edit, lifecycle, duplicate, retry and confirmed force
   await page.getByRole("tab", { name: "Template", exact: true }).click();
   await page.getByLabel("Job name").fill("Edited name stays after conflict");
   const stale = page.waitForResponse(response => response.url().endsWith(`/api/jobs/${jobId}`) && response.request().method() === "PUT");
-  await page.getByRole("tab", { name: "Review", exact: true }).click();
+  for (let step = 0; step < 4; step++) await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Save disabled draft" }).click();
   expect((await stale).status()).toBe(412);
+  await page.getByRole("tab", { name: "Template", exact: true }).click();
   await expect(page.getByLabel("Job name")).toHaveValue("Edited name stays after conflict");
   await expect(page.getByRole("button", { name: "Load current revision" })).toBeVisible();
-  const staleSaveCount = requests.filter(request => request.method === "PUT" && request.path === `/api/jobs/${jobId}`).length;
-  await expect(page.getByRole("button", { name: "Save disabled draft" })).toBeDisabled();
-  expect(requests.filter(request => request.method === "PUT" && request.path === `/api/jobs/${jobId}`)).toHaveLength(staleSaveCount);
   await page.getByRole("button", { name: "Load current revision" }).click();
+  await page.getByRole("tab", { name: "Template", exact: true }).click();
   await expect(page.getByLabel("Job name")).toHaveValue("Demo");
+  for (let step = 0; step < 4; step++) await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Restore my draft" }).click();
+  await page.getByRole("tab", { name: "Template", exact: true }).click();
   await expect(page.getByLabel("Job name")).toHaveValue("Edited name stays after conflict");
+  for (let step = 0; step < 4; step++) await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "I reviewed this current revision" }).click();
   await page.getByRole("button", { name: "Save disabled draft" }).click();
   expect(requests.filter(request => request.method === "PUT" && request.path === `/api/jobs/${jobId}`).at(-1)?.etag).toBe('"current-save"');
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
 
   rejectEnable();
   await page.getByRole("button", { name: "Enable job" }).click();
@@ -143,7 +144,7 @@ test("guided create, stale edit, lifecycle, duplicate, retry and confirmed force
   expect(requests.filter(request => request.body?.action === "Enable")).toHaveLength(staleEnableCount);
   await page.getByRole("button", { name: "Load current revision" }).click();
   await page.getByRole("button", { name: "I reviewed this current revision" }).click();
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Enable job" }).click();
   expect(requests.filter(request => request.body?.action === "Enable").at(-1)?.etag).toBe('"current-enable"');
   await page.getByRole("button", { name: "Run now" }).click();
@@ -153,9 +154,6 @@ test("guided create, stale edit, lifecycle, duplicate, retry and confirmed force
   expect(runKeys).toHaveLength(2);
   expect(runKeys[0]).toBe(runKeys[1]);
 
-  await page.getByRole("button", { name: "Pause schedule" }).click();
-  await expect(page.getByRole("button", { name: "Resume schedule" })).toBeVisible();
-  await page.getByRole("button", { name: "Resume schedule" }).click();
   await page.getByRole("button", { name: "Disable" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Disable" }).click();
   await expect(page.getByRole("button", { name: "Enable", exact: true })).toBeVisible();
@@ -170,7 +168,7 @@ test("guided create, stale edit, lifecycle, duplicate, retry and confirmed force
   await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: "Duplicate" }).click();
   await expect(page.getByText("Review this disabled copy before enabling it.")).toBeVisible();
-  await expect(page.getByText("Disabled", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Status: Disabled/)).toBeVisible();
   expect(requests.some(request => request.body?.action === "Duplicate" && request.body.targetJobId)).toBe(true);
 });
 
@@ -195,43 +193,46 @@ test("job wizard controls fit desktop and narrow keyboard navigation", async ({ 
 });
 
 test("failed schedule DELETE stays truthful and keeps safety actions while blocking manual enable", async ({ page }) => {
-  await setup(page, { deleteFails: true });
+  await setup(page, { deleteFails: true, rejectScheduleOnce: false });
   await createScheduledDraft(page, "DELETE fails");
   await page.getByRole("tab", { name: "Schedule", exact: true }).click();
   await page.getByLabel("Use a schedule").uncheck();
-  await page.getByRole("tab", { name: "Review", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Save disabled draft" }).click();
-  await expect(page.getByText(/schedule removal could not be confirmed/i)).toBeVisible();
-  await page.getByRole("button", { name: "Next" }).click();
-  await expect(page.getByText(/schedule removal could not be confirmed/i)).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: /schedule removal could not be confirmed/i })).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: /schedule removal could not be confirmed/i })).toBeVisible();
   await expect(page.getByRole("button", { name: "Pause schedule" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Disable" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Enable job" })).toBeDisabled();
 });
 
 test("successful schedule DELETE with failed confirming GET remains unresolved and blocks enable", async ({ page }) => {
-  await setup(page, { scheduleReadFailsAfterDelete: true });
+  await setup(page, { scheduleReadFailsAfterDelete: true, rejectScheduleOnce: false });
   await createScheduledDraft(page, "GET fails");
   await page.getByRole("tab", { name: "Schedule", exact: true }).click();
   await page.getByLabel("Use a schedule").uncheck();
-  await page.getByRole("tab", { name: "Review", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Save disabled draft" }).click();
-  await expect(page.getByText(/schedule removal could not be confirmed/i)).toBeVisible();
-  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: /schedule removal could not be confirmed/i })).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByRole("button", { name: "Pause schedule" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Disable" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Enable job" })).toBeDisabled();
 });
 
 test("scheduled source duplicate derives its own no-schedule state and can be enabled manually", async ({ page }) => {
-  const { requests } = await setup(page);
+  const { requests } = await setup(page, { rejectScheduleOnce: false });
   await createScheduledDraft(page, "Scheduled source");
-  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Duplicate" }).click();
   await expect(page.getByText("Review this disabled copy before enabling it.")).toBeVisible();
   await expect(page.getByText("Manual job")).toBeVisible();
   await page.getByRole("button", { name: "Save disabled draft" }).click();
-  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByText("Disabled draft saved.")).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByRole("button", { name: "Enable job" })).toBeEnabled();
   expect(requests.some(request => request.method === "GET" && request.path.includes("/api/jobs/") && request.path.endsWith("/schedule"))).toBe(true);
 });

@@ -42,7 +42,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
   const summary = useRef<HTMLDivElement>(null);
   const localIssues = useMemo(() => selected ? validateSchema(selected.descriptor.configurationSchema, configuration) : [], [selected, configuration]);
   const labels = [t.stageTemplate, t.stageConfiguration, t.stageSchedule, t.stagePolicy, t.stageReview, t.stageActivation];
-  useEffect(() => { let current = true; void read<{ items: CatalogItem[] }>("/api/templates").then(result => { if (current) { setCatalog(result.data.items); setSelected(result.data.items.find(item => item.selectable)); } }).catch(() => { if (current) setMessage(t.requestError); }).finally(() => { if (current) setLoading(false); }); return () => { current = false; }; }, []);
+  useEffect(() => { let current = true; void read<{ items: CatalogItem[] }>("/api/templates").then(result => { if (current) { const initial = result.data.items.find(item => item.selectable); setCatalog(result.data.items); setSelected(initial); setConfiguration(initial ? defaults(initial.descriptor.configurationSchema) : {}); } }).catch(() => { if (current) setMessage(t.requestError); }).finally(() => { if (current) setLoading(false); }); return () => { current = false; }; }, []);
   useEffect(() => { if (message) summary.current?.focus(); }, [message]);
   const saveDraft = async () => {
     if (staleConflict || !reviewAcknowledged) return false;

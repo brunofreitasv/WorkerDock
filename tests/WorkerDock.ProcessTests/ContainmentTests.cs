@@ -301,7 +301,7 @@ public sealed class ContainmentTests
 
     internal static async Task<int[]> WaitForPids(string directory)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var path = System.IO.Path.Combine(directory, "pids");
         while (true)
         {

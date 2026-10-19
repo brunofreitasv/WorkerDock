@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
-    "e2e:serve": "vite --host 127.0.0.1 --port 4173 --strictPort",
+    "e2e:serve": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {

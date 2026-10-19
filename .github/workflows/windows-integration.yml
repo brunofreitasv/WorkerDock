@@ -1,0 +1,33 @@
+name: Windows and SQL integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sql-integration:
+    # Require runner v2.329.0+, SQL Server 2022+, disposable DB rights,
+    # and the `workerdock-sql` label before enabling this workflow.
+    runs-on: [self-hosted, windows, x64, workerdock-sql]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Require the disposable SQL fixture connection
+        shell: pwsh
+        env:
+          WORKERDOCK_TEST_SQL: ${{ secrets.WORKERDOCK_TEST_SQL }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WORKERDOCK_TEST_SQL)) {
+            throw 'WORKERDOCK_TEST_SQL must reference a dedicated disposable SQL Server 2022+ test instance.'
+          }
+      - name: Restore locked dependencies
+        run: dotnet restore WorkerDock.slnx --locked-mode
+      - name: Run SQL-backed integration tests
+        shell: pwsh
+        env:
+          WORKERDOCK_TEST_SQL: ${{ secrets.WORKERDOCK_TEST_SQL }}
+        run: dotnet test WorkerDock.slnx --no-restore -c Release --filter "Store=Sql"

@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workerdock-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dotnet:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore locked dependencies
+        run: dotnet restore WorkerDock.slnx --locked-mode
+      - name: Test non-SQL scenarios
+        run: dotnet test WorkerDock.slnx --no-restore -c Release --filter "Store!=Sql"
+      - name: Deployment script smoke
+        shell: pwsh
+        run: ./tests/DeploymentSmoke.ps1
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run frontend unit tests
+        working-directory: frontend
+        run: npm run test -- --run
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run tenant browser tests
+        working-directory: frontend
+        run: npm run e2e
+      - name: Run Control Center browser tests
+        working-directory: frontend
+        run: npm run e2e:center
+      - name: Build frontend workspaces
+        working-directory: frontend
+        run: npm run build
