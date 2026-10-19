@@ -7,7 +7,7 @@ Record the exact checkout, tool versions, command, result and artifact location 
 - Date: 2026-10-19.
 - .NET non-SQL Release tests: `dotnet test WorkerDock.slnx --no-restore -c Release --filter "Store!=Sql"` — PASS; 384 tests (71 unit, 37 Windows process, 276 integration).
 - Frontend unit tests: `npm.cmd --prefix frontend run test -- --run` — PASS; 35 tests.
-- Tenant browser tests: `npm.cmd --prefix frontend run e2e -- --workers=1` — PASS; 19 tests.
+- Tenant browser tests: `npm.cmd --prefix frontend run e2e -- --workers=1` — PASS; 20 tests.
 - Control Center browser tests: `npm.cmd --prefix frontend run e2e:center -- --workers=1` — PASS; 2 tests.
 - Focused accessibility browser tests: `npm.cmd --prefix frontend run e2e -- accessibility.spec.ts --workers=1` — PASS; 3 tests covering keyboard flow, visible focus, localized validation, non-color health text and mobile layout.
 - Frontend production build: `npm.cmd --prefix frontend run build` — PASS; tenant and Control Center.
