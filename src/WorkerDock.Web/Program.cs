@@ -22,10 +22,15 @@ using WorkerDock.Quartz.Scheduling;
 using WorkerDock.Web.Endpoints;
 using WorkerDock.Templates.SqlServer;
 using WorkerDock.Templates.Http;
+using WorkerDock.Application.Monitoring;
+using WorkerDock.Infrastructure.Monitoring;
+using WorkerDock.Contracts.Secrets;
+using WorkerDock.Infrastructure.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWorkerDockAccess();
 builder.Services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.TryAddSingleton<ISecretVault>(_ => SecretVaultRegistration.CreateDevelopment());
 builder.Services.TryAddSingleton<IScheduleEvaluator, QuartzScheduleEvaluator>();
 var trustedTemplates = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
 {
@@ -125,6 +130,14 @@ builder.Services.TryAddSingleton<SqlJobLifecycle>(provider =>
 });
 builder.Services.TryAddSingleton<IJobLifecycle>(provider => provider.GetRequiredService<SqlJobLifecycle>());
 builder.Services.TryAddSingleton<IJobDuplicator>(provider => provider.GetRequiredService<SqlJobLifecycle>());
+builder.Services.TryAddSingleton<IMonitoringQueries>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    var clock = provider.GetRequiredService<TimeProvider>();
+    if (Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"]) && config["Tenant:Adapter"] != "Memory")
+        return new SqlMonitoringQueries(new(config["Tenant:ConnectionString"]!, id), clock);
+    return new UnavailableMonitoringQueries(Guid.TryParse(config["Tenant:InstanceId"], out var instanceId) ? instanceId : Guid.Empty, clock);
+});
 var app = builder.Build();
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
@@ -145,19 +158,14 @@ app.MapConnectionProfiles();
 app.MapIntegrationSettings();
 app.MapSchedules();
 app.MapJobLifecycle();
+app.MapMonitoring();
+app.MapHealthEndpoints();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
 static IResult SafeProblem(int status, string code, string field = "") =>
     Results.Problem(statusCode: status, extensions: new Dictionary<string, object?> { ["code"] = code, ["field"] = field });
 static string ETag(byte[] version) => '"' + Convert.ToBase64String(version) + '"';
-
-app.MapGet("/health/live", () => Results.Json(new { status = "live" }));
-app.MapGet("/health/ready", async (ITenantSettingsService service, CancellationToken ct) =>
-{
-    try { await service.GetAsync(ct); return Results.Json(new { status = "ready" }); }
-    catch { return Results.Json(new { status = "unavailable" }, statusCode: 503); }
-});
 
 app.MapGet("/api/settings", async (HttpResponse response, ITenantSettingsService service, CancellationToken ct) =>
 {
@@ -190,9 +198,6 @@ app.MapPut("/api/settings", async (HttpRequest request, SettingsUpdate input, IT
     catch { return SafeProblem(503, "PersistenceUnavailable"); }
 }).RequireAuthorization(AccessPolicies.Manage);
 
-// Task02 provides policy-protected route contracts. Operational projections arrive in later stages.
-foreach (var route in new[] { "/api/dashboard", "/api/monitoring", "/api/audit" })
-    app.MapGet(route, () => Results.Ok(new { available = false, items = Array.Empty<object>() })).RequireAuthorization(AccessPolicies.Read);
 app.Map("/api/{**path}", () => Results.NotFound());
 app.Map("/auth/{**path}", () => Results.NotFound());
 app.Map("/_test/{**path}", () => Results.NotFound());
@@ -247,6 +252,16 @@ internal sealed class UnavailableScheduleCommands : IScheduleCommands
     public ValueTask<WorkerDock.Application.Scheduling.ScheduleEditorDto> GetAsync(Guid jobId,CancellationToken ct)=>Unavailable<WorkerDock.Application.Scheduling.ScheduleEditorDto>();
     public ValueTask<CommandReceipt> DeleteAsync(Guid jobId,byte[] expectedVersion,ActorContext actor,CancellationToken ct)=>Unavailable<CommandReceipt>();
     public ValueTask<IReadOnlyList<DateTimeOffset>> PreviewAsync(WorkerDock.Domain.Scheduling.ScheduleDefinition definition,DateTimeOffset afterUtc,int count,CancellationToken ct)=>Unavailable<IReadOnlyList<DateTimeOffset>>();
+}
+internal sealed class UnavailableMonitoringQueries(Guid instanceId, TimeProvider clock) : IMonitoringQueries
+{
+    private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<DashboardDto> DashboardAsync(CancellationToken ct) => Unavailable<DashboardDto>();
+    public ValueTask<Page<JobSummaryDto>> JobsAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<JobSummaryDto>>();
+    public ValueTask<ExecutionDetailsDto> ExecutionAsync(Guid executionId, CancellationToken ct) => Unavailable<ExecutionDetailsDto>();
+    public ValueTask<Page<AuditSummaryDto>> AuditAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<AuditSummaryDto>>();
+    public ValueTask<IReadOnlyList<WorkerSummaryDto>> WorkersAsync(CancellationToken ct) => Unavailable<IReadOnlyList<WorkerSummaryDto>>();
+    public ValueTask<TenantHealthDto> HealthAsync(CancellationToken ct) => ValueTask.FromResult(new TenantHealthDto(instanceId, "Unavailable", new Dictionary<string,string> { ["web"] = "Healthy", ["database"] = "Unavailable" }, clock.GetUtcNow()));
 }
 internal sealed class UnavailableTemplateCatalog : ITemplateCatalog
 {

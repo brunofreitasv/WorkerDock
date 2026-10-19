@@ -39,7 +39,7 @@ public sealed class AccessPolicyTests
         await using var host = new AccessHost(); using var client = host.Client();
         var session = await client.GetFromJsonAsync<SessionView>("/api/session");
         Assert.Equal(new(false, true, true, "Anonymous", "en", "UTC"), session);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/dashboard")).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/api/dashboard")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync("/api/settings", new { displayName = "Team", displayTimeZone = "UTC" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/auth/signout", null)).StatusCode);
         Assert.Equal(HttpStatusCode.MethodNotAllowed, (await client.GetAsync("/auth/signout")).StatusCode);
@@ -64,8 +64,8 @@ public sealed class AccessPolicyTests
         var session = await client.GetFromJsonAsync<SessionView>("/api/session");
         Assert.True(session!.Authenticated); Assert.True(session.CanRead); Assert.Equal(canManage, session.CanManage);
         Assert.Equal(requiredRole is null ? "Authenticated" : "RoleProtected", session.Mode);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/audit")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/monitoring")).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/api/audit")).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/api/monitoring")).StatusCode);
         Assert.Equal(canManage ? HttpStatusCode.OK : HttpStatusCode.Forbidden, (await client.GetAsync("/api/settings")).StatusCode);
         var text = await client.GetStringAsync("/api/session");
         Assert.DoesNotContain("token", text, StringComparison.OrdinalIgnoreCase);
@@ -78,7 +78,7 @@ public sealed class AccessPolicyTests
         using var issuer = new LocalOidcIssuer("Viewer");
         await using var host = new AccessHost(issuer, "Manager"); using var client = host.Client();
         await issuer.SignIn(client);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/dashboard")).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/api/dashboard")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/settings")).StatusCode);
         var csrf = await client.GetFromJsonAsync<CsrfView>("/api/antiforgery");
         using var update = Mutation(csrf!.RequestToken, "https://localhost");

@@ -25,6 +25,11 @@ import { OutboundPolicyPage } from "./features/settings/OutboundPolicyPage";
 import { ManualJobEditor } from "./features/jobs/ManualJobEditor";
 import { ProfileEditor } from "./features/profiles/ProfileEditor";
 import { TemplatePicker, type CatalogItem } from "./features/templates/TemplatePicker";
+import { Dashboard } from "./features/monitoring/Dashboard";
+import { JobsTable } from "./features/monitoring/JobsTable";
+import { WorkersPage } from "./features/monitoring/WorkersPage";
+import { ExecutionDetails } from "./features/monitoring/ExecutionDetails";
+import { AuditPage } from "./features/monitoring/AuditPage";
 const theme = createTheme({
   palette: {
     primary: { main: "#0b6c61", dark: "#064f47", light: "#dff2ed" },
@@ -185,6 +190,7 @@ export default function App() {
     ? [
         { id: "dashboard", label: t.dashboard },
         { id: "monitoring", label: t.monitoring },
+        { id: "workers", label: preferences.language === "pt-BR" ? "Workers" : "Workers" },
         { id: "audit", label: t.audit },
         { id: "templates", label: t.templates },
         ...(session.canManage ? [{ id: "jobs", label: t.jobs }] : []),
@@ -193,7 +199,7 @@ export default function App() {
     : [];
   const title =
     navigation.find((item) => item.id === active)?.label ??
-    (active === "settings" ? t.settings : t.dashboard);
+    (active === "settings" ? t.settings : active.startsWith("execution:") ? "Execution details" : t.dashboard);
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -263,6 +269,17 @@ export default function App() {
                     </Stack>
                   </Paper>
                 ) : (
+                active.startsWith("execution:") ? (
+                  <ExecutionDetails executionId={active.slice("execution:".length)} language={preferences.language} />
+                ) : active === "monitoring" ? (
+                  <JobsTable language={preferences.language} />
+                ) : active === "workers" ? (
+                  <WorkersPage language={preferences.language} />
+                ) : active === "audit" ? (
+                  <AuditPage language={preferences.language} />
+                ) : active === "dashboard" ? (
+                  <Dashboard language={preferences.language} onExecution={id => navigate(`execution:${id}`)} />
+                ) : (
                 <Paper
                   variant="outlined"
                   sx={{
@@ -272,20 +289,10 @@ export default function App() {
                     borderTopColor: "primary.main",
                   }}
                 >
-                  {active === "dashboard" && (
-                    <Typography component="h2" variant="h6" sx={{ mb: 1 }}>
-                      {t.welcome}
-                    </Typography>
-                  )}
-                  <Typography
-                    color="text.secondary"
-                    sx={{ maxWidth: 660, lineHeight: 1.8 }}
-                  >
-                    {active === "dashboard" ? t.foundation : t.unavailable}
-                  </Typography>
+                  <Typography color="text.secondary" sx={{ maxWidth: 660, lineHeight: 1.8 }}>{t.unavailable}</Typography>
                 </Paper>
                 )
-              )}
+              ))}
               <Paper variant="outlined" sx={{ p: 3, mt: 3 }}>
                 <Typography component="h2" variant="h6" sx={{ mb: 1 }}>
                   {t.preferences}
