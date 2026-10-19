@@ -62,3 +62,50 @@ test("dashboard remains usable on mobile and switches accessible labels to Brazi
   }));
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
 });
+
+test("job creation is keyboard operable with visible focus and localized validation", async ({ page }) => {
+  await page.unroute("**/api/session");
+  await page.route("**/api/session", route => route.fulfill({ json: {
+    authenticated: true, canRead: true, canManage: true, mode: "RoleProtected", language: "en", timeZone: "UTC",
+  } }));
+  await page.route("**/api/templates", route => route.fulfill({ json: { items: [{
+    selectable: true,
+    descriptor: { id: "sample", version: "1", displayName: "Sample", description: "Safe sample", configurationSchema: { type: "object", properties: {} } },
+  }] } }));
+
+  for (const locale of ["en", "pt-BR"] as const) {
+    await page.goto("/#/jobs");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    const language = page.getByRole("combobox", { name: "Wizard language" });
+    if (locale === "pt-BR") {
+      await language.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+    }
+
+    const jobName = page.getByRole("textbox", { name: locale === "en" ? "Job name" : "Nome da tarefa" });
+    await jobName.focus();
+    await page.keyboard.press("Tab");
+    const template = page.getByRole("combobox", { name: locale === "en" ? "Template" : "Modelo" });
+    await expect(template).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+
+    await page.keyboard.press("Tab");
+    const next = page.getByRole("button", { name: locale === "en" ? "Next" : "Avançar" });
+    await expect(next).toBeFocused();
+    const focusIsVisible = await next.evaluate(element => element.matches(":focus-visible"));
+    expect(focusIsVisible).toBe(true);
+    await page.keyboard.press("Enter");
+
+    const alert = page.getByRole("alert");
+    await expect(alert).toBeVisible();
+    await expect(alert).toHaveText(locale === "en"
+      ? "Choose a template and enter a job name."
+      : "Escolha um modelo e informe o nome da tarefa.");
+    await expect(alert).toBeFocused();
+  }
+});

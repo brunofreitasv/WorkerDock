@@ -9,6 +9,7 @@ Record the exact checkout, tool versions, command, result and artifact location 
 - Frontend unit tests: `npm.cmd --prefix frontend run test -- --run` — PASS; 35 tests.
 - Tenant browser tests: `npm.cmd --prefix frontend run e2e -- --workers=1` — PASS; 19 tests.
 - Control Center browser tests: `npm.cmd --prefix frontend run e2e:center -- --workers=1` — PASS; 2 tests.
+- Focused accessibility browser tests: `npm.cmd --prefix frontend run e2e -- accessibility.spec.ts --workers=1` — PASS; 3 tests covering keyboard flow, visible focus, localized validation, non-color health text and mobile layout.
 - Frontend production build: `npm.cmd --prefix frontend run build` — PASS; tenant and Control Center.
 - Deployment script smoke: `pwsh -File tests/DeploymentSmoke.ps1` — PASS.
 - OSS sample check: `dotnet test tests/WorkerDock.UnitTests/WorkerDock.UnitTests.csproj --no-restore -c Release --filter FullyQualifiedName~SampleTemplateConformanceTests` — PASS; 2 tests. `dotnet build examples/WorkerDock.SampleTemplate/WorkerDock.SampleTemplate.csproj --no-restore -c Release` — PASS.
