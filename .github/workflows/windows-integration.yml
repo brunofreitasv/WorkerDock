@@ -8,8 +8,8 @@ permissions:
 
 jobs:
   sql-integration:
-    # Require runner v2.329.0+, SQL Server 2022+, disposable DB rights,
-    # and the `workerdock-sql` label before enabling this workflow.
+    # Require runner v2.329.0+, SQL Server 2022+, the three disposable SQL
+    # test logins, and the `workerdock-sql` label before enabling this workflow.
     runs-on: [self-hosted, windows, x64, workerdock-sql]
     steps:
       - uses: actions/checkout@v7
@@ -20,9 +20,14 @@ jobs:
         shell: pwsh
         env:
           WORKERDOCK_TEST_SQL: ${{ secrets.WORKERDOCK_TEST_SQL }}
+          WORKERDOCK_TEST_SQL_RUNTIME: ${{ secrets.WORKERDOCK_TEST_SQL_RUNTIME }}
+          WORKERDOCK_TEST_SQL_TARGET_RUNTIME: ${{ secrets.WORKERDOCK_TEST_SQL_TARGET_RUNTIME }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WORKERDOCK_TEST_SQL)) {
-            throw 'WORKERDOCK_TEST_SQL must reference a dedicated disposable SQL Server 2022+ test instance.'
+          $required = @('WORKERDOCK_TEST_SQL', 'WORKERDOCK_TEST_SQL_RUNTIME', 'WORKERDOCK_TEST_SQL_TARGET_RUNTIME')
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "$name must be configured as a GitHub Actions secret for the disposable SQL test instance."
+            }
           }
       - name: Restore locked dependencies
         run: dotnet restore WorkerDock.slnx --locked-mode
@@ -30,4 +35,6 @@ jobs:
         shell: pwsh
         env:
           WORKERDOCK_TEST_SQL: ${{ secrets.WORKERDOCK_TEST_SQL }}
+          WORKERDOCK_TEST_SQL_RUNTIME: ${{ secrets.WORKERDOCK_TEST_SQL_RUNTIME }}
+          WORKERDOCK_TEST_SQL_TARGET_RUNTIME: ${{ secrets.WORKERDOCK_TEST_SQL_TARGET_RUNTIME }}
         run: dotnet test WorkerDock.slnx --no-restore -c Release --filter "Store=Sql"

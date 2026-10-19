@@ -4,6 +4,8 @@ Use SQL Server 2022 or newer. The tenant database requires compatibility level 1
 
 On Windows, install a local SQL Server 2022 Developer or Express instance, start its Database Engine service, and have an administrator provision a dedicated test login with permission to create databases. Use an integrated-authentication connection supplied through deployment secrets when that Windows identity is authorized. If Windows authentication is rejected, use a dedicated SQL test login provisioned by the administrator; do not change server permissions as part of the test run.
 
+The manual `Windows and SQL integration` GitHub Actions workflow requires repository secrets named `WORKERDOCK_TEST_SQL`, `WORKERDOCK_TEST_SQL_RUNTIME`, and `WORKERDOCK_TEST_SQL_TARGET_RUNTIME`. It checks that all three are present without printing their values and scopes them to the preflight and SQL test steps. The provisioner and two restricted logins must point to the same disposable SQL Server; fixtures create generated disposable databases and their paired target objects.
+
 For tests, set `WORKERDOCK_TEST_SQL` to a connection string for that disposable instance. Do not include a database name that should be preserved: the fixture overrides Initial Catalog with `master` and its generated test database. Then run:
 
 Quartz process tests also require `WORKERDOCK_TEST_SQL_RUNTIME`, a connection
