@@ -194,7 +194,7 @@ async function startScheduledDraftWithPutFailure(status: 412 | 503) {
   await user.click(screen.getByRole("button", { name: "Next" }));
   await user.click(screen.getByRole("button", { name: "Next" }));
   await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
-  await waitFor(() => expect(screen.getAllByRole("alert").some(alert => status === 412 ? /draft is preserved/i.test(alert.textContent ?? "") : /schedule removal could not be confirmed/i.test(alert.textContent ?? ""))).toBe(true));
+  await waitFor(() => expect(screen.getAllByRole("alert").some(alert => status === 412 ? /draft is preserved/i.test(alert.textContent ?? "") : /schedule draft has not been confirmed/i.test(alert.textContent ?? ""))).toBe(true));
   return user;
 }
 
@@ -213,11 +213,61 @@ test("initial schedule PUT 412 enters explicit re-review and cannot enable unsee
   expect(screen.queryByText(/Manual job/)).not.toBeInTheDocument();
 });
 
+test("restoring a different local schedule after 412 stays blocked until PUT and GET confirm it", async () => {
+  const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };
+  const jobId = "11111111-1111-4111-8111-111111111111";
+  let schedulePutCount = 0;
+  let persistedCron = "0 8 * * 1-5";
+  const confirmedCrons: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    const method = init?.method ?? "GET";
+    let status = 200;
+    let body: any = {};
+    if (url.pathname === "/api/templates") body = { items: [{ selectable: true, descriptor }] };
+    else if (url.pathname === "/api/time-zones") body = ["UTC"];
+    else if (url.pathname === "/api/jobs" && method === "POST") { status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}/configuration`) body = { revision: { jobId, revision: 1, name: "Scheduled draft", templateId: "sample", templateVersion: "1", configuration: {}, profileId: null, policy: { timeout: null } }, version: [1], enabled: false, archived: false, concurrencyLimit: 1 };
+    else if (url.pathname === `/api/jobs/${jobId}/schedule` && method === "PUT") {
+      schedulePutCount++;
+      if (schedulePutCount === 1) { status = 412; body = { code: "StaleVersion" }; }
+      else { persistedCron = JSON.parse(String(init?.body)).input.cron; status = 202; body = { targetId: jobId }; }
+    }
+    else if (url.pathname === `/api/jobs/${jobId}/schedule` && method === "GET") { confirmedCrons.push(persistedCron); body = { input: { kind: "Cron", cron: persistedCron, zoneId: "UTC", localOnce: null, selectedOffset: null }, policy: { mode: "Skip" }, paused: false }; }
+    else if (url.pathname === "/api/antiforgery") body = { requestToken: "test" };
+    else if (url.pathname === `/api/jobs/${jobId}` && method === "PUT") { status = 202; body = { targetId: jobId }; }
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ETag: '"current"' } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "Scheduled draft");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByLabelText("Use a schedule"));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Load current revision" })).toBeVisible());
+  await user.click(screen.getByRole("button", { name: "Load current revision" }));
+  await waitFor(() => expect(screen.getByDisplayValue("0 8 * * 1-5")).toBeVisible());
+  await user.click(screen.getByRole("button", { name: "Restore my draft" }));
+  expect(screen.getByDisplayValue("0 9 * * 1-5")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "I reviewed this current revision" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("button", { name: "Enable job" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getByText("Disabled draft saved.")).toBeVisible());
+  expect(confirmedCrons.at(-1)).toBe("0 9 * * 1-5");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("button", { name: "Enable job" })).toBeEnabled();
+});
+
 test("initial schedule PUT 503 remains unresolved and blocks activation", async () => {
   const user = await startScheduledDraftWithPutFailure(503);
   await user.click(screen.getByRole("button", { name: "Next" }));
   expect(screen.getByRole("button", { name: "Enable job" })).toBeDisabled();
-  expect(screen.getAllByRole("alert").some(alert => /schedule removal could not be confirmed/i.test(alert.textContent ?? ""))).toBe(true);
+  expect(screen.getAllByRole("alert").some(alert => /schedule draft has not been confirmed/i.test(alert.textContent ?? ""))).toBe(true);
   expect(screen.queryByText(/Manual job/)).not.toBeInTheDocument();
 });
 

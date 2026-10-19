@@ -159,6 +159,7 @@
   "scheduleDeleteFailed": "O agendamento salvo ainda existe. O rascunho foi preservado; tente salvar novamente após resolver a remoção do agendamento.",
   "scheduleRemovalUnconfirmed": "Não foi possível confirmar a remoção do agendamento. A tarefa ainda pode executar conforme o agendamento; pause ou desative e verifique antes de habilitar manualmente.",
   "scheduleStillPresent": "O agendamento salvo ainda existe e pode continuar executando.",
+  "scheduleDraftUnconfirmed": "Este rascunho de agendamento ainda não foi confirmado no servidor. Salve e verifique antes de habilitar.",
   "recurringSchedule": "Recorrente (cron)",
   "oneTimeSchedule": "Uma vez",
   "timeoutHelp": "Informe um número positivo de segundos ou selecione Sem limite de tempo. Zero não significa ilimitado. Uma tarefa sem limite ainda ocupa capacidade até concluir, ser parada ou interrompida.",
