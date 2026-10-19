@@ -51,7 +51,7 @@ public sealed class CustomSqlSchemaTests
         var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "manifest.json")));
         var ids = manifest.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetString()!).ToArray();
-        Assert.Equal(new[] { "0001_bootstrap", "0002_quartz", "0003_execution", "0003a_projection", "0003b_attempts", "0003c_capacity", "0003d_dispatch", "0004_templates", "0004a_profiles", "0004b_integration_settings", "0005_scheduling", "0006_observability", "0007_alerts" }, ids);
+        Assert.Equal(new[] { "0001_bootstrap", "0002_quartz", "0003_execution", "0003a_projection", "0003b_attempts", "0003c_capacity", "0003d_dispatch", "0004_templates", "0004a_profiles", "0004b_integration_settings", "0005_scheduling", "0006_observability", "0007_alerts", "0008_retention" }, ids);
         Assert.Equal(ids.Length * 2, Directory.GetFiles(directory, "*.sql").Length);
         foreach (var entry in manifest.RootElement.EnumerateArray())
         foreach (var direction in new[] { "up", "down" })
@@ -64,6 +64,36 @@ public sealed class CustomSqlSchemaTests
             foreach (Match table in Regex.Matches(sql, @"(?im)^CREATE (?:TABLE|TRIGGER)\s+(\S+)"))
                 Assert.StartsWith("[workerdock].", table.Groups[1].Value);
         }
+    }
+
+    [Fact]
+    public void Retention_schema_keeps_replay_tombstones_and_restricts_audit_purge_to_a_bounded_procedure()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
+        var up = File.ReadAllText(Path.Combine(directory, "0008_retention.up.sql"));
+        var down = File.ReadAllText(Path.Combine(directory, "0008_retention.down.sql"));
+        Assert.Contains("RetentionPolicy", up);
+        Assert.Contains("Version rowversion NOT NULL", up);
+        Assert.Contains("VALUES(1,30,90,365,0,0)", up);
+        Assert.Contains("ArchiveBatches", up);
+        Assert.Contains("ArchiveRemovedAtUtc", up);
+        Assert.Contains("CREATE PROCEDURE [workerdock].PurgeExpiredArchiveBatchItems", up);
+        Assert.Contains("DENY DELETE ON [workerdock].ArchiveBatchItems TO WorkerDockRuntime", up);
+        Assert.Contains("LogCutoffUtc datetime2(7) NOT NULL", up);
+        Assert.Contains("LogCutoffUtc=@LogCutoffUtc", up);
+        Assert.Contains("AggregatedAtUtc IS NOT NULL", up);
+        Assert.Contains("N'Abandoned'", up);
+        Assert.Contains("Archive log item is newer than the batch log cutoff", up);
+        Assert.Contains("RetentionRequestTombstones", up);
+        Assert.Contains("RetentionPurgeAudit", up);
+        Assert.Contains("CREATE PROCEDURE [workerdock].PurgeAuditEvents", up);
+        Assert.Contains("CREATE PROCEDURE [workerdock].PurgeRetentionRequestTombstones", up);
+        Assert.Contains("EXECUTE AS OWNER", up);
+        Assert.Contains("DELETE TOP (@MaxRows)", up);
+        Assert.Contains("GRANT EXECUTE ON [workerdock].PurgeAuditEvents TO WorkerDockRuntime", up);
+        Assert.DoesNotContain("GRANT DELETE ON [workerdock].AuditEvents TO WorkerDockRuntime", up);
+        Assert.DoesNotContain("GRANT SELECT,INSERT,UPDATE,DELETE ON [workerdock].RetentionRequestTombstones TO WorkerDockRuntime", up);
+        Assert.Contains("Cannot remove populated retention state", down);
     }
 
     [Fact]

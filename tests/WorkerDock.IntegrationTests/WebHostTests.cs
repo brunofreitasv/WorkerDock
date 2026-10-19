@@ -70,6 +70,49 @@ public sealed class WebHostTests
     }
 
     [Fact]
+    public async Task Retention_settings_are_manager_only_versioned_and_never_expose_archive_paths()
+    {
+        await using var factory = new WebApplicationFactory<WorkerDock.Web.WebAssemblyMarker>().WithWebHostBuilder(builder =>
+            builder.UseEnvironment("Development").ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Tenant:Adapter"] = "Memory",
+                    ["Tenant:InstanceId"] = Guid.NewGuid().ToString(),
+                    ["Tenant:ConnectionString"] = "",
+                    ["Retention:ArchiveRoot"] = "C:/secret/archive-root"
+                })));
+        using var client = factory.CreateClient(new() { BaseAddress = new("https://localhost") });
+        using var get = await client.GetAsync("/api/settings/retention");
+        Assert.Equal(HttpStatusCode.OK, get.StatusCode);
+        var original = await get.Content.ReadFromJsonAsync<RetentionPolicyResponse>();
+        Assert.Equal(new RetentionPolicyValues(30, 90, 365, false, 0), new(original!.LogDays, original.ExecutionDays, original.AuditDays, original.ArchiveBeforeDelete, original.ArchiveDays));
+        Assert.DoesNotContain("archive-root", await get.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        var csrf = (await client.GetFromJsonAsync<CsrfView>("/api/antiforgery"))!.RequestToken;
+        using var update = new HttpRequestMessage(HttpMethod.Put, "/api/settings/retention")
+        {
+            Content = JsonContent.Create(new { logDays = 14, executionDays = 45, auditDays = 180, archiveBeforeDelete = true, archiveDays = 730 })
+        };
+        update.Headers.TryAddWithoutValidation("If-Match", get.Headers.ETag!.ToString());
+        update.Headers.TryAddWithoutValidation("X-WorkerDock-CSRF", csrf);
+        update.Headers.TryAddWithoutValidation("Origin", "https://localhost");
+        using var changed = await client.SendAsync(update);
+        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+        Assert.NotNull(changed.Headers.ETag);
+        var saved = await changed.Content.ReadFromJsonAsync<RetentionPolicyResponse>();
+        Assert.Equal(730, saved?.ArchiveDays);
+
+        using var stale = new HttpRequestMessage(HttpMethod.Put, "/api/settings/retention")
+        {
+            Content = JsonContent.Create(new { logDays = 20, executionDays = 45, auditDays = 180, archiveBeforeDelete = true, archiveDays = 730 })
+        };
+        stale.Headers.TryAddWithoutValidation("If-Match", get.Headers.ETag.ToString());
+        stale.Headers.TryAddWithoutValidation("X-WorkerDock-CSRF", csrf);
+        stale.Headers.TryAddWithoutValidation("Origin", "https://localhost");
+        using var staleResponse = await client.SendAsync(stale);
+        Assert.Equal(HttpStatusCode.PreconditionFailed, staleResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task Liveness_is_safe_and_readiness_fails_closed_without_database_configuration()
     {
         await using var factory = new WebApplicationFactory<WorkerDock.Web.WebAssemblyMarker>().WithWebHostBuilder(builder =>
@@ -91,3 +134,5 @@ public sealed class WebHostTests
 }
 
 public sealed record SettingsResponse(string DisplayName, string DisplayTimeZone, string Version);
+public sealed record RetentionPolicyResponse(int LogDays, int ExecutionDays, int AuditDays, bool ArchiveBeforeDelete, int ArchiveDays, string Version, Guid? CommandId = null);
+public sealed record RetentionPolicyValues(int LogDays, int ExecutionDays, int AuditDays, bool ArchiveBeforeDelete, int ArchiveDays);

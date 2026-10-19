@@ -30,6 +30,8 @@ using WorkerDock.Application.Observability;
 using WorkerDock.Infrastructure.Observability;
 using WorkerDock.Application.Alerts;
 using WorkerDock.Infrastructure.Alerts;
+using WorkerDock.Application.Retention;
+using WorkerDock.Infrastructure.Retention;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWorkerDockAccess();
@@ -174,6 +176,16 @@ builder.Services.TryAddSingleton<IAlertDeliveryStore>(provider =>
     return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
         ? new SqlAlertDeliveryStore(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableAlertDeliveryStore();
 });
+builder.Services.TryAddSingleton<IRetentionService>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    var environment = provider.GetRequiredService<IHostEnvironment>();
+    if (config["Tenant:Adapter"] == "Memory")
+        return environment.IsDevelopment() ? new InMemoryRetentionService() : new UnavailableRetentionService();
+    return Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlRetentionService(new(config["Tenant:ConnectionString"]!, id), config["Retention:ArchiveRoot"])
+        : new UnavailableRetentionService();
+});
 var app = builder.Build();
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
@@ -197,6 +209,7 @@ app.MapJobLifecycle();
 app.MapMonitoring();
 app.MapExecutionEventEndpoints();
 app.MapAlerts();
+app.MapRetention();
 app.MapHealthEndpoints();
 app.UseDefaultFiles();
 app.UseStaticFiles();
@@ -329,6 +342,13 @@ internal sealed class UnavailableExecutionEventQueries : IExecutionEventQueries
 {
     public ValueTask<ExecutionEventPage> ReadAsync(Guid executionId, string? cursor, int limit, CancellationToken ct) =>
         ValueTask.FromException<ExecutionEventPage>(new WorkerDockException("PersistenceUnavailable"));
+}
+internal sealed class UnavailableRetentionService : IRetentionService
+{
+    private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<int> RunBatchAsync(DateTimeOffset nowUtc, int maxRows, CancellationToken ct) => Unavailable<int>();
+    public ValueTask<RetentionPolicyEditorDto> GetPolicyAsync(CancellationToken ct) => Unavailable<RetentionPolicyEditorDto>();
+    public ValueTask<CommandReceipt> SavePolicyAsync(RetentionPolicy policy, byte[] expectedVersion, ActorContext actor, CancellationToken ct) => Unavailable<CommandReceipt>();
 }
 internal sealed class UnavailableTemplateCatalog : ITemplateCatalog
 {

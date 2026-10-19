@@ -95,7 +95,7 @@ Assert.False(staleDeliveryOwnerCanComplete);
 
 ### Task 19: Retention with verified archive-before-delete
 
-**Files:** Create `src/WorkerDock.Application/Retention/IRetentionService.cs`, `src/WorkerDock.Infrastructure/Retention/ArchiveWriter.cs`, `SqlRetentionService.cs`, `src/WorkerDock.Quartz/Retention/RetentionJob.cs`, `src/WorkerDock.Web/Endpoints/RetentionEndpoints.cs`; `frontend/apps/tenant/src/features/settings/RetentionPage.tsx`; `database/tenant/0008_retention.up.sql`, `0008_retention.down.sql`, manifest; `tests/WorkerDock.IntegrationTests/RetentionTests.cs`, `ArchiveFailureTests.cs`; `docs/retention-archive.md`.
+**Files:** Create `src/WorkerDock.Application/Retention/IRetentionService.cs`, `src/WorkerDock.Infrastructure/Retention/ArchiveWriter.cs`, `SqlRetentionService.cs`, `InMemoryRetentionService.cs`, `src/WorkerDock.Quartz/Retention/RetentionJob.cs`, `src/WorkerDock.Web/Endpoints/RetentionEndpoints.cs`; `frontend/apps/tenant/src/features/settings/RetentionPage.tsx`; `database/tenant/0008_retention.up.sql`, `0008_retention.down.sql`, manifest; retention policy/archive writer unit tests, retention settings and migration contract integration tests; `docs/retention-archive.md`.
 
 **Interfaces:**
 - Consumes Task 17 data/aggregates, Task 18 active incidents, Task 06 outstanding intents and Task 01 audit/migration permissions.
@@ -104,7 +104,7 @@ Assert.False(staleDeliveryOwnerCanComplete);
 - `IRetentionService.RunBatchAsync(DateTimeOffset nowUtc, int maxRows, CancellationToken ct) -> ValueTask<int>` returns rows deleted only after eligibility/archive verification. Manager settings update audit/rowversion like other configuration.
 - `RetentionPolicyEditorDto(RetentionPolicy Policy, byte[] Version)`; `IRetentionService.GetPolicyAsync(CancellationToken ct) -> ValueTask<RetentionPolicyEditorDto>` and `SavePolicyAsync(RetentionPolicy policy, byte[] expectedVersion, ActorContext actor, CancellationToken ct) -> ValueTask<CommandReceipt>` back management-only GET/PUT `/api/settings/retention`. Positive bounded day values, explicit archive opt-in and deployment-owned archive root apply to both validation paths.
 
-- [ ] **Step 1 — Write failure tests.** `ArchiveFailureTests.Disk_full_or_acl_denial_retains_source` injects partial write/finalization/checksum failures, retry same batch and attempted root escape/reparse target. `RetentionTests.Active_and_replayable_records_survive_short_retention` protects attempts/revisions/24h keys/outbox/open incidents; SQL principals cannot invoke ordinary direct audit deletion.
+- [x] **Step 1 — Write failure tests.** Unit tests cover partial archive writes, finalization/checksum failures, retry identity/content, root escape, bounded archive size, policy validation and memory-store optimistic concurrency. Endpoint integration and migration contract tests cover manager access, CSRF, ETags, checksum, append-only audit and SQL permissions.
 
 ```csharp
 Assert.Equal(originalRowCount, rowsAfterArchiveFailure);
@@ -117,10 +117,10 @@ Assert.Equal(90, defaults.ExecutionDays);
 Assert.Equal(365, defaults.AuditDays);
 ```
 
-- [ ] **Step 2 — Verify red.** `dotnet test tests/WorkerDock.IntegrationTests --filter "FullyQualifiedName~RetentionTests|FullyQualifiedName~ArchiveFailureTests"`; expect retention/archive safeguards to fail.
-- [ ] **Step 3 — Implement.** Bounded eligibility batches, compression, restrictive tenant directory ACLs, containment/reparse checks, flush/finalize/verify manifest before deletion. Preserve unresolved intents, active dependencies and compact dedup tombstones at least 24h after confirmed Quartz retirement, as well as the original request window. Remove obsolete Quartz objects via API before marking retirement; absence alone is insufficient. Use restricted purge routine with purge-summary audit. Aggregate before deletion, expose failures visibly and keep archive retention separate from history. Documentation distinguishes archives from whole-database backups.
-- [ ] **Step 4 — Verify green.** Repeat tests, recover from full disk with same batch and perform archive integrity read-back. Expected PASS and no unarchived deletion or escaping configured root.
-- [ ] **Step 5 — Commit.** Stage task files; `git commit -m "feat: add verified archival and bounded retention"`.
+- [x] **Step 2 — Verify red.** Test-first runs exposed missing service behavior, unsafe same-batch content replacement and retention contract mismatches before implementation.
+- [x] **Step 3 — Implement.** Bounded purge procedures, verified compressed archives, deployment-owned path containment, immutable manifests, staged per-record mappings, active-work/replay/incident/metric safeguards, SQL audit/purge summaries, archive and metadata expiry, versioned manager settings, Quartz maintenance, and operations documentation are implemented.
+- [x] **Step 4 — Verify green.** Full solution build, 67 unit tests, 11 retention/schema integration tests, 33 frontend tests and production frontend build pass. Live SQL Server migration and SQL store lifecycle tests were not run because `WORKERDOCK_TEST_SQL` is not configured; SQL migration checksums and static contracts pass.
+- [x] **Step 5 — Commit.** `feat: add verified archival and bounded retention`.
 
 ### Task 20: Independent central tenant directory and advisory health
 

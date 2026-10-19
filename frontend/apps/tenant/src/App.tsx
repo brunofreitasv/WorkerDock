@@ -31,6 +31,7 @@ import { WorkersPage } from "./features/monitoring/WorkersPage";
 import { ExecutionDetails } from "./features/monitoring/ExecutionDetails";
 import { AuditPage } from "./features/monitoring/AuditPage";
 import { AlertRulesPage } from "./features/alerts/AlertRulesPage";
+import RetentionPage from "./features/settings/RetentionPage";
 const theme = createTheme({
   palette: {
     primary: { main: "#0b6c61", dark: "#064f47", light: "#dff2ed" },
@@ -253,8 +254,9 @@ export default function App() {
                       <Button variant={settingsTab === "vault" ? "contained" : "outlined"} onClick={() => setSettingsTab("vault")}>{t.vaultSettings}</Button>
                       <Button variant={settingsTab === "outbound" ? "contained" : "outlined"} onClick={() => setSettingsTab("outbound")}>{t.outboundSettings}</Button>
                       <Button variant={settingsTab === "profiles" ? "contained" : "outlined"} onClick={() => setSettingsTab("profiles")}>{t.profiles}</Button>
+                      <Button variant={settingsTab === "retention" ? "contained" : "outlined"} onClick={() => setSettingsTab("retention")}>Retention</Button>
                     </Stack>
-                    {settingsTab === "general" ? <SettingsForm t={t} /> : settingsTab === "vault" ? <VaultSettingsPage t={t} /> : settingsTab === "outbound" ? <OutboundPolicyPage t={t} /> : <ProfileEditor />}
+                    {settingsTab === "general" ? <SettingsForm t={t} /> : settingsTab === "vault" ? <VaultSettingsPage t={t} /> : settingsTab === "outbound" ? <OutboundPolicyPage t={t} /> : settingsTab === "profiles" ? <ProfileEditor /> : <RetentionPage />}
                   </>
                 ) : (
                   <Alert severity="error">{t.permission}</Alert>

@@ -20,6 +20,9 @@ using WorkerDock.Infrastructure.Alerts;
 using WorkerDock.Infrastructure.Secrets;
 using WorkerDock.Infrastructure.Settings;
 using WorkerDock.Quartz.Alerts;
+using WorkerDock.Application.Retention;
+using WorkerDock.Infrastructure.Retention;
+using WorkerDock.Quartz.Retention;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddHostedService<SchedulerService>();
@@ -43,13 +46,14 @@ internal sealed class SchedulerService(IConfiguration configuration) : Backgroun
         var alertSinks = new IAlertSink[] { new WebhookAlertSink(new SqlIntegrationSettings(options)) };
         var alertOwnerBootId = Guid.NewGuid();
         var alertEvaluator = new IncidentEvaluator(options);
+        var retention = new SqlRetentionService(options, configuration["Retention:ArchiveRoot"]);
         var evaluator = new QuartzScheduleEvaluator();
         var scheduleStore = new SqlScheduleCommands(options, evaluator, TimeProvider.System);
         var occurrenceWriter = new OccurrenceWriter(options, evaluator);
         DispatchReconciler? reconciler = null;
         var attempts = new SqlAttemptStore(options);
         var control = await topology.CreateScheduleAsync(node, new MaintenanceFactory(() => reconciler, attempts, occurrenceWriter, TimeProvider.System,
-            alertDeliveries, alertSinks, alertVault, alertOwnerBootId, alertEvaluator), stoppingToken);
+            alertDeliveries, alertSinks, alertVault, alertOwnerBootId, alertEvaluator, retention), stoppingToken);
         var publisher = new QuartzPublisher(handle, typeof(ExecuteTemplateJob));
         var scheduleProjection = new ScheduleProjection(control, scheduleStore, evaluator);
         var alertProjection = new AlertDeliveryProjection(control);
@@ -59,6 +63,7 @@ internal sealed class SchedulerService(IConfiguration configuration) : Backgroun
             await ProjectionJob.RegisterAsync(control, stoppingToken);
             await RecoveryReviewJob.RegisterAsync(control, stoppingToken);
             await AlertEvaluationJob.RegisterAsync(control, stoppingToken);
+            await RetentionJob.RegisterAsync(control, stoppingToken);
             await control.Start(stoppingToken);
             await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
         }
@@ -73,7 +78,7 @@ internal sealed class SchedulerService(IConfiguration configuration) : Backgroun
 
     private sealed class MaintenanceFactory(Func<DispatchReconciler?> reconciler, IAttemptStore attempts, IOccurrenceWriter occurrences, TimeProvider clock,
         IAlertDeliveryStore alertDeliveries, IReadOnlyCollection<IAlertSink> alertSinks, ISecretVault secrets, Guid alertOwnerBootId,
-        IAlertEvaluator alertEvaluator) : IJobFactory
+        IAlertEvaluator alertEvaluator, IRetentionService retention) : IJobFactory
     {
         public ValueTask<JobScope> CreateJob(TriggerFiredBundle bundle, IScheduler scheduler, CancellationToken cancellationToken = default)
         {
@@ -82,6 +87,7 @@ internal sealed class SchedulerService(IConfiguration configuration) : Backgroun
                 : bundle.JobDetail.JobType == typeof(OccurrenceDispatchJob) ? new OccurrenceDispatchJob(occurrences,clock)
                 : bundle.JobDetail.JobType == typeof(AlertDeliveryJob) ? new AlertDeliveryJob(alertDeliveries, alertSinks, secrets, alertOwnerBootId)
                 : bundle.JobDetail.JobType == typeof(AlertEvaluationJob) ? new AlertEvaluationJob(alertEvaluator, clock)
+                : bundle.JobDetail.JobType == typeof(RetentionJob) ? new RetentionJob(retention, clock)
                 : throw new SchedulerException("UnsupportedControlJob");
             return ValueTask.FromResult(new JobScope(job));
         }
