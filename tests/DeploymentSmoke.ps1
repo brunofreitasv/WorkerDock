@@ -15,6 +15,12 @@ foreach ($script in Get-ChildItem -LiteralPath $deployRoot -Filter '*.ps1' -File
     [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$errors) | Out-Null
     if ($errors.Count) { throw "PowerShell parse failed for $($script.Name): $($errors[0].Message)" }
 }
+$workloadScript = Join-Path $PSScriptRoot 'load/Invoke-Workload.ps1'
+if (-not (Test-Path -LiteralPath $workloadScript -PathType Leaf)) { throw 'Workload validation runner is missing.' }
+$tokens = $null
+$errors = $null
+[System.Management.Automation.Language.Parser]::ParseFile($workloadScript, [ref]$tokens, [ref]$errors) | Out-Null
+if ($errors.Count) { throw "PowerShell parse failed for workload runner: $($errors[0].Message)" }
 
 $iisSiteFunction = (Get-Command New-HttpsIisSite).ScriptBlock.ToString()
 if ($iisSiteFunction -notmatch '-PropertyName\s+sslFlags\s+-Value\s+1') {
