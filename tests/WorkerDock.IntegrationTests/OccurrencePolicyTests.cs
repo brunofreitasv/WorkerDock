@@ -26,6 +26,24 @@ public sealed class OccurrencePolicyTests
         Assert.Equal(due[2], boundedCatchUp[0]);
     }
 
+    [Fact]
+    public void Recovery_classifies_each_due_occurrence_and_bounds_catch_up_with_recent_work()
+    {
+        var activation = new DateTimeOffset(2026, 10, 18, 12, 0, 0, TimeSpan.Zero);
+        var due = Enumerable.Range(1, 5).Select(i => activation.AddMinutes(i)).ToArray();
+        var through = activation.AddMinutes(5).AddSeconds(30);
+
+        var skip = MissedWorkPolicy.Default.SelectOccurrences(due, activation, through);
+        var coalesce = new MissedWorkPolicy("Coalesce", TimeSpan.FromSeconds(60), 0, TimeSpan.Zero)
+            .SelectOccurrences(due, activation, through);
+        var catchUp = new MissedWorkPolicy("CatchUp", TimeSpan.FromSeconds(60), 3, TimeSpan.FromMinutes(10))
+            .SelectOccurrences(due, activation, through);
+
+        Assert.Equal([due[4]], skip);
+        Assert.Equal([due[3], due[4]], coalesce);
+        Assert.Equal([due[0], due[1], due[4]], catchUp);
+    }
+
     [Theory]
     [InlineData("CatchUp", 0, 1)]
     [InlineData("CatchUp", 3, 0)]

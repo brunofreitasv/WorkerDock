@@ -10,5 +10,7 @@
 - [x] Added bounded timezone-rule drift scanning that revises future projection through the outbox without rewriting accepted work.
 - [x] Added SQL scenarios for manual run during pause, concurrent ETag edits, profile revision pinning, archive with running work, and held-delivery release on enable.
 - [x] Delayed-initial and stale-removed Quartz projection cases pass without SQL.
-- [ ] Nine SQL-backed lifecycle/recovery scenarios and real migration apply/rollback: `SQL_TEST_BLOCKED` because `WORKERDOCK_TEST_SQL` is unset.
-- [x] Release build and `git diff --check` passed; commit pending.
+- [ ] SQL-backed lifecycle/recovery scenarios and real migration apply/rollback: `SQL_TEST_BLOCKED` because `WORKERDOCK_TEST_SQL` is unset.
+- [x] Review follow-up regressions added for rowversion pause/resume, paused edit preservation, persisted no-op Enable, stale occurrence horizon, >100 timezone schedules, and per-occurrence recovery; policy RED confirmed before fix.
+- [x] Release build passed with 0 warnings/errors; unit tests passed 33/33; 6 policy and 3 migration checksum tests passed; `git diff --check` passed.
+- [ ] Thirteen SQL lifecycle tests and live migration apply/rollback remain `SQL_TEST_BLOCKED` because `WORKERDOCK_TEST_SQL` is unset; commit pending.

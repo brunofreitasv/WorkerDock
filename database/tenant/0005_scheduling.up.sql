@@ -55,5 +55,14 @@ CREATE TABLE [workerdock].ScheduleRecoveryEvents
 GO
 CREATE INDEX IX_ScheduleRecoveryEvents_Schedule ON [workerdock].ScheduleRecoveryEvents(ScheduleId,ScheduleRevision,ThroughUtc);
 GO
+CREATE TABLE [workerdock].ScheduleRuleScanState
+(
+    ScanId tinyint NOT NULL CONSTRAINT PK_ScheduleRuleScanState PRIMARY KEY,
+    LastScheduleId uniqueidentifier NULL,
+    CONSTRAINT CK_ScheduleRuleScanState_Singleton CHECK(ScanId=1)
+);
+INSERT [workerdock].ScheduleRuleScanState(ScanId,LastScheduleId) VALUES(1,NULL);
+GO
 GRANT SELECT,INSERT,UPDATE,DELETE ON [workerdock].Schedules TO WorkerDockRuntime;
 GRANT SELECT,INSERT ON [workerdock].ScheduleRecoveryEvents TO WorkerDockRuntime;
+GRANT SELECT,UPDATE ON [workerdock].ScheduleRuleScanState TO WorkerDockRuntime;

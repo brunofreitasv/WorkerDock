@@ -36,6 +36,7 @@ public sealed class OccurrenceWriter(TenantDatabaseOptions options, IScheduleEva
                     row.IsDBNull(4) ? null : Utc(row.GetDateTime(4)), Utc(row.GetDateTime(5)));
                 var cursor = Utc(row.GetDateTime(6)); var policy = new MissedWorkPolicy(row.GetString(7), TimeSpan.FromMilliseconds(row.GetInt64(8)), row.GetInt32(9), TimeSpan.FromMilliseconds(row.GetInt64(10)));
                 await row.CloseAsync(); policy.Validate();
+                if (throughUtc.UtcDateTime <= cursor) return 0;
                 if (evaluator.Validate(definition).Count != 0) throw new WorkerDockException("InvalidSchedule");
                 var raw = evaluator.Next(definition, cursor, EnumerationLimit);
                 var due = raw.Where(x => x <= throughUtc).ToArray();
@@ -45,34 +46,18 @@ public sealed class OccurrenceWriter(TenantDatabaseOptions options, IScheduleEva
                     return 0;
                 }
                 var bounded = raw.Count == EnumerationLimit && raw[^1] <= throughUtc;
-                var lateness = throughUtc - due[^1];
-                var late = lateness > policy.LatenessTolerance;
-                IReadOnlyList<DateTimeOffset> selected;
+                var late = due.Any(value => throughUtc - value > policy.LatenessTolerance);
+                IReadOnlyList<DateTimeOffset> selected = policy.SelectOccurrences(due, definition.ActivatedUtc, throughUtc);
                 DateTime cursorAfter;
-                bool exactCount = !bounded;
-                if (!late)
+                bool exactCount = !bounded && (policy.Mode != "CatchUp" || due.Count(value => throughUtc - value > policy.LatenessTolerance) <= policy.CatchUpCount);
+                if (policy.Mode == "Coalesce" && bounded)
                 {
-                    selected = due;
-                    cursorAfter = bounded ? due[^1].UtcDateTime : throughUtc.UtcDateTime;
-                }
-                else if (policy.Mode == "Skip")
-                {
-                    selected = Array.Empty<DateTimeOffset>(); cursorAfter = throughUtc.UtcDateTime;
-                }
-                else if (policy.Mode == "Coalesce" && bounded)
-                {
-                    // Continue through another bounded page; only the final page may be coalesced.
-                    selected = Array.Empty<DateTimeOffset>(); cursorAfter = due[^1].UtcDateTime; exactCount = false;
-                }
-                else if (policy.Mode == "Coalesce")
-                {
-                    selected = [due[^1]]; cursorAfter = throughUtc.UtcDateTime;
+                    selected = selected.Where(value => throughUtc - value <= policy.LatenessTolerance).ToArray();
+                    cursorAfter = due[^1].UtcDateTime; exactCount = false;
                 }
                 else
                 {
-                    var eligible = due.Where(x => throughUtc - x <= policy.CatchUpAge).ToArray();
-                    selected = eligible.Take(policy.CatchUpCount).ToArray(); cursorAfter = throughUtc.UtcDateTime;
-                    if (eligible.Length > policy.CatchUpCount || bounded) exactCount = false;
+                    cursorAfter = bounded ? due[^1].UtcDateTime : throughUtc.UtcDateTime;
                 }
                 var created = 0;
                 foreach (var scheduledUtc in selected)
@@ -87,7 +72,7 @@ public sealed class OccurrenceWriter(TenantDatabaseOptions options, IScheduleEva
                 if (late)
                 {
                     await using var recovery = Command(connection, transaction, "INSERT [workerdock].ScheduleRecoveryEvents(RecoveryEventId,ScheduleId,ScheduleRevision,FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount) VALUES(NEWID(),@schedule,@revision,@from,@through,@policy,@created,@exact)");
-                    Add(recovery,"@schedule",SqlDbType.UniqueIdentifier,scheduleId); Add(recovery,"@revision",SqlDbType.BigInt,scheduleRevision); Add(recovery,"@from",SqlDbType.DateTime2,cursor.UtcDateTime); Add(recovery,"@through",SqlDbType.DateTime2,throughUtc.UtcDateTime); Add(recovery,"@policy",SqlDbType.NVarChar,policy.Mode,16); Add(recovery,"@created",SqlDbType.Int,created); Add(recovery,"@exact",SqlDbType.BigInt,exactCount?due.Length:(object)DBNull.Value); await recovery.ExecuteNonQueryAsync(token);
+                    Add(recovery,"@schedule",SqlDbType.UniqueIdentifier,scheduleId); Add(recovery,"@revision",SqlDbType.BigInt,scheduleRevision); Add(recovery,"@from",SqlDbType.DateTime2,cursor.UtcDateTime); Add(recovery,"@through",SqlDbType.DateTime2,throughUtc.UtcDateTime); Add(recovery,"@policy",SqlDbType.NVarChar,policy.Mode,16); Add(recovery,"@created",SqlDbType.Int,created); Add(recovery,"@exact",SqlDbType.BigInt,exactCount?due.Count(value => throughUtc - value > policy.LatenessTolerance):(object)DBNull.Value); await recovery.ExecuteNonQueryAsync(token);
                 }
                 await AdvanceCursorAsync(connection, transaction, scheduleId, scheduleRevision, cursorAfter, token);
                 await JobAdmission.AdmitAsync(connection, transaction, jobId, token);

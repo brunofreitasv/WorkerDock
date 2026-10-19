@@ -20,16 +20,19 @@ public sealed record MissedWorkPolicy(string Mode, TimeSpan LatenessTolerance, i
             .Distinct().Order().ToArray();
         if (due.Length == 0) return Array.Empty<DateTimeOffset>();
 
-        var lateness = throughUtc - due[^1];
-        if (lateness <= LatenessTolerance) return due;
-
-        return Mode switch
+        var timelyBoundary = throughUtc - LatenessTolerance;
+        var missed = due.Where(value => value < timelyBoundary).ToArray();
+        var timely = due.Where(value => value >= timelyBoundary).ToArray();
+        var selectedMissed = Mode switch
         {
             "Skip" => Array.Empty<DateTimeOffset>(),
-            "Coalesce" => [due[^1]],
-            "CatchUp" => due.Where(value => throughUtc - value <= CatchUpAge).Take(CatchUpCount).ToArray(),
+            "Coalesce" => missed.Length == 0 ? Array.Empty<DateTimeOffset>() : [missed[^1]],
+            "CatchUp" => missed.Where(value => throughUtc - value <= CatchUpAge)
+                .Take(Math.Max(0, CatchUpCount - timely.Length)).ToArray(),
             _ => throw new InvalidOperationException("Unsupported missed-work mode.")
         };
+        var selectedTimely = Mode == "CatchUp" ? timely.TakeLast(CatchUpCount).ToArray() : timely;
+        return selectedMissed.Concat(selectedTimely).Distinct().Order().ToArray();
     }
 
     public void Validate()

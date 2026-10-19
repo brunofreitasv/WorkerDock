@@ -36,11 +36,11 @@ public sealed class SqlJobLifecycle(TenantDatabaseOptions options, ITemplateCata
                 await row.CloseAsync();
                 if (!version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
                 if (archived && action != "Enable") throw new WorkerDockException("JobArchived");
-                if (action == "Enable" && enabled) return new CommandReceipt(Guid.NewGuid(), jobId, "Applied");
+                if (action == "Enable" && enabled) return await NoOpReceiptAsync(connection, transaction, jobId, action, token);
                 if (action is "Enable" or "EnableManual")
                 {
                     await ValidateForEnableAsync(connection, transaction, current, token, action == "EnableManual");
-                    if (action == "EnableManual" && enabled) return new CommandReceipt(Guid.NewGuid(), jobId, "Applied");
+                    if (action == "EnableManual" && enabled) return await NoOpReceiptAsync(connection, transaction, jobId, action, token);
                 }
                 var now = clock.GetUtcNow().UtcDateTime;
                 switch (action)
@@ -64,6 +64,12 @@ public sealed class SqlJobLifecycle(TenantDatabaseOptions options, ITemplateCata
                         { Add(update, "@job", SqlDbType.UniqueIdentifier, jobId); Add(update, "@version", SqlDbType.Binary, version, 8); Add(update, "@now", SqlDbType.DateTime2, now); if (await update.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion"); }
                         await RemoveScheduleAsync(connection, transaction, jobId, token);
                         break;
+                }
+                if (action is "PauseSchedule" or "ResumeSchedule")
+                {
+                    await using var etag = Command(connection, transaction, "UPDATE [workerdock].Jobs SET CurrentRevision=CurrentRevision WHERE JobId=@job AND Version=@version");
+                    Add(etag, "@job", SqlDbType.UniqueIdentifier, jobId); Add(etag, "@version", SqlDbType.Binary, version, 8);
+                    if (await etag.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion");
                 }
                 await using (var bump = Command(connection, transaction, "UPDATE [workerdock].Jobs SET CurrentRevision=CurrentRevision WHERE JobId=@job AND Version<>@version"))
                 { Add(bump,"@job",SqlDbType.UniqueIdentifier,jobId); Add(bump,"@version",SqlDbType.Binary,version,8); if(await bump.ExecuteNonQueryAsync(token)!=1)throw new WorkerDockException("StaleVersion"); }
@@ -120,6 +126,14 @@ public sealed class SqlJobLifecycle(TenantDatabaseOptions options, ITemplateCata
             var policy = new MissedWorkPolicy(scheduleRow.GetString(5), TimeSpan.FromMilliseconds(scheduleRow.GetInt64(6)), scheduleRow.GetInt32(7), TimeSpan.FromMilliseconds(scheduleRow.GetInt64(8))); policy.Validate();
             if (evaluator.Validate(definition).Count != 0) throw new WorkerDockException("ValidationFailed", "schedule");
         }
+    }
+    private static async ValueTask<CommandReceipt> NoOpReceiptAsync(DbConnection c, DbTransaction t, Guid jobId, string action, CancellationToken ct)
+    {
+        var receipt = new CommandReceipt(Guid.NewGuid(), jobId, "Applied");
+        await using var command = Command(c, t, "INSERT [workerdock].Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc) VALUES(@id,@target,@kind,@state,SYSUTCDATETIME())");
+        Add(command, "@id", SqlDbType.UniqueIdentifier, receipt.CommandId); Add(command, "@target", SqlDbType.UniqueIdentifier, jobId); Add(command, "@kind", SqlDbType.NVarChar, action, 40); Add(command, "@state", SqlDbType.NVarChar, receipt.State, 20);
+        await command.ExecuteNonQueryAsync(ct);
+        return receipt;
     }
     private static async ValueTask UpdateSchedulePauseAsync(DbConnection c, DbTransaction t, Guid job, bool pause, DateTime now, CancellationToken ct)
     {

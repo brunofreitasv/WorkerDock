@@ -50,11 +50,52 @@ public sealed class JobLifecycleTests
 
         await lifecycle.ApplyAsync(jobId, "PauseSchedule", version, Actor, default);
         var paused = await VersionAsync(database, jobId);
+        Assert.NotEqual(version, paused);
         await lifecycle.ApplyAsync(jobId, "ResumeSchedule", paused, Actor, default);
+        Assert.NotEqual(paused, await VersionAsync(database, jobId));
 
         Assert.Equal(0, await database.ScalarAsync($"SELECT Paused FROM [workerdock].Schedules WHERE JobId='{jobId}'"));
         Assert.Equal(3, await database.ScalarAsync($"SELECT Revision FROM [workerdock].Schedules WHERE JobId='{jobId}'"));
         Assert.Equal(2, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Outbox WHERE EntityId=(SELECT ScheduleId FROM [workerdock].Schedules WHERE JobId='{jobId}') AND EventType=N'ScheduleProjection'"));
+    }
+
+    [Trait("Store", "Sql")]
+    [Fact]
+    public async Task Repeated_enable_returns_a_persisted_command_receipt()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        var jobId = await SeedScheduledJobAsync(database, enabled: true);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        var lifecycle = new SqlJobLifecycle(options, null, new QuartzScheduleEvaluator(), TimeProvider.System);
+        var receipt = await lifecycle.ApplyAsync(jobId, "Enable", await VersionAsync(database, jobId), Actor, default);
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
+
+        Assert.Equal(receipt, await commands.GetCommandAsync(receipt.CommandId, default));
+    }
+
+    [Trait("Store", "Sql")]
+    [Fact]
+    public async Task Saving_an_edited_paused_schedule_keeps_it_paused()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        var jobId = await SeedScheduledJobAsync(database, enabled: false);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        var lifecycle = new SqlJobLifecycle(options, null, new QuartzScheduleEvaluator(), TimeProvider.System);
+        await lifecycle.ApplyAsync(jobId, "PauseSchedule", await VersionAsync(database, jobId), Actor, default);
+        var pausedAt = await ScalarStringAsync(database, $"SELECT CONVERT(nvarchar(33),PausedAtUtc,126) FROM [workerdock].Schedules WHERE JobId='{jobId}'");
+        var editor = new SqlScheduleCommands(options, new QuartzScheduleEvaluator(), TimeProvider.System);
+        var current = await editor.GetAsync(jobId, default);
+
+        await editor.SaveAsync(jobId, current.Definition with { Cron = "*/2 * * * *" }, current.Policy, current.Version, Actor, default);
+
+        Assert.Equal(1, await database.ScalarAsync($"SELECT Paused FROM [workerdock].Schedules WHERE JobId='{jobId}'"));
+        Assert.Equal(pausedAt, await ScalarStringAsync(database, $"SELECT CONVERT(nvarchar(33),PausedAtUtc,126) FROM [workerdock].Schedules WHERE JobId='{jobId}'"));
     }
 
     [Trait("Store", "Sql")]
@@ -84,6 +125,26 @@ public sealed class JobLifecycleTests
 
     [Trait("Store", "Sql")]
     [Fact]
+    public async Task Older_occurrence_horizon_does_not_move_cursor_back_or_duplicate_work()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        var jobId = await SeedScheduledJobAsync(database, enabled: true);
+        var scheduleId = await ScheduleIdAsync(database, jobId);
+        await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:00:00' WHERE ScheduleId='{scheduleId}'");
+        var writer = new OccurrenceWriter(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), new QuartzScheduleEvaluator());
+
+        Assert.Equal(2, await writer.MaterializeAsync(scheduleId, 1, new DateTimeOffset(2026, 10, 18, 0, 2, 0, TimeSpan.Zero), default));
+        Assert.Equal(0, await writer.MaterializeAsync(scheduleId, 1, new DateTimeOffset(2026, 10, 18, 0, 1, 0, TimeSpan.Zero), default));
+
+        Assert.Equal("2026-10-18T00:02:00.0000000", await ScalarStringAsync(database, $"SELECT CONVERT(nvarchar(33),CursorUtc,126) FROM [workerdock].Schedules WHERE ScheduleId='{scheduleId}'"));
+        Assert.Equal(2, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ScheduleId='{scheduleId}' AND TriggerKind=N'Scheduled'"));
+    }
+
+    [Trait("Store", "Sql")]
+    [Fact]
     public async Task Changed_timezone_rules_advance_revision_and_enqueue_future_projection()
     {
         await using var database = new SqlDatabaseFixture();
@@ -99,6 +160,22 @@ public sealed class JobLifecycleTests
         Assert.Equal(2, await database.ScalarAsync($"SELECT Revision FROM [workerdock].Schedules WHERE ScheduleId='{scheduleId}'"));
         Assert.Equal(new string('B', 64), await ScalarStringAsync(database, $"SELECT ZoneRulesFingerprint FROM [workerdock].Schedules WHERE ScheduleId='{scheduleId}'"));
         Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Outbox WHERE EntityId='{scheduleId}' AND EventType=N'ScheduleProjection' AND EntityRevision=2"));
+    }
+
+    [Trait("Store", "Sql")]
+    [Fact]
+    public async Task Timezone_reconciliation_rotates_past_the_first_hundred_schedules()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        for (var i = 0; i < 105; i++) await SeedScheduledJobAsync(database, enabled: false);
+        var store = new SqlScheduleCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), new QuartzScheduleEvaluator(), TimeProvider.System, new FixedRulesFingerprint(new string('B', 64)));
+
+        Assert.Equal(100, await store.ReconcileZoneRuleChangesAsync(default));
+        Assert.Equal(5, await store.ReconcileZoneRuleChangesAsync(default));
+        Assert.Equal(105, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Schedules WHERE ZoneRulesFingerprint=REPLICATE('B',64) AND Revision=2"));
     }
 
     [Trait("Store", "Sql")]
