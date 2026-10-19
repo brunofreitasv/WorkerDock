@@ -16,6 +16,8 @@ using WorkerDock.Runtime.Workers;
 using WorkerDock.Application.Workers;
 using WorkerDock.Infrastructure.Workers;
 using WorkerDock.Quartz.Capacity;
+using WorkerDock.Application.Observability;
+using WorkerDock.Infrastructure.Observability;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(90));
@@ -37,6 +39,7 @@ internal sealed class WorkerService(IConfiguration configuration) : BackgroundSe
         if (drainSeconds is < 1 or > 60) throw new WorkerDockException("WorkerConfigurationUnavailable");
         var boot = Guid.NewGuid().ToString("N");
         var database = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(configuration["Tenant:ConnectionString"]!, instanceId);
+        await using var bufferedEvents = new BufferedExecutionEvents(new SqlExecutionEvents(database));
         // Explicit installed descriptors only. Built-in packages are added here with their reviewed handler references.
         IReadOnlyList<TemplateDescriptor> installedDescriptors=[new WorkerDock.Templates.SqlServer.SqlTemplate().Descriptor, new WorkerDock.Templates.Http.HttpTemplate(new HttpClient(new HttpClientHandler())).Descriptor];
         var registeredDigest=TemplateMetadata.AggregateDigest(installedDescriptors);
@@ -46,7 +49,7 @@ internal sealed class WorkerService(IConfiguration configuration) : BackgroundSe
         var store = new SqlAttemptStore(database);
         var supervisor = new ExecutionSupervisor(new(configuration["Executor:Path"]!,
             configuration.GetSection("Executor:Arguments").Get<string[]>() ?? [],
-            installedDescriptors.ToDictionary(x=>x.Id+"@"+x.Version,x=>x.MetadataDigest,StringComparer.Ordinal)));
+            installedDescriptors.ToDictionary(x=>x.Id+"@"+x.Version,x=>x.MetadataDigest,StringComparer.Ordinal)), bufferedEvents);
         var monitor = new OwnershipMonitor(store, store, supervisor, TimeProvider.System);
         await using var topology = new QuartzTopology(new(configuration["Tenant:ConnectionString"]!, instanceId));
         var initial = await capacity.TransactAsync((s, _) => s.Snapshot, stoppingToken);
@@ -80,6 +83,9 @@ internal sealed class WorkerService(IConfiguration configuration) : BackgroundSe
             {
                 try { await coordinator.ApplyPendingAsync(stoppingToken); }
                 catch (WorkerDockException) { await execution.Standby(stoppingToken); }
+                try { await MetricAggregation.AggregateAsync(database, DateTimeOffset.UtcNow, 100, stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+                catch { /* Aggregation is optional and cannot change execution outcomes. */ }
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }

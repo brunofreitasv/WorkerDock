@@ -35,9 +35,10 @@ public sealed class SecretBoundaryTests
         var emitted = new List<string>();
         var log = new SafeExecutionLog(emitted.Add);
         await log.WriteAsync("TemplateCompleted",new Dictionary<string,string> { ["outcome"]="Success", ["durationMs"]="12" },default);
-        await Assert.ThrowsAsync<InvalidOperationException>(async () => await log.WriteAsync("TemplateFailed",new Dictionary<string,string> { ["message"]="SECRET_SENTINEL" },default));
-        await Assert.ThrowsAsync<InvalidOperationException>(async () => await log.WriteAsync("TemplateFailed",new Dictionary<string,string> { ["safeCode"]="SECRET_SENTINEL" },default));
-        Assert.Single(emitted);
+        await log.WriteAsync("TemplateFailed",new Dictionary<string,string> { ["message"]="SECRET_SENTINEL" },default);
+        await log.WriteAsync("TemplateFailed",new Dictionary<string,string> { ["safeCode"]="SECRET_SENTINEL" },default);
+        Assert.Equal(2, log.DroppedCount);
+        Assert.Equal(2, emitted.Count); // one success record plus one aggregate drop marker
         Assert.DoesNotContain("SECRET_SENTINEL",string.Join("",emitted));
     }
     [Fact]

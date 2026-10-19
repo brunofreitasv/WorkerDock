@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text;
 using WorkerDock.Application.Execution;
+using WorkerDock.Application.Observability;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Runtime.Ipc;
 namespace WorkerDock.Runtime.Processes;
@@ -22,12 +23,17 @@ public sealed class ExecutionSupervisor : IExecutionSupervisor
 {
     private readonly ExecutionSupervisorOptions options;
     private readonly Func<Process, ContainedProcess> contain;
-    public ExecutionSupervisor(ExecutionSupervisorOptions options) : this(options, process => new ContainedProcess(process)) { }
+    private readonly IExecutionEvents events;
+    public ExecutionSupervisor(ExecutionSupervisorOptions options) : this(options, NullExecutionEvents.Instance, process => new ContainedProcess(process)) { }
+    public ExecutionSupervisor(ExecutionSupervisorOptions options, IExecutionEvents events) : this(options, events, process => new ContainedProcess(process)) { }
     internal ExecutionSupervisor(ExecutionSupervisorOptions options, Func<Process, ContainedProcess> contain)
+        : this(options, NullExecutionEvents.Instance, contain) { }
+    internal ExecutionSupervisor(ExecutionSupervisorOptions options, IExecutionEvents events, Func<Process, ContainedProcess> contain)
     {
         if (options.StartupTimeout <= TimeSpan.Zero || options.StartupTimeout > TimeSpan.FromMinutes(1)) throw new ArgumentOutOfRangeException(nameof(options));
         this.options = options with { Arguments = options.Arguments.ToArray(), MetadataDigests = new Dictionary<string, string>(options.MetadataDigests, StringComparer.Ordinal) };
         this.contain = contain;
+        this.events = events;
     }
     public async ValueTask<IExecutionChild> StartAsync(Guid attemptId, long generation, ExecutionDescriptor descriptor, CancellationToken ct)
     {
@@ -77,7 +83,7 @@ public sealed class ExecutionSupervisor : IExecutionSupervisor
             // This frame is the sole permission to enter the installed handler composition root.
             permissionAttempted = true;
             await ExecutionProtocol.WriteAsync(pipe, request, startup.Token);
-            return new ChildHandle(process, containment, pipe, stdout, stderr);
+            return new ChildHandle(process, containment, pipe, stdout, stderr, events, descriptor.ExecutionId, attemptId);
         }
         catch
         {
@@ -92,6 +98,11 @@ public sealed class ExecutionSupervisor : IExecutionSupervisor
             process?.Dispose();
             throw new ExecutionProcessException("ExecutorStartupFailed", !permissionAttempted);
         }
+    }
+    private sealed class NullExecutionEvents : IExecutionEvents
+    {
+        public static readonly NullExecutionEvents Instance = new();
+        public ValueTask AppendAsync(IReadOnlyList<ExecutionEvent> events, CancellationToken ct) => ValueTask.CompletedTask;
     }
     private static async Task DiscardAsync(Stream stream)
     {

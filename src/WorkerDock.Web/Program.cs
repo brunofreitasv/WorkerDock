@@ -26,6 +26,8 @@ using WorkerDock.Application.Monitoring;
 using WorkerDock.Infrastructure.Monitoring;
 using WorkerDock.Contracts.Secrets;
 using WorkerDock.Infrastructure.Secrets;
+using WorkerDock.Application.Observability;
+using WorkerDock.Infrastructure.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWorkerDockAccess();
@@ -138,6 +140,13 @@ builder.Services.TryAddSingleton<IMonitoringQueries>(provider =>
         return new SqlMonitoringQueries(new(config["Tenant:ConnectionString"]!, id), clock);
     return new UnavailableMonitoringQueries(Guid.TryParse(config["Tenant:InstanceId"], out var instanceId) ? instanceId : Guid.Empty, clock);
 });
+builder.Services.TryAddSingleton<IExecutionEventQueries>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    return Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"]) && config["Tenant:Adapter"] != "Memory"
+        ? new SqlExecutionEventQueries(new(config["Tenant:ConnectionString"]!, id))
+        : new UnavailableExecutionEventQueries();
+});
 var app = builder.Build();
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
@@ -159,6 +168,7 @@ app.MapIntegrationSettings();
 app.MapSchedules();
 app.MapJobLifecycle();
 app.MapMonitoring();
+app.MapExecutionEventEndpoints();
 app.MapHealthEndpoints();
 app.UseDefaultFiles();
 app.UseStaticFiles();
@@ -262,6 +272,11 @@ internal sealed class UnavailableMonitoringQueries(Guid instanceId, TimeProvider
     public ValueTask<Page<AuditSummaryDto>> AuditAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<AuditSummaryDto>>();
     public ValueTask<IReadOnlyList<WorkerSummaryDto>> WorkersAsync(CancellationToken ct) => Unavailable<IReadOnlyList<WorkerSummaryDto>>();
     public ValueTask<TenantHealthDto> HealthAsync(CancellationToken ct) => ValueTask.FromResult(new TenantHealthDto(instanceId, "Unavailable", new Dictionary<string,string> { ["web"] = "Healthy", ["database"] = "Unavailable" }, clock.GetUtcNow()));
+}
+internal sealed class UnavailableExecutionEventQueries : IExecutionEventQueries
+{
+    public ValueTask<ExecutionEventPage> ReadAsync(Guid executionId, string? cursor, int limit, CancellationToken ct) =>
+        ValueTask.FromException<ExecutionEventPage>(new WorkerDockException("PersistenceUnavailable"));
 }
 internal sealed class UnavailableTemplateCatalog : ITemplateCatalog
 {

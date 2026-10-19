@@ -5,6 +5,7 @@ using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Monitoring;
 using WorkerDock.Infrastructure.Persistence;
+using WorkerDock.Infrastructure.Observability;
 
 namespace WorkerDock.Infrastructure.Monitoring;
 
@@ -130,7 +131,7 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         Add(command, "@search", SqlDbType.NVarChar, filter.Search is null ? DBNull.Value : "%" + filter.Search + "%", 204); Add(command, "@plainSearch", SqlDbType.NVarChar, (object?)filter.Search ?? DBNull.Value, 100);
         Add(command, "@cursorTime", SqlDbType.DateTime2, cursor is null ? DBNull.Value : cursor.Value.Time.UtcDateTime); Add(command, "@cursorId", SqlDbType.UniqueIdentifier, cursor is null ? DBNull.Value : cursor.Value.Id);
         var items = new List<AuditSummaryDto>();
-        await using (var reader = await command.ExecuteReaderAsync(ct)) while (await reader.ReadAsync(ct)) items.Add(new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetGuid(4), Utc(reader.GetDateTime(5))));
+        await using (var reader = await command.ExecuteReaderAsync(ct)) while (await reader.ReadAsync(ct)) items.Add(AuditEventProjection.Project(new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetGuid(4), Utc(reader.GetDateTime(5)))));
         var hasMore = items.Count > page.Limit; if (hasMore) items.RemoveAt(items.Count - 1);
         return new(items, hasMore ? EncodeCursor(items[^1].OccurredAtUtc, items[^1].EventId) : null);
     }
@@ -151,7 +152,11 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
             if (!rows.TryGetValue(id, out var row)) rows[id] = row = new(id, reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3), reader.GetInt64(4), Utc(reader.GetDateTime(5)), reader.GetBoolean(6));
             if (!reader.IsDBNull(7)) row.Capabilities.Add(reader.GetString(7) + "@" + reader.GetString(8));
         }
-        return rows.Values.Select(x => new WorkerSummaryDto(x.Id, x.State, x.Ceiling, x.LiveLimit, x.Revision, x.Heartbeat, x.Recovered, x.Capabilities)).ToArray();
+        return rows.Values.Select(x =>
+        {
+            TelemetryRegistration.RecordHeartbeatAge(clock.GetUtcNow() - x.Heartbeat);
+            return new WorkerSummaryDto(x.Id, x.State, x.Ceiling, x.LiveLimit, x.Revision, x.Heartbeat, x.Recovered, x.Capabilities);
+        }).ToArray();
     }
 
     public async ValueTask<TenantHealthDto> HealthAsync(CancellationToken ct)

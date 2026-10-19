@@ -8,10 +8,17 @@ public sealed class SafeExecutionLog(Action<string> emit) : ISafeExecutionLog
 {
     private static readonly HashSet<string> Events = new(StringComparer.Ordinal) { "TemplateStarted", "TemplateCompleted", "TemplateFailed", "SecretUnavailable" };
     private static readonly HashSet<string> Codes = new(StringComparer.Ordinal) { "Success", "SecretUnavailable", "TemplateCancelled", "TemplateExecutionFailed", "TemplateConfigurationInvalid", "ConnectivityFailed", "AuthenticationFailed", "DestinationUnavailable", "CommandFailed", "Timeout" };
+    private const int MaximumEvents = 256;
+    private int accepted;
+    private int markerEmitted;
+    private long dropped;
+    public long DroppedCount => Interlocked.Read(ref dropped);
+
     public ValueTask WriteAsync(string eventCode, IReadOnlyDictionary<string,string> safeFields, CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
-        if (!Events.Contains(eventCode) || safeFields.Count > 8) throw new InvalidOperationException("SafeLogInvalid");
+        if (ct.IsCancellationRequested) { Drop(); return ValueTask.CompletedTask; }
+        if (!Events.Contains(eventCode) || safeFields is null || safeFields.Count > 8 || Interlocked.Increment(ref accepted) > MaximumEvents)
+        { Drop(); return ValueTask.CompletedTask; }
         var projected = new Dictionary<string,string>(StringComparer.Ordinal);
         foreach (var field in safeFields)
         {
@@ -23,10 +30,23 @@ public sealed class SafeExecutionLog(Action<string> emit) : ISafeExecutionLog
                 "safeCode" => Codes.Contains(field.Value),
                 _ => false
             };
-            if (!valid) throw new InvalidOperationException("SafeLogInvalid");
+            if (!valid) { Drop(); return ValueTask.CompletedTask; }
             projected.Add(field.Key,field.Value);
         }
-        emit(JsonSerializer.Serialize(new { eventCode, safeFields = projected }));
+        Emit(JsonSerializer.Serialize(new { eventCode, safeFields = projected }));
         return ValueTask.CompletedTask;
+    }
+
+    private void Drop()
+    {
+        var count = Interlocked.Increment(ref dropped);
+        if (Interlocked.Exchange(ref markerEmitted, 1) == 0)
+            Emit(JsonSerializer.Serialize(new { eventCode = "DiagnosticsDropped", safeFields = new Dictionary<string, string> { ["count"] = count.ToString(CultureInfo.InvariantCulture) } }));
+    }
+
+    private void Emit(string record)
+    {
+        try { emit(record); }
+        catch { Interlocked.Increment(ref dropped); }
     }
 }
