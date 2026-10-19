@@ -36,5 +36,16 @@ it("shows server validation paths on their matching schema fields", () => {
 it("shows root configuration errors when a required form value is missing", () => {
   const descriptor = { id: "test", version: "1", displayName: "Test", description: "Test", configurationSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } };
   render(<TemplateForm descriptor={descriptor} value={{}} onChange={() => {}} errors={{ configuration: "Required" }} />);
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
   expect(screen.getByRole("alert")).toHaveTextContent("Required");
+});
+
+it("shows a root oneOf validation error only once", () => {
+  const descriptor = { id: "test", version: "1", displayName: "Test", description: "Test", configurationSchema: { type: "object", oneOf: [
+    { properties: { kind: { const: "a" }, first: { type: "string" } }, required: ["kind"] },
+    { properties: { kind: { const: "b" }, second: { type: "string" } }, required: ["kind"] },
+  ] } };
+  render(<TemplateForm descriptor={descriptor} value={{ kind: "a" }} onChange={() => {}} errors={{ configuration: "OneOf" }} />);
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.getByRole("alert")).toHaveTextContent("OneOf");
 });

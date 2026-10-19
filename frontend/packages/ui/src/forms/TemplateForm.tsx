@@ -34,7 +34,7 @@ function Node({ schema, value, path, onChange, errors, descriptor }: { schema: a
         onChange(next);
       }}>{branches.map((branch, index) => <MenuItem key={index} value={branch.properties?.[tag]?.const ?? index}>{String(branch.properties?.[tag]?.const ?? index)}</MenuItem>)}</TextField>}
       <Node schema={selected} value={value} path={path} onChange={onChange} errors={errors} descriptor={descriptor} />
-      {errors[path] && <Typography color="error" role="alert">{errors[path]}</Typography>}
+      {path !== "configuration" && errors[path] && <Typography color="error" role="alert">{errors[path]}</Typography>}
     </Stack>;
   }
   if (schema["x-workerDock-secretReference"] === true) return <SecretReferenceField value={value ?? ""} error={errors[path]} onChange={onChange} />;
@@ -62,7 +62,7 @@ function Node({ schema, value, path, onChange, errors, descriptor }: { schema: a
         <Button onClick={() => onChange(items.filter((_, i) => i !== index))}>Remove</Button>
       </Stack>)}
       <Button onClick={() => onChange([...items, defaultFor(schema.items ?? { type: "string" })])}>Add item</Button>
-      {errors[path] && <Typography color="error" role="alert">{errors[path]}</Typography>}
+      {path !== "configuration" && errors[path] && <Typography color="error" role="alert">{errors[path]}</Typography>}
     </Stack>;
   }
   const types = Array.isArray(schema.type) ? schema.type.filter((type: string) => type !== "null") : [schema.type ?? typeof value];
