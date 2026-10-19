@@ -1,13 +1,14 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using WorkerDock.Application.Observability;
 
 namespace WorkerDock.Infrastructure.Observability;
 
 /// <summary>OpenTelemetry-compatible instruments; exporters/listeners are attached only by the host.</summary>
 public static class TelemetryRegistration
 {
-    public const string InstrumentationName = "WorkerDock";
-    public static readonly ActivitySource Activities = new(InstrumentationName);
+    public const string InstrumentationName = ExecutionActivitySource.InstrumentationName;
+    public static readonly ActivitySource Activities = ExecutionActivitySource.Source;
     public static readonly Meter Meter = new(InstrumentationName);
     private static readonly Counter<long> Executions = Meter.CreateCounter<long>("workerdock.executions");
     private static readonly Counter<long> Retries = Meter.CreateCounter<long>("workerdock.retries");

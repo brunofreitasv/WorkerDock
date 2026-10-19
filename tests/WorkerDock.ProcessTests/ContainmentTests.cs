@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Text.Json;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Contracts.Secrets;
+using WorkerDock.Application.Observability;
 using WorkerDock.Runtime.Ipc;
 using WorkerDock.Runtime.Processes;
 
@@ -10,6 +11,56 @@ namespace WorkerDock.ProcessTests;
 
 public sealed class ContainmentTests
 {
+    [Fact]
+    public async Task Safe_handler_diagnostic_reaches_supervisor_event_store_before_success_is_observed()
+    {
+        using var fixture = new TestDirectory();
+        var store = new RecordingEvents();
+        await using var child = await FixtureProgram.Supervisor(store).StartAsync(Guid.NewGuid(), 1, FixtureProgram.Descriptor("diagnostic", fixture.Path), default);
+
+        var result = await child.WaitAsync(default);
+        var handlerEvent = await store.HandlerEvent.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal("Success", result.Outcome);
+        Assert.Equal("Handler", handlerEvent.Source);
+        Assert.Equal("TemplateFailed", handlerEvent.Code);
+        Assert.Equal("ConnectivityFailed", handlerEvent.SafeFields["safeCode"]);
+    }
+
+    [Fact]
+    public async Task Malformed_flooded_and_failed_diagnostic_transport_preserves_success()
+    {
+        using var fixture = new TestDirectory();
+        var store = new RecordingEvents { FailWrites = true, BlockWrites = true };
+        await using var child = await FixtureProgram.Supervisor(store).StartAsync(Guid.NewGuid(), 1, FixtureProgram.Descriptor("diagnostic-stress", fixture.Path), default);
+
+        await store.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var result = await child.WaitAsync(default);
+
+        Assert.Equal("Success", result.Outcome);
+        Assert.Equal("DiagnosticFloodDropped", result.SafeCode);
+        Assert.True(store.WriteAttempts > 0);
+        Assert.Contains("Handler", store.Sources);
+        Assert.DoesNotContain("SHOULD_BE_DROPPED", JsonSerializer.Serialize(store.Items));
+        store.Release.TrySetResult();
+        await child.DisposeAsync();
+        Assert.True(store.Sources.Count <= 65);
+    }
+
+    [Fact]
+    public async Task Malformed_diagnostic_frame_is_dropped_before_terminal_result()
+    {
+        using var fixture = new TestDirectory();
+        var store = new RecordingEvents();
+        await using var child = await new ExecutionSupervisor(FixtureProgram.Options("malformed-diagnostic"), store)
+            .StartAsync(Guid.NewGuid(), 1, FixtureProgram.Descriptor("block", fixture.Path), default);
+
+        var result = await child.WaitAsync(default);
+
+        Assert.Equal("Success", result.Outcome);
+        Assert.DoesNotContain("Handler", store.Sources);
+    }
+
     [Fact]
     public async Task Provider_failure_and_rotated_attempts_emit_only_safe_diagnostics()
     {
@@ -280,5 +331,33 @@ public sealed class ContainmentTests
         public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "WorkerDockProcess_" + Guid.NewGuid().ToString("N"));
         public TestDirectory() => Directory.CreateDirectory(Path);
         public void Dispose() { Directory.Delete(Path, true); }
+    }
+
+    private sealed class RecordingEvents : IExecutionEvents
+    {
+        public TaskCompletionSource<ExecutionEvent> HandlerEvent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool FailWrites { get; init; }
+        public bool BlockWrites { get; init; }
+        public int WriteAttempts;
+        public System.Collections.Concurrent.ConcurrentBag<string> Sources { get; } = [];
+        public System.Collections.Concurrent.ConcurrentBag<ExecutionEvent> Items { get; } = [];
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async ValueTask AppendAsync(IReadOnlyList<ExecutionEvent> events, CancellationToken ct)
+        {
+            Interlocked.Increment(ref WriteAttempts);
+            foreach (var item in events)
+            {
+                Sources.Add(item.Source);
+                Items.Add(item);
+                if (item.Source == "Handler") HandlerEvent.TrySetResult(item);
+            }
+            if (FailWrites)
+            {
+                Started.TrySetResult();
+                if (BlockWrites) await Release.Task.WaitAsync(ct);
+                throw new IOException("synthetic event store failure");
+            }
+        }
     }
 }

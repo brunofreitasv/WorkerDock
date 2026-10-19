@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using WorkerDock.Application.Observability;
 using WorkerDock.Application.Execution;
 using WorkerDock.Application.Executions;
 using WorkerDock.Contracts.Execution;
@@ -15,9 +16,11 @@ public sealed class OwnershipMonitor(IAttemptStore store, IAttemptSignals signal
     {
         var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!active.TryAdd(lease.AttemptId, finished)) throw new InvalidOperationException("AttemptAlreadySupervised");
+        var activity = ExecutionActivitySource.StartAttempt(lease, descriptor);
         IExecutionChild? child = null;
         TemplateResult? result = null;
         var outcome = "ProcessFailed"; var exitConfirmed = false; var effects = true;
+        var completionPersisted = false;
         var acknowledgedAt = authorizationStarted;
         var finiteBudget = lease.DeadlineUtc is { } deadline ? deadline - (lease.ExpiresUtc - OwnershipDefaults.LeaseDuration) : (TimeSpan?)null;
         TimeSpan Remaining() => OwnershipDefaults.LeaseDuration - OwnershipDefaults.SafetyMargin - clock.GetElapsedTime(acknowledgedAt);
@@ -117,8 +120,13 @@ public sealed class OwnershipMonitor(IAttemptStore store, IAttemptSignals signal
                 }
                 using var persist = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 await store.CompleteAsync(lease, new(result, outcome, exitConfirmed, effects), persist.Token);
+                completionPersisted = true;
             }
-            finally { active.TryRemove(lease.AttemptId, out _); finished.TrySetResult(); }
+            finally
+            {
+                ExecutionActivitySource.StopAttempt(activity, outcome, result, exitConfirmed, effects, completionPersisted);
+                active.TryRemove(lease.AttemptId, out _); finished.TrySetResult();
+            }
         }
     }
 

@@ -2,6 +2,7 @@ using WorkerDock.Infrastructure.Templates;
 using System.Globalization;
 using System.IO.Pipes;
 using System.Text.Json;
+using System.Threading.Channels;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Contracts.Logging;
 using WorkerDock.Contracts.Secrets;
@@ -31,12 +32,18 @@ public static class ExecutorHost
             await ExecutionProtocol.WriteAsync(pipe, new Handshake(1, attempt, generation, nonce, Environment.ProcessId), startup.Token);
             var request = await ExecutionProtocol.ReadAsync<ExecuteRequest>(pipe, startup.Token);
             if (request.Version != 1 || request.AttemptId != attempt || request.Generation != generation) return 1;
+            using var writer = new SemaphoreSlim(1, 1);
+            var composedAdapters = adapters;
+            await using var diagnostics = new IpcDiagnosticRelay(pipe, writer, null);
             using var cancellation = new CancellationTokenSource();
             using var controls = new CancellationTokenSource();
             var listener = ListenAsync(pipe, cancellation, controls.Token);
-            var result = await ExecuteAsync(request, templates, adapters, cancellation.Token);
+            var result = await ExecuteAsync(request, templates, composedAdapters, diagnostics, cancellation.Token);
+            await diagnostics.FlushAsync();
             using var finish = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await ExecutionProtocol.WriteAsync(pipe, result, finish.Token);
+            await writer.WaitAsync(finish.Token);
+            try { await ExecutionProtocol.WriteAsync(pipe, result, finish.Token); }
+            finally { writer.Release(); }
             controls.Cancel(); await listener;
             return 0;
         }
@@ -56,7 +63,7 @@ public static class ExecutorHost
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch { cancellation.Cancel(); }
     }
-    private static async Task<TemplateResult> ExecuteAsync(ExecuteRequest request, Func<ExecutionDescriptor, IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters, CancellationToken ct)
+    private static async Task<TemplateResult> ExecuteAsync(ExecuteRequest request, Func<ExecutionDescriptor, IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters, IpcDiagnosticRelay diagnostics, CancellationToken ct)
     {
         using var secrets = new RedactingSecrets();
         try
@@ -70,7 +77,8 @@ public static class ExecutorHost
             ct.ThrowIfCancellationRequested();
             var composed = adapters(request.Execution);
             secrets.Provider = composed.Secrets;
-            var context = new TemplateExecutionContext(request.Execution, secrets, new RedactingLog(composed.Log, secrets));
+            diagnostics.SetTarget(composed.Log);
+            var context = new TemplateExecutionContext(request.Execution, secrets, new RedactingLog(secrets, diagnostics));
             var result = await template.ExecuteAsync(context, ct);
             if (result.Outcome is not ("Success" or "TransientFailure" or "PermanentFailure") || !Code(result.SafeCode)) return Failure("TemplateResultInvalid", true);
             var safe = secrets.Redact(JsonSerializer.Serialize(result.SafeSummary));
@@ -123,12 +131,96 @@ public static class ExecutorHost
         }
         public void Dispose() { lock (gate) { foreach (var value in leased) value.Dispose(); leased.Clear(); foreach (var value in resolved) Array.Clear(value); resolved.Clear(); } }
     }
-    private sealed class RedactingLog(ISafeExecutionLog target, RedactingSecrets secrets) : ISafeExecutionLog
+    private sealed class RedactingLog(RedactingSecrets secrets, IpcDiagnosticRelay diagnostics) : ISafeExecutionLog
     {
-        public ValueTask WriteAsync(string eventCode, IReadOnlyDictionary<string, string> safeFields, CancellationToken ct)
+        private int accepted;
+        public async ValueTask WriteAsync(string eventCode, IReadOnlyDictionary<string, string> safeFields, CancellationToken ct)
         {
-            if (!Code(eventCode) || safeFields.Count > 32 || safeFields.Any(x => !Code(x.Key) || x.Value.Length > 1024)) throw new InvalidOperationException("SafeLogInvalid");
-            return target.WriteAsync(secrets.Redact(eventCode), safeFields.ToDictionary(x => secrets.Redact(x.Key), x => secrets.Redact(x.Value), StringComparer.Ordinal), ct);
+            if (ct.IsCancellationRequested || safeFields is null || safeFields.Count > 32 || Interlocked.Increment(ref accepted) > 256) return;
+            try
+            {
+                var redactedCode = secrets.Redact(eventCode);
+                var redactedFields = safeFields.ToDictionary(x => secrets.Redact(x.Key), x => secrets.Redact(x.Value), StringComparer.Ordinal);
+                diagnostics.TryWrite(redactedCode, redactedFields);
+            }
+            catch { /* Optional diagnostics cannot escape into the handler. */ }
+        }
+    }
+
+    private sealed class IpcDiagnosticRelay : IAsyncDisposable
+    {
+        private static readonly HashSet<string> Events = new(StringComparer.Ordinal) { "TemplateStarted", "TemplateCompleted", "TemplateFailed", "SecretUnavailable" };
+        private static readonly HashSet<string> Codes = new(StringComparer.Ordinal) { "Success", "SecretUnavailable", "TemplateCancelled", "TemplateExecutionFailed", "TemplateConfigurationInvalid", "ConnectivityFailed", "AuthenticationFailed", "DestinationUnavailable", "CommandFailed", "Timeout" };
+        private static readonly HashSet<string> Fields = new(StringComparer.Ordinal) { "executionId", "attemptId", "correlationId", "durationMs", "affectedRows", "outcome", "safeCode" };
+        private readonly Stream pipe;
+        private readonly SemaphoreSlim writer;
+        private ISafeExecutionLog? target;
+        private readonly Channel<ExecutorDiagnosticFrame> queue = Channel.CreateBounded<ExecutorDiagnosticFrame>(new BoundedChannelOptions(32) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
+        private readonly CancellationTokenSource stop = new();
+        private readonly Task pump;
+        private long sequence;
+        private int accepted;
+
+        public IpcDiagnosticRelay(Stream pipe, SemaphoreSlim writer, ISafeExecutionLog? target)
+        {
+            this.pipe = pipe; this.writer = writer; this.target = target; pump = PumpAsync();
+        }
+
+        public void SetTarget(ISafeExecutionLog log) => target = log;
+
+        public void TryWrite(string eventCode, IReadOnlyDictionary<string, string> fields)
+        {
+            if (!Events.Contains(eventCode) || fields.Count > 8 || Interlocked.Increment(ref accepted) > 256) return;
+            foreach (var (key, value) in fields)
+            {
+                if (!Fields.Contains(key) || value is not { Length: > 0 and <= 80 }) return;
+                var valid = key switch
+                {
+                    "executionId" or "attemptId" or "correlationId" => Guid.TryParseExact(value, "D", out _),
+                    "durationMs" or "affectedRows" => long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) && n >= 0,
+                    "outcome" => value is "Success" or "TransientFailure" or "PermanentFailure",
+                    "safeCode" => Codes.Contains(value),
+                    _ => false
+                };
+                if (!valid) return;
+            }
+            var frame = new ExecutorDiagnosticFrame("Diagnostic", Interlocked.Increment(ref sequence), eventCode, new Dictionary<string, string>(fields, StringComparer.Ordinal));
+            try { if (ExecutionProtocol.Serialize(frame).Length <= 4096) queue.Writer.TryWrite(frame); }
+            catch { }
+        }
+
+        private async Task PumpAsync()
+        {
+            await foreach (var frame in queue.Reader.ReadAllAsync(stop.Token))
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(100));
+                try { if (target is not null) await target.WriteAsync(frame.EventCode, frame.SafeFields, timeout.Token); } catch { }
+                if (timeout.IsCancellationRequested) continue;
+                try
+                {
+                    await writer.WaitAsync(timeout.Token);
+                    try { await ExecutionProtocol.WriteAsync(pipe, frame, timeout.Token); }
+                    finally { writer.Release(); }
+                }
+                catch (OperationCanceledException) when (timeout.IsCancellationRequested) { }
+                catch { /* A broken diagnostic path only drops this optional frame. */ }
+            }
+        }
+
+        public async ValueTask FlushAsync()
+        {
+            queue.Writer.TryComplete();
+            try { await pump.WaitAsync(TimeSpan.FromMilliseconds(250)); }
+            catch { stop.Cancel(); try { await pump.WaitAsync(TimeSpan.FromMilliseconds(100)); } catch { } }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            queue.Writer.TryComplete();
+            try { await pump.WaitAsync(TimeSpan.FromMilliseconds(250)); }
+            catch { stop.Cancel(); try { await pump.WaitAsync(TimeSpan.FromMilliseconds(100)); } catch { } }
+            stop.Dispose();
         }
     }
 }

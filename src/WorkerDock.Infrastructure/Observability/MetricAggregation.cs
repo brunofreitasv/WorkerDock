@@ -23,6 +23,10 @@ public static class MetricTagProjection
 public static class MetricAggregation
 {
     private const int MaximumBatchSize = 5000;
+    // Update locks are retained to transaction end; READPAST lets another worker claim different rows.
+    // READCOMMITTEDLOCK makes this behavior valid when tenant databases enable RCSI.
+    internal const IsolationLevel BatchIsolationLevel = IsolationLevel.ReadCommitted;
+    internal const string BatchClaimHints = "UPDLOCK,READPAST,READCOMMITTEDLOCK";
 
     public static async ValueTask<int> AggregateAsync(TenantDatabaseOptions options, DateTimeOffset throughUtc, int batchSize, CancellationToken ct)
     {
@@ -36,9 +40,9 @@ public static class MetricAggregation
             if ((Guid?)await identity.ExecuteScalarAsync(ct) != options.InstanceId) throw new WorkerDockException("TenantInstanceMismatch");
         }
 
-        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(BatchIsolationLevel, ct);
         await using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = """
+        command.CommandText = $"""
             DECLARE @Batch TABLE(ExecutionId uniqueidentifier PRIMARY KEY, WindowStartUtc datetime2(7), TemplateId nvarchar(100), Outcome nvarchar(30), Retries int, Timeouts int, DurationMs bigint, TriggerDelayMs bigint, QueueDelayMs bigint);
             INSERT @Batch(ExecutionId,WindowStartUtc,TemplateId,Outcome,Retries,Timeouts,DurationMs,TriggerDelayMs,QueueDelayMs)
             SELECT TOP(@batchSize) e.ExecutionId,
@@ -48,7 +52,7 @@ public static class MetricAggregation
                    COALESCE(SUM(CASE WHEN a.StartedAtUtc IS NOT NULL AND a.EndedAtUtc IS NOT NULL THEN DATEDIFF_BIG(millisecond,a.StartedAtUtc,a.EndedAtUtc) ELSE 0 END),0),
                    COALESCE(CASE WHEN e.ScheduledForUtc IS NOT NULL THEN DATEDIFF_BIG(millisecond,e.ScheduledForUtc,MIN(a.StartedAtUtc)) ELSE 0 END,0),
                    COALESCE(CASE WHEN MIN(a.StartedAtUtc) IS NOT NULL THEN DATEDIFF_BIG(millisecond,e.AvailableAtUtc,MIN(a.StartedAtUtc)) ELSE 0 END,0)
-              FROM [workerdock].Executions e WITH(UPDLOCK,READPAST,ROWLOCK)
+              FROM [workerdock].Executions e WITH({BatchClaimHints})
               JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
               LEFT JOIN [workerdock].Attempts a ON a.ExecutionId=e.ExecutionId
              WHERE e.AggregatedAtUtc IS NULL AND e.CreatedAtUtc<=@throughUtc AND e.State IN(N'Succeeded',N'Failed',N'Stopped',N'TimedOut',N'Skipped')

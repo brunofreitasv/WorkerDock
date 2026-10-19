@@ -81,7 +81,11 @@ public sealed class WebHostTests
         Assert.Equal("""{"status":"live"}""", await live.Content.ReadAsStringAsync());
         var ready = await client.GetAsync("/health/ready");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
-        Assert.Equal("""{"status":"unavailable"}""", await ready.Content.ReadAsStringAsync());
+        using var readiness = JsonDocument.Parse(await ready.Content.ReadAsStringAsync());
+        Assert.NotEqual("Healthy", readiness.RootElement.GetProperty("overall").GetString());
+        Assert.True(readiness.RootElement.TryGetProperty("instanceId", out _));
+        Assert.True(readiness.RootElement.TryGetProperty("components", out _));
+        Assert.True(readiness.RootElement.TryGetProperty("observedUtc", out _));
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/_test/settings")).StatusCode);
     }
 }

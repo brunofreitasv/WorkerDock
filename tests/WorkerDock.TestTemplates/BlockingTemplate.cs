@@ -27,3 +27,25 @@ public sealed class SecretTemplate : BlockingTemplate
         return new("Success", "SecretResolved", false, JsonSerializer.SerializeToElement(new { secret = new string(secret.Reveal().Span) }), null);
     }
 }
+
+public sealed class DiagnosticTemplate : BlockingTemplate
+{
+    public override TemplateDescriptor Descriptor => base.Descriptor with { Id = "diagnostic" };
+    public override async ValueTask<TemplateResult> ExecuteAsync(TemplateExecutionContext context, CancellationToken ct)
+    {
+        await context.Log.WriteAsync("TemplateFailed", new Dictionary<string, string> { ["safeCode"] = "ConnectivityFailed" }, ct);
+        return new("Success", "DiagnosticCaptured", false, JsonSerializer.SerializeToElement(new { }), null);
+    }
+}
+
+public sealed class DiagnosticStressTemplate : BlockingTemplate
+{
+    public override TemplateDescriptor Descriptor => base.Descriptor with { Id = "diagnostic-stress" };
+    public override async ValueTask<TemplateResult> ExecuteAsync(TemplateExecutionContext context, CancellationToken ct)
+    {
+        await context.Log.WriteAsync("TemplateFailed", new Dictionary<string, string> { ["message"] = "SHOULD_BE_DROPPED" }, ct);
+        for (var i = 0; i < 10_000; i++)
+            await context.Log.WriteAsync("TemplateCompleted", new Dictionary<string, string> { ["outcome"] = "Success" }, ct);
+        return new("Success", "DiagnosticFloodDropped", false, JsonSerializer.SerializeToElement(new { }), null);
+    }
+}

@@ -14,6 +14,11 @@ public sealed class SqlExecutionEvents(TenantDatabaseOptions options) : IExecuti
     {
         "TemplateStarted", "TemplateCompleted", "TemplateFailed", "SecretUnavailable", "ExecutorDisconnected", "ExecutorStarted"
     };
+    private static readonly HashSet<string> SafeCodes = new(StringComparer.Ordinal)
+    {
+        "Success", "SecretUnavailable", "TemplateCancelled", "TemplateExecutionFailed", "TemplateConfigurationInvalid",
+        "ConnectivityFailed", "AuthenticationFailed", "DestinationUnavailable", "CommandFailed", "Timeout"
+    };
     private static readonly HashSet<string> Fields = new(StringComparer.Ordinal)
     {
         "executionId", "attemptId", "correlationId", "durationMs", "affectedRows", "outcome", "safeCode"
@@ -77,7 +82,7 @@ public sealed class SqlExecutionEvents(TenantDatabaseOptions options) : IExecuti
                 "executionId" or "attemptId" or "correlationId" => Guid.TryParseExact(value, "D", out _),
                 "durationMs" or "affectedRows" => long.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) && n >= 0,
                 "outcome" => value is "Success" or "TransientFailure" or "PermanentFailure",
-                "safeCode" => value.All(char.IsAsciiLetterOrDigit) && Codes.Contains(value),
+                "safeCode" => value.All(char.IsAsciiLetterOrDigit) && SafeCodes.Contains(value),
                 _ => false
             };
             if (!valid) throw new WorkerDockException("ValidationFailed");
