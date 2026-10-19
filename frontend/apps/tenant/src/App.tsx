@@ -163,7 +163,7 @@ function SettingsForm({ t }: { t: Labels }) {
 }
 export default function App() {
   const { session, loading, error, retry } = useSession();
-  const preferences = usePreferences();
+  const preferences = usePreferences(session?.timeZone);
   const { t } = preferences;
   const [active, setActive] = useState(
     () => window.location.hash.slice(2) || "dashboard",
@@ -253,7 +253,7 @@ export default function App() {
                 )
               ) : (
                 active === "jobs" ? (
-                  session.canManage ? <ManualJobEditor t={t} /> : <Alert severity="error">{t.permission}</Alert>
+                  session.canManage ? <ManualJobEditor t={t} defaultZone={preferences.timeZone} /> : <Alert severity="error">{t.permission}</Alert>
                 ) : active === "templates" ? (
                   <Paper variant="outlined" sx={{ p: 3, mb: 3, maxWidth: 900 }}>
                     <Stack spacing={2}>

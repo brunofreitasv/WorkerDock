@@ -14,6 +14,11 @@ public static class ScheduleEndpoints
 {
     public static void MapSchedules(this IEndpointRouteBuilder app)
     {
+        app.MapGet("/api/time-zones", () => Results.Ok(TimeZoneInfo.GetSystemTimeZones()
+            .Select(zone => TimeZoneInfo.TryConvertWindowsIdToIanaId(zone.Id, out var iana) ? iana : zone.Id)
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()))
+            .RequireAuthorization(AccessPolicies.Read);
+
         app.MapGet("/api/jobs/{id:guid}/schedule", async (Guid id, IScheduleCommands commands, HttpResponse response, CancellationToken ct) =>
         {
             try { var schedule = await commands.GetAsync(id, ct); response.Headers.ETag = ETag(schedule.Version); return Results.Ok(new { input = ToInput(schedule.Definition), resolvedUtc = schedule.Definition.OneTimeUtc, schedule.Policy, schedule.Paused }); }

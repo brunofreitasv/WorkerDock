@@ -23,7 +23,7 @@ export async function read<T>(
 }
 export async function mutate<T>(
   path: string,
-  method: "PUT" | "POST",
+  method: "PUT" | "POST" | "DELETE",
   body?: unknown,
   etag?: string,
 ): Promise<T> {

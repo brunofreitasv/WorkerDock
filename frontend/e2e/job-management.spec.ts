@@ -1,0 +1,139 @@
+import { expect, test } from "@playwright/test";
+
+const template = { id: "sample", version: "1", displayName: "Sample", description: "Safe sample", configurationSchema: { type: "object", additionalProperties: false, properties: {} } };
+const jobId = "11111111-1111-4111-8111-111111111111";
+
+async function setup(page: import("@playwright/test").Page) {
+  let enabled = false;
+  let paused = false;
+  let rejectEditedNameOnce = true;
+  let rejectScheduleOnce = true;
+  const duplicates = new Set<string>();
+  const requests: { method: string; path: string; body?: any }[] = [];
+  await page.route("**/api/session", route => route.fulfill({ json: { authenticated: false, canRead: true, canManage: true, mode: "Anonymous", language: "en", timeZone: "UTC" } }));
+  await page.route("**/api/antiforgery", route => route.fulfill({ json: { requestToken: "test-csrf" } }));
+  await page.route("**/api/templates", route => route.fulfill({ json: { items: [{ selectable: true, descriptor: template }] } }));
+  await page.route("**/api/time-zones", route => route.fulfill({ json: ["America/New_York", "UTC"] }));
+  await page.route("**/api/jobs", route => { requests.push({ method: "POST", path: "/api/jobs" }); return route.fulfill({ status: 202, json: { targetId: jobId, commandId: "draft-command" } }); });
+  await page.route("**/api/jobs/*/configuration", route => { const id = new URL(route.request().url()).pathname.split("/").at(-2) ?? jobId; return route.fulfill({ json: { revision: { jobId: id, revision: 1, name: "Demo", templateId: "sample", templateVersion: "1", configuration: {}, profileId: null, policy: { timeout: null } }, version: [1], enabled: duplicates.has(id) ? false : enabled, archived: false, concurrencyLimit: 1 }, headers: { ETag: '"AQAAAAAAAAA="' } }); });
+  await page.route("**/api/jobs/*/schedule", async route => {
+    requests.push({ method: route.request().method(), path: route.request().url(), body: route.request().postDataJSON() });
+    if (route.request().method() === "PUT" && rejectScheduleOnce) { rejectScheduleOnce = false; return route.fulfill({ status: 412, json: { code: "StaleVersion" } }); }
+    if (route.request().method() === "PUT") return route.fulfill({ status: 202, json: { commandId: "schedule-command", targetId: jobId, state: "Pending" } });
+    if (route.request().method() === "DELETE") return route.fulfill({ status: 202, json: { commandId: "delete-command", targetId: jobId } });
+    return route.fulfill({ json: { input: { kind: "Cron", cron: "0 9 * * 1-5", zoneId: "UTC", localOnce: null, selectedOffset: null }, policy: { mode: "Skip" }, paused } });
+  });
+  await page.route("**/api/schedules/preview", route => route.fulfill({ json: [{ utc: "2026-11-02T14:00:00Z", offset: "-05:00:00" }] }));
+  await page.route("**/api/template-validation", route => route.fulfill({ json: { issues: [] } }));
+  await page.route("**/api/jobs/*/actions", async route => {
+    const path = new URL(route.request().url()).pathname;
+    const body = route.request().postDataJSON();
+    requests.push({ method: "POST", path, body });
+    if (body.action === "Enable") enabled = true;
+    if (body.action === "Disable" || body.action === "Archive") enabled = false;
+    if (body.action === "PauseSchedule") paused = true;
+    if (body.action === "ResumeSchedule") paused = false;
+    if (body.action === "Duplicate") duplicates.add(body.targetJobId);
+    return route.fulfill({ status: 202, json: { commandId: "action-command", targetId: body.targetJobId ?? jobId, state: "Pending" } });
+  });
+  await page.route(`**/api/jobs/${jobId}`, async route => {
+    const body = route.request().postDataJSON();
+    requests.push({ method: "PUT", path: new URL(route.request().url()).pathname, body });
+    if (body.name === "Edited name stays after conflict" && rejectEditedNameOnce) { rejectEditedNameOnce = false; return route.fulfill({ status: 412, json: { code: "StaleVersion" } }); }
+    return route.fulfill({ status: 202, json: { commandId: "edit-command", targetId: jobId } });
+  });
+  let firstRun = true;
+  await page.route("**/api/jobs/*/runs", async route => {
+    requests.push({ method: "POST", path: route.request().url(), body: route.request().postDataJSON() });
+    if (firstRun) { firstRun = false; return route.abort(); }
+    return route.fulfill({ status: 202, json: { targetId: "22222222-2222-4222-8222-222222222222", commandId: "run-command", state: "Pending" } });
+  });
+  await page.route("**/api/executions/*/stop", route => { requests.push({ method: "POST", path: route.request().url(), body: route.request().postDataJSON() }); return route.fulfill({ status: 202, json: { commandId: "stop-command" } }); });
+  await page.goto("/#/jobs");
+  await expect(page.getByRole("heading", { name: "Create job" })).toBeVisible();
+  return requests;
+}
+
+test("guided create, stale edit, lifecycle, duplicate, retry and confirmed force stop", async ({ page }) => {
+  const requests = await setup(page);
+  await page.getByLabel("Job name").fill("Demo");
+  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByLabel("Use a schedule").check();
+  await page.getByRole("button", { name: "Preview next runs" }).click();
+  await expect(page.getByText(/2026-11-02T14:00:00Z/)).toBeVisible();
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByText("No timeout", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Next" }).click();
+  const failedSchedule = page.waitForResponse(response => response.url().endsWith(`/api/jobs/${jobId}/schedule`) && response.request().method() === "PUT");
+  await page.getByRole("button", { name: "Save disabled draft" }).click();
+  expect((await failedSchedule).status()).toBe(412);
+  await expect(page.getByText("Disabled", { exact: true })).toBeVisible();
+  expect(requests.filter(request => request.path === "/api/jobs")).toHaveLength(1);
+  await page.getByRole("button", { name: "Save disabled draft" }).click();
+  await expect(page.getByText("Disabled draft saved.")).toBeVisible();
+  expect(requests.some(request => request.path.endsWith("/schedule") && request.method === "PUT")).toBe(true);
+
+  await page.getByRole("button", { name: "Template", exact: true }).click();
+  await page.getByLabel("Job name").fill("Edited name stays after conflict");
+  const stale = page.waitForResponse(response => response.url().endsWith(`/api/jobs/${jobId}`) && response.request().method() === "PUT");
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await page.getByRole("button", { name: "Save disabled draft" }).click();
+  expect((await stale).status()).toBe(412);
+  await expect(page.getByLabel("Job name")).toHaveValue("Edited name stays after conflict");
+  await expect(page.getByText(/unsaved edits are preserved/i)).toBeVisible();
+  await page.getByRole("button", { name: "Save disabled draft" }).click();
+  await page.getByRole("button", { name: "Next" }).click();
+
+  await page.getByRole("button", { name: "Enable job" }).click();
+  await page.getByRole("button", { name: "Run now" }).click();
+  await expect(page.getByText(/Unable to complete the request/)).toBeVisible();
+  await page.getByRole("button", { name: "Run now" }).click();
+  const runKeys = requests.filter(request => request.path.endsWith("/runs")).map(request => request.body.requestKey);
+  expect(runKeys).toHaveLength(2);
+  expect(runKeys[0]).toBe(runKeys[1]);
+
+  await page.getByRole("button", { name: "Pause schedule" }).click();
+  await expect(page.getByRole("button", { name: "Resume schedule" })).toBeVisible();
+  await page.getByRole("button", { name: "Resume schedule" }).click();
+  await page.getByRole("button", { name: "Disable" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Disable" }).click();
+  await expect(page.getByRole("button", { name: "Enable", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Enable", exact: true }).click();
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
+  await page.getByRole("button", { name: "Delete schedule" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete schedule" }).click();
+  expect(requests.some(request => request.method === "DELETE" && request.path.endsWith("/schedule"))).toBe(true);
+  await page.getByRole("button", { name: "Activation", exact: true }).click();
+  await page.getByRole("button", { name: "Stop execution" }).click();
+  await page.getByLabel("Force stop").check();
+  await page.getByLabel("Reason").fill("Operator requested");
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm stop" }).click();
+  await expect(page.getByRole("dialog")).toContainText("remote outcome");
+  expect(requests.some(request => request.path.includes("/executions/") && request.body.force === true && request.body.confirmForce === true)).toBe(true);
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Duplicate" }).click();
+  await expect(page.getByText("Review this disabled copy before enabling it.")).toBeVisible();
+  await expect(page.getByText("Disabled", { exact: true })).toBeVisible();
+  expect(requests.some(request => request.body?.action === "Duplicate" && request.body.targetJobId)).toBe(true);
+});
+
+test("viewer has no configuration or management controls", async ({ page }) => {
+  await page.route("**/api/session", route => route.fulfill({ json: { authenticated: true, canRead: true, canManage: false, mode: "RoleProtected", language: "en", timeZone: "UTC" } }));
+  await page.goto("/#/monitoring");
+  await expect(page.getByRole("heading", { name: "Monitoring" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Jobs" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /run now|duplicate|disable|archive/i })).toHaveCount(0);
+  await expect(page.getByLabel(/configuration/i)).toHaveCount(0);
+});
+
+test("job wizard controls fit desktop and narrow keyboard navigation", async ({ page }) => {
+  await setup(page);
+  for (const width of [375, 1280]) {
+    await page.setViewportSize({ width, height: 850 });
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("heading", { name: "Create job" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+});
