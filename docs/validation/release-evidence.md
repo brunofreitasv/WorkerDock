@@ -15,6 +15,7 @@ Record the exact checkout, tool versions, command, result and artifact location 
 - OSS sample check: `dotnet test tests/WorkerDock.UnitTests/WorkerDock.UnitTests.csproj --no-restore -c Release --filter FullyQualifiedName~SampleTemplateConformanceTests` — PASS; 2 tests. `dotnet build examples/WorkerDock.SampleTemplate/WorkerDock.SampleTemplate.csproj --no-restore -c Release` — PASS.
 - Package attribution: `pwsh -NoProfile -File scripts/Generate-DotNetNotices.ps1` — PASS; 94 locked NuGet packages. `node frontend/scripts/licenses.mjs` — PASS; emits tenant and center production notices. `pwsh -NoProfile -File deploy/Build-Packages.ps1 -Version 0.0.1 -OutputRoot artifacts/packages` — PASS; tenant and center ZIPs built, with attribution files verified in ZIP contents and checksummed manifests. These are disposable verification artifacts, not a release.
 - Patch hygiene: `git diff --check` — PASS; Git reported only line-ending normalization warnings.
+- Fault coverage and evidence boundaries: see [fault matrix](fault-matrix.md); portable test results are separated from SQL/IIS/Entra and host-suspension proofs that remain NOT RUN.
 - SQL-backed tests, disposable IIS installation, Entra sign-in, upgrade interruption, restore, cross-tenant host boundary and measured workload — NOT RUN. A provisioned SQL Server 2022+ fixture and disposable Windows/IIS environment are still required.
 - Hosted GitHub workflows — NOT RUN from this worktree; CI workflow outcomes must be attached to a reviewed revision before release.
 
