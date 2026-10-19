@@ -6,9 +6,13 @@ using Quartz.Extensibility;
 using WorkerDock.Application.Common;
 using WorkerDock.Infrastructure.Dispatch;
 using WorkerDock.Application.Executions;
+using WorkerDock.Application.Scheduling;
 using WorkerDock.Infrastructure.Executions;
+using WorkerDock.Infrastructure.Persistence;
+using WorkerDock.Infrastructure.Scheduling;
 using WorkerDock.Quartz.Dispatch;
 using WorkerDock.Quartz.Hosting;
+using WorkerDock.Quartz.Scheduling;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddHostedService<SchedulerService>();
@@ -26,9 +30,16 @@ internal sealed class SchedulerService(IConfiguration configuration) : Backgroun
         var node = new QuartzNodeOptions(instanceId, Guid.NewGuid().ToString("N"), 4);
         var handle = await topology.CreateExecutionPublisherAsync(node, stoppingToken);
         var store = new SqlProjectionStore(new(connection, instanceId));
+        var options = new TenantDatabaseOptions(connection, instanceId);
+        var evaluator = new QuartzScheduleEvaluator();
+        var scheduleStore = new SqlScheduleCommands(options, evaluator, TimeProvider.System);
+        var occurrenceWriter = new OccurrenceWriter(options, evaluator);
+        DispatchReconciler? reconciler = null;
+        var attempts = new SqlAttemptStore(options);
+        var control = await topology.CreateScheduleAsync(node, new MaintenanceFactory(() => reconciler, attempts, occurrenceWriter, TimeProvider.System), stoppingToken);
         var publisher = new QuartzPublisher(handle, typeof(ExecuteTemplateJob));
-        var reconciler = new DispatchReconciler(store, store, publisher, TimeProvider.System);
-        var control = await topology.CreateScheduleAsync(node, new MaintenanceFactory(reconciler, new SqlAttemptStore(new(connection, instanceId))), stoppingToken);
+        var scheduleProjection = new ScheduleProjection(control, scheduleStore, evaluator);
+        reconciler = new DispatchReconciler(store, store, publisher, TimeProvider.System, scheduleProjection);
         try
         {
             await ProjectionJob.RegisterAsync(control, stoppingToken);
@@ -45,12 +56,13 @@ internal sealed class SchedulerService(IConfiguration configuration) : Backgroun
         }
     }
 
-    private sealed class MaintenanceFactory(DispatchReconciler reconciler, IAttemptStore attempts) : IJobFactory
+    private sealed class MaintenanceFactory(Func<DispatchReconciler?> reconciler, IAttemptStore attempts, IOccurrenceWriter occurrences, TimeProvider clock) : IJobFactory
     {
         public ValueTask<JobScope> CreateJob(TriggerFiredBundle bundle, IScheduler scheduler, CancellationToken cancellationToken = default)
         {
-            IJob job = bundle.JobDetail.JobType == typeof(ProjectionJob) ? new ProjectionJob(reconciler)
+            IJob job = bundle.JobDetail.JobType == typeof(ProjectionJob) ? new ProjectionJob(reconciler() ?? throw new SchedulerException("ProjectionNotReady"))
                 : bundle.JobDetail.JobType == typeof(RecoveryReviewJob) ? new RecoveryReviewJob(attempts)
+                : bundle.JobDetail.JobType == typeof(OccurrenceDispatchJob) ? new OccurrenceDispatchJob(occurrences,clock)
                 : throw new SchedulerException("UnsupportedControlJob");
             return ValueTask.FromResult(new JobScope(job));
         }

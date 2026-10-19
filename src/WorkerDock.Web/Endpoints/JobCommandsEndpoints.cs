@@ -52,14 +52,14 @@ public static class JobCommandsEndpoints
             catch (WorkerDockException error) { return Error(error); }
         }).RequireAuthorization(AccessPolicies.Manage);
 
-        app.MapPost("/api/jobs/{id:guid}/enable-manual", async(Guid id,IJobCommands commands,HttpContext context,CancellationToken ct)=>
+        app.MapPost("/api/jobs/{id:guid}/enable-manual", async(Guid id,IJobLifecycle lifecycle,HttpContext context,CancellationToken ct)=>
         {
             var value=context.Request.Headers.IfMatch.ToString();
             if(value.Length<3 || value[0]!='"' || value[^1]!='"') return Problem(412,"InvalidIfMatch","headers.ifMatch");
             byte[] expected;
             try { expected=Convert.FromBase64String(value[1..^1]); }
             catch(FormatException) { return Problem(412,"InvalidIfMatch","headers.ifMatch"); }
-            try { var receipt=await commands.EnableManualAsync(id,expected,SessionEndpoints.Actor(context),ct); return Results.Accepted($"/api/commands/{receipt.CommandId}",receipt); }
+            try { var receipt=await lifecycle.ApplyAsync(id,"EnableManual",expected,SessionEndpoints.Actor(context),ct); return Results.Accepted($"/api/commands/{receipt.CommandId}",receipt); }
             catch(WorkerDockException error) { return Error(error); }
         }).RequireAuthorization(AccessPolicies.Manage);
 

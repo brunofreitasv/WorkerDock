@@ -1,10 +1,11 @@
 using System.Text.Json;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Dispatch;
+using WorkerDock.Quartz.Scheduling;
 
 namespace WorkerDock.Quartz.Dispatch;
 
-public sealed class DispatchReconciler(IProjectionStore projections, IDispatchStateStore states, QuartzPublisher publisher, TimeProvider clock)
+public sealed class DispatchReconciler(IProjectionStore projections, IDispatchStateStore states, QuartzPublisher publisher, TimeProvider clock, ScheduleProjection? scheduleProjection = null)
 {
     private int reviewTurn;
     public async ValueTask<int> ReconcileAsync(int batchSize, CancellationToken ct)
@@ -21,6 +22,16 @@ public sealed class DispatchReconciler(IProjectionStore projections, IDispatchSt
             ct.ThrowIfCancellationRequested();
             try
             {
+                if (envelope.Kind == "ScheduleProjection")
+                {
+                    var (scheduleId, scheduleRevision) = DecodeSchedule(envelope);
+                    if (scheduleProjection is null) throw new WorkerDockException("UnsupportedProjection");
+                    await scheduleProjection.ApplyAsync(scheduleId, scheduleRevision, ct);
+                    await projections.AcknowledgeAsync(envelope.IntentId, envelope.PayloadDigest, ct);
+                    if (reviews is not null) await reviews.CompleteReviewAsync(envelope.IntentId, false, clock.GetUtcNow().AddMinutes(1), ct);
+                    count++;
+                    continue;
+                }
                 var ordinal = Decode(envelope);
                 var business = await states.ReadAsync(envelope, ordinal, ct);
                 var intent = business.Intent;
@@ -55,7 +66,34 @@ public sealed class DispatchReconciler(IProjectionStore projections, IDispatchSt
             catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
             catch (WorkerDockException) { } // Publication already committed; retry bounded maintenance on the next tick.
         }
+        if (scheduleProjection is not null)
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budget.CancelAfter(TimeSpan.FromSeconds(2));
+            try { await scheduleProjection.ReconcileZoneRuleChangesAsync(budget.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+            catch (WorkerDockException) { } // A later projection pass will retry the bounded scan.
+        }
         return count;
+    }
+
+    private static (Guid ScheduleId, long Revision) DecodeSchedule(ProjectionEnvelope envelope)
+    {
+        try
+        {
+            if (envelope.SchemaVersion != 1 || envelope.Payload.ValueKind != JsonValueKind.Object ||
+                envelope.Payload.EnumerateObject().Any(p => p.Name is not ("scheduleId" or "scheduleRevision" or "deleted")) ||
+                envelope.Payload.EnumerateObject().GroupBy(p => p.Name).Any(group => group.Count() != 1))
+                throw new WorkerDockException("ProjectionIntegrityError");
+            var id = envelope.Payload.GetProperty("scheduleId").GetGuid();
+            var revision = envelope.Payload.GetProperty("scheduleRevision").GetInt64();
+            if (id == Guid.Empty || revision < 1 || id != envelope.EntityId || revision != envelope.EntityRevision ||
+                envelope.PayloadDigest != ProjectionEnvelope.ScheduleDigest(id, revision))
+                throw new WorkerDockException("ProjectionIntegrityError");
+            return (id, revision);
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException)
+        { throw new WorkerDockException("ProjectionIntegrityError"); }
     }
 
     private static int Decode(ProjectionEnvelope envelope)

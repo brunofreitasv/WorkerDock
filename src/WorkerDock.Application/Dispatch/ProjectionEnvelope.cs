@@ -11,4 +11,7 @@ public sealed record ProjectionEnvelope(Guid IntentId, string Kind, int SchemaVe
     public static string ExecutionDigest(Guid executionId, long revision, int ordinal = 1, long capacityRevision = 0) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("ExecutionDispatch|" + executionId.ToString("N") + "|" +
             revision.ToString(CultureInfo.InvariantCulture) + (ordinal == 1 ? "" : "|" + ordinal.ToString(CultureInfo.InvariantCulture)) + (capacityRevision == 0 ? "" : "|capacity=" + capacityRevision.ToString(CultureInfo.InvariantCulture)))));
+
+    public static string ScheduleDigest(Guid scheduleId, long revision) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("ScheduleProjection|" + scheduleId.ToString("N") + "|" + revision.ToString(CultureInfo.InvariantCulture))));
 }

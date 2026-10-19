@@ -1,5 +1,6 @@
 using Quartz;
 using WorkerDock.Application.Common;
+using WorkerDock.Application.Scheduling;
 using WorkerDock.Domain.Scheduling;
 using WorkerDock.Quartz.Scheduling;
 namespace WorkerDock.UnitTests;
@@ -46,6 +47,52 @@ public sealed class ScheduleProjectionTests
         var impossible = new WorkerDockPolicyCalendar("* * 31 2 1", "Etc/UTC");
         Assert.Equal("ScheduleSearchLimit", Assert.Throws<WorkerDockException>(() => impossible.GetNextIncludedTimeUtc(U("2026-01-01T00:00:00Z"))).Code);
         Assert.Equal(DateTimeOffset.MaxValue, new WorkerDockPolicyCalendar("0 0 31 2 *", "Etc/UTC").GetNextIncludedTimeUtc(U("2026-01-01T00:00:00Z")));
+    }
+
+    [Fact]
+    public async Task Stale_projection_rereads_removed_business_state_before_touching_Quartz()
+    {
+        var id = Guid.NewGuid();
+        var current = new ScheduleDefinition(id, 3, "Cron", "* * * * *", "Etc/UTC", null, U("2028-01-01T00:00:00Z"));
+        await using var factory = QuartzSchedulerBuilder.Create(builder =>
+        {
+            builder.ConfigureScheduler(x => { x.InstanceName = "stale-schedule-projection"; x.InstanceId = "stale-schedule-projection"; });
+            builder.UseDefaultThreadPool(1);
+            builder.UseInMemoryStore();
+        }).Build();
+        var scheduler = await factory.GetScheduler();
+        var projection = new ScheduleProjection(scheduler, new CurrentScheduleStore(new(current, false, false, false, true, new string('A', 64))), new QuartzScheduleEvaluator());
+
+        await projection.ApplyAsync(id, 1, default);
+
+        Assert.Empty(await scheduler.GetJobKeys(GroupMatcher<JobKey>.GroupEquals("WorkerDock.Scheduled")));
+        await scheduler.Shutdown();
+    }
+
+    [Fact]
+    public async Task Delayed_projection_publishes_latest_revision_only()
+    {
+        var id = Guid.NewGuid();
+        var current = new ScheduleDefinition(id, 3, "Cron", "* * * * *", "Etc/UTC", null, U("2028-01-01T00:00:00Z"));
+        await using var factory = QuartzSchedulerBuilder.Create(builder =>
+        {
+            builder.ConfigureScheduler(x => { x.InstanceName = "latest-schedule-projection"; x.InstanceId = "latest-schedule-projection"; });
+            builder.UseDefaultThreadPool(1);
+            builder.UseInMemoryStore();
+        }).Build();
+        var scheduler = await factory.GetScheduler();
+        var projection = new ScheduleProjection(scheduler, new CurrentScheduleStore(new(current, true, false, false, false, new string('A', 64))), new QuartzScheduleEvaluator());
+
+        await projection.ApplyAsync(id, 1, default);
+
+        var keys = await scheduler.GetJobKeys(GroupMatcher<JobKey>.GroupEquals("WorkerDock.Scheduled"));
+        Assert.Equal([new JobKey(id.ToString("N") + ".3", "WorkerDock.Scheduled")], keys);
+        await scheduler.Shutdown();
+    }
+
+    private sealed class CurrentScheduleStore(ScheduleProjectionState current) : IScheduleProjectionStore
+    {
+        public ValueTask<ScheduleProjectionState?> ReadProjectionAsync(Guid scheduleId, CancellationToken ct) => ValueTask.FromResult<ScheduleProjectionState?>(current);
     }
 }
 

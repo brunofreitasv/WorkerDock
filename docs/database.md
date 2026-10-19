@@ -375,3 +375,13 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'FullyQualifie
 ```
 
 These cases exercise snapshot OFF/ON, exact bootstrap promotion with restricted grants, immutable mismatch rejection, retirement without metadata loss, rollback refusal and empty up/down/up. Fresh installation now applies all eight pairs through `0004_templates`. The source checksum/custom-schema tests and memory catalog tests are SQL-independent; they cannot prove migration execution, trigger behavior, runtime grants, locking or restart durability. Live SQL acceptance is **SQL_TEST_BLOCKED** until the authorized test credentials are available and the above commands pass.
+
+## Task 14 durable scheduling migration
+
+`0005_scheduling` follows `0004b_integration_settings` and adds the durable schedule cursor, recovery ranges, job activation boundaries, and occurrence foreign-key/check constraints. It grants only the required schedule and recovery-event DML to `WorkerDockRuntime`; all schema changes remain migration-only. Stop/drain writers and back up before applying with the separate migration identity:
+
+```powershell
+dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0005_scheduling
+```
+
+Rollback refuses to discard any saved schedule, scheduled execution, or recovery event. Remove this feature's business data only through an explicitly reviewed migration procedure before rollback. Verify the apply/rollback round trip on the disposable SQL instance; until that has run, real SQL acceptance remains `SQL_TEST_BLOCKED`.

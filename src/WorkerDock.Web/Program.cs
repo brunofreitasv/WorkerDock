@@ -16,6 +16,9 @@ using WorkerDock.Infrastructure.Authentication;
 using WorkerDock.Infrastructure.Jobs;
 using WorkerDock.Application.Settings;
 using WorkerDock.Infrastructure.Settings;
+using WorkerDock.Application.Scheduling;
+using WorkerDock.Infrastructure.Scheduling;
+using WorkerDock.Quartz.Scheduling;
 using WorkerDock.Web.Endpoints;
 using WorkerDock.Templates.SqlServer;
 using WorkerDock.Templates.Http;
@@ -23,6 +26,7 @@ using WorkerDock.Templates.Http;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWorkerDockAccess();
 builder.Services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.TryAddSingleton<IScheduleEvaluator, QuartzScheduleEvaluator>();
 var trustedTemplates = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
 {
     new SqlTemplate().Descriptor,
@@ -105,6 +109,22 @@ builder.Services.TryAddSingleton<IProfileDiagnostics>(provider =>
     return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
         ? new SqlProfileDiagnostics(new(config["Tenant:ConnectionString"]!,id)) : new UnavailableProfileDiagnostics();
 });
+builder.Services.TryAddSingleton<IScheduleCommands>(provider =>
+{
+    var config=provider.GetRequiredService<IConfiguration>();
+    return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlScheduleCommands(new(config["Tenant:ConnectionString"]!,id),provider.GetRequiredService<IScheduleEvaluator>(),provider.GetRequiredService<TimeProvider>())
+        : new UnavailableScheduleCommands();
+});
+builder.Services.TryAddSingleton<SqlJobLifecycle>(provider =>
+{
+    var config=provider.GetRequiredService<IConfiguration>();
+    if(config["Tenant:Adapter"]=="Memory" || !Guid.TryParse(config["Tenant:InstanceId"],out var id) || string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"]))
+        throw new WorkerDockException("PersistenceUnavailable");
+    return new SqlJobLifecycle(new(config["Tenant:ConnectionString"]!,id),provider.GetRequiredService<ITemplateCatalog>(),provider.GetRequiredService<IScheduleEvaluator>(),provider.GetRequiredService<TimeProvider>());
+});
+builder.Services.TryAddSingleton<IJobLifecycle>(provider => provider.GetRequiredService<SqlJobLifecycle>());
+builder.Services.TryAddSingleton<IJobDuplicator>(provider => provider.GetRequiredService<SqlJobLifecycle>());
 var app = builder.Build();
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
@@ -123,6 +143,8 @@ app.MapCapacity();
 app.MapTemplateCatalog();
 app.MapConnectionProfiles();
 app.MapIntegrationSettings();
+app.MapSchedules();
+app.MapJobLifecycle();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -217,6 +239,14 @@ internal sealed class UnavailableCapacityCommands : ICapacityCommands
 internal sealed class UnavailableCapacityStore : ICapacityStore
 {
     public ValueTask<T> TransactAsync<T>(Func<CapacityState,DateTimeOffset,T> change,CancellationToken ct) => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
+}
+internal sealed class UnavailableScheduleCommands : IScheduleCommands
+{
+    private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<CommandReceipt> SaveAsync(Guid jobId,WorkerDock.Domain.Scheduling.ScheduleDefinition definition,WorkerDock.Domain.Scheduling.MissedWorkPolicy policy,byte[]? expectedVersion,ActorContext actor,CancellationToken ct)=>Unavailable<CommandReceipt>();
+    public ValueTask<WorkerDock.Application.Scheduling.ScheduleEditorDto> GetAsync(Guid jobId,CancellationToken ct)=>Unavailable<WorkerDock.Application.Scheduling.ScheduleEditorDto>();
+    public ValueTask<CommandReceipt> DeleteAsync(Guid jobId,byte[] expectedVersion,ActorContext actor,CancellationToken ct)=>Unavailable<CommandReceipt>();
+    public ValueTask<IReadOnlyList<DateTimeOffset>> PreviewAsync(WorkerDock.Domain.Scheduling.ScheduleDefinition definition,DateTimeOffset afterUtc,int count,CancellationToken ct)=>Unavailable<IReadOnlyList<DateTimeOffset>>();
 }
 internal sealed class UnavailableTemplateCatalog : ITemplateCatalog
 {

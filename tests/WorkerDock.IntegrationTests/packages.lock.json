@@ -621,6 +621,7 @@
         "type": "Project",
         "dependencies": {
           "WorkerDock.Infrastructure": "[1.0.0, )",
+          "WorkerDock.Quartz": "[1.0.0, )",
           "WorkerDock.Templates.SqlServer": "[1.0.0, )"
         }
       },

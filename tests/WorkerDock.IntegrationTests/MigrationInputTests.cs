@@ -1,8 +1,28 @@
 using WorkerDock.Application.Common;
 using WorkerDock.DatabaseMigrator;
+using System.Security.Cryptography;
+using System.Text.Json;
 namespace WorkerDock.IntegrationTests;
 public sealed class MigrationInputTests
 {
+    [Fact]
+    public void Tenant_manifest_checksums_match_every_up_and_down_script()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
+        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "manifest.json")));
+        foreach (var entry in manifest.RootElement.EnumerateArray())
+        {
+            var id = entry.GetProperty("id").GetString()!;
+            foreach (var direction in new[] { "up", "down" })
+            {
+                var script = Path.Combine(directory, $"{id}.{direction}.sql");
+                var expected = entry.GetProperty(direction + "Sha256").GetString();
+                Assert.True(File.Exists(script), $"Missing {id}.{direction}.sql");
+                Assert.Equal(expected, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(script))));
+            }
+        }
+    }
+
     [Fact]
     public async Task Modified_script_is_rejected_before_connecting()
     {
