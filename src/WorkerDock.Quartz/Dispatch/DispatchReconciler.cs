@@ -2,10 +2,11 @@ using System.Text.Json;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Dispatch;
 using WorkerDock.Quartz.Scheduling;
+using WorkerDock.Quartz.Alerts;
 
 namespace WorkerDock.Quartz.Dispatch;
 
-public sealed class DispatchReconciler(IProjectionStore projections, IDispatchStateStore states, QuartzPublisher publisher, TimeProvider clock, ScheduleProjection? scheduleProjection = null)
+public sealed class DispatchReconciler(IProjectionStore projections, IDispatchStateStore states, QuartzPublisher publisher, TimeProvider clock, ScheduleProjection? scheduleProjection = null, AlertDeliveryProjection? alertProjection = null)
 {
     private int reviewTurn;
     public async ValueTask<int> ReconcileAsync(int batchSize, CancellationToken ct)
@@ -24,11 +25,20 @@ public sealed class DispatchReconciler(IProjectionStore projections, IDispatchSt
             {
                 if (envelope.Kind == "ScheduleProjection")
                 {
-                    var (scheduleId, scheduleRevision) = DecodeSchedule(envelope);
                     if (scheduleProjection is null) throw new WorkerDockException("UnsupportedProjection");
+                    var (scheduleId, scheduleRevision) = DecodeSchedule(envelope);
                     await scheduleProjection.ApplyAsync(scheduleId, scheduleRevision, ct);
                     await projections.AcknowledgeAsync(envelope.IntentId, envelope.PayloadDigest, ct);
                     if (reviews is not null) await reviews.CompleteReviewAsync(envelope.IntentId, false, clock.GetUtcNow().AddMinutes(1), ct);
+                    count++;
+                    continue;
+                }
+                if (envelope.Kind == "AlertDispatch")
+                {
+                    if (alertProjection is null) throw new WorkerDockException("UnsupportedProjection");
+                    await alertProjection.ApplyAsync(envelope, ct);
+                    await projections.AcknowledgeAsync(envelope.IntentId, envelope.PayloadDigest, ct);
+                    if (reviews is not null) await reviews.CompleteReviewAsync(envelope.IntentId, true, clock.GetUtcNow(), ct);
                     count++;
                     continue;
                 }

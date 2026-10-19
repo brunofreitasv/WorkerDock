@@ -30,6 +30,7 @@ import { JobsTable } from "./features/monitoring/JobsTable";
 import { WorkersPage } from "./features/monitoring/WorkersPage";
 import { ExecutionDetails } from "./features/monitoring/ExecutionDetails";
 import { AuditPage } from "./features/monitoring/AuditPage";
+import { AlertRulesPage } from "./features/alerts/AlertRulesPage";
 const theme = createTheme({
   palette: {
     primary: { main: "#0b6c61", dark: "#064f47", light: "#dff2ed" },
@@ -192,6 +193,7 @@ export default function App() {
         { id: "monitoring", label: t.monitoring },
         { id: "workers", label: preferences.language === "pt-BR" ? "Workers" : "Workers" },
         { id: "audit", label: t.audit },
+        { id: "alerts", label: t.alerts },
         { id: "templates", label: t.templates },
         ...(session.canManage ? [{ id: "jobs", label: t.jobs }] : []),
         ...(session.canManage ? [{ id: "settings", label: t.settings }] : []),
@@ -277,6 +279,8 @@ export default function App() {
                   <WorkersPage language={preferences.language} />
                 ) : active === "audit" ? (
                   <AuditPage language={preferences.language} />
+                ) : active === "alerts" ? (
+                  <AlertRulesPage t={t} canManage={session.canManage} />
                 ) : active === "dashboard" ? (
                   <Dashboard language={preferences.language} onExecution={id => navigate(`execution:${id}`)} />
                 ) : (

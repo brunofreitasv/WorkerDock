@@ -65,11 +65,15 @@ public sealed class SqlProjectionStore(TenantDatabaseOptions options) : IProject
         await TransactAsync(async (connection, transaction, token) =>
         {
             await using var command = SqlAttemptStore.Command(connection, transaction,
-                "UPDATE [workerdock].Outbox SET DispatchedAtUtc=COALESCE(DispatchedAtUtc,SYSUTCDATETIME()),ProjectionState=CASE WHEN ProjectionState=N'Retired' THEN N'Retired' ELSE N'Published' END,LastErrorCode=NULL,RetryAtUtc=NULL OUTPUT inserted.EntityId WHERE EventId=@id AND PayloadDigest=@digest");
+                "UPDATE [workerdock].Outbox SET DispatchedAtUtc=COALESCE(DispatchedAtUtc,SYSUTCDATETIME()),ProjectionState=CASE WHEN ProjectionState=N'Retired' THEN N'Retired' ELSE N'Published' END,LastErrorCode=NULL,RetryAtUtc=NULL OUTPUT inserted.EventType,inserted.EntityId WHERE EventId=@id AND PayloadDigest=@digest");
             SqlAttemptStore.Add(command, "@id", SqlDbType.UniqueIdentifier, intentId);
             SqlAttemptStore.Add(command, "@digest", SqlDbType.Char, payloadDigest, 64);
-            if (await command.ExecuteScalarAsync(token) is not Guid executionId) throw new WorkerDockException("ProjectionIntegrityError");
-            await SqlCommandOutcomes.SettleAsync(connection, transaction, executionId, token);
+            await using var result = await command.ExecuteReaderAsync(token);
+            if (!await result.ReadAsync(token)) throw new WorkerDockException("ProjectionIntegrityError");
+            var eventType = result.GetString(0);
+            var entityId = result.IsDBNull(1) ? Guid.Empty : result.GetGuid(1);
+            await result.CloseAsync();
+            if (eventType == "ExecutionDispatch") await SqlCommandOutcomes.SettleAsync(connection, transaction, entityId, token);
         }, ct);
     }
 
@@ -81,12 +85,19 @@ public sealed class SqlProjectionStore(TenantDatabaseOptions options) : IProject
         await TransactAsync(async (connection, transaction, token) =>
         {
             await using var command = SqlAttemptStore.Command(connection, transaction,
-                "UPDATE [workerdock].Outbox SET ProjectionState=CASE WHEN @code=N'ProjectionHeld' THEN N'Held' WHEN DispatchedAtUtc IS NULL THEN N'Failed' ELSE N'Published' END,LastErrorCode=@code,RetryAtUtc=@retry,ReviewAtUtc=@retry OUTPUT inserted.EntityId WHERE EventId=@id AND ProjectionState<>N'Retired'");
+                "UPDATE [workerdock].Outbox SET ProjectionState=CASE WHEN @code=N'ProjectionHeld' THEN N'Held' WHEN DispatchedAtUtc IS NULL THEN N'Failed' ELSE N'Published' END,LastErrorCode=@code,RetryAtUtc=@retry,ReviewAtUtc=@retry OUTPUT inserted.EventType,inserted.EntityId WHERE EventId=@id AND ProjectionState<>N'Retired'");
             SqlAttemptStore.Add(command, "@id", SqlDbType.UniqueIdentifier, intentId);
             SqlAttemptStore.Add(command, "@code", SqlDbType.NVarChar, safeCode, 40);
             SqlAttemptStore.Add(command, "@retry", SqlDbType.DateTime2, retryAtUtc.UtcDateTime);
-            if (await command.ExecuteScalarAsync(token) is Guid executionId)
-                await SqlCommandOutcomes.SettleAsync(connection, transaction, executionId, token, safeCode is "UnsupportedProjection" or "ProjectionIntegrityError");
+            await using var result = await command.ExecuteReaderAsync(token);
+            if (await result.ReadAsync(token))
+            {
+                var eventType = result.GetString(0);
+                var entityId = result.IsDBNull(1) ? Guid.Empty : result.GetGuid(1);
+                await result.CloseAsync();
+                if (eventType == "ExecutionDispatch")
+                    await SqlCommandOutcomes.SettleAsync(connection, transaction, entityId, token, safeCode is "UnsupportedProjection" or "ProjectionIntegrityError");
+            }
         }, ct);
     }
 

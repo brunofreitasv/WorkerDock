@@ -14,4 +14,7 @@ public sealed record ProjectionEnvelope(Guid IntentId, string Kind, int SchemaVe
 
     public static string ScheduleDigest(Guid scheduleId, long revision) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("ScheduleProjection|" + scheduleId.ToString("N") + "|" + revision.ToString(CultureInfo.InvariantCulture))));
+
+    public static string AlertDigest(Guid deliveryId, int attemptOrdinal) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("AlertDispatch|" + deliveryId.ToString("N") + "|" + attemptOrdinal.ToString(CultureInfo.InvariantCulture))));
 }

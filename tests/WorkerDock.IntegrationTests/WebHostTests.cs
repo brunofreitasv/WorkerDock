@@ -21,7 +21,7 @@ public sealed class WebHostTests
                     ["Tenant:ConnectionString"] = ""
                 })));
         using var client = factory.CreateClient(new() { BaseAddress = new("https://localhost") });
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
         using var getOriginal = await client.GetAsync("/api/settings");
         var original = await getOriginal.Content.ReadFromJsonAsync<SettingsResponse>();
         Assert.NotNull(original);

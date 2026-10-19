@@ -2,6 +2,7 @@
 **/obj/
 .vs/
 TestResults/
+**/test-results/
 .superpowers/
 *.user
 *.suo

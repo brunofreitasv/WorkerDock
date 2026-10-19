@@ -28,6 +28,8 @@ using WorkerDock.Contracts.Secrets;
 using WorkerDock.Infrastructure.Secrets;
 using WorkerDock.Application.Observability;
 using WorkerDock.Infrastructure.Observability;
+using WorkerDock.Application.Alerts;
+using WorkerDock.Infrastructure.Alerts;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWorkerDockAccess();
@@ -147,6 +149,31 @@ builder.Services.TryAddSingleton<IExecutionEventQueries>(provider =>
         ? new SqlExecutionEventQueries(new(config["Tenant:ConnectionString"]!, id))
         : new UnavailableExecutionEventQueries();
 });
+builder.Services.TryAddSingleton<UnavailableAlertConfigurations>();
+builder.Services.TryAddSingleton<IAlertRules>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlAlertRules(new(config["Tenant:ConnectionString"]!, id)) : provider.GetRequiredService<UnavailableAlertConfigurations>();
+});
+builder.Services.TryAddSingleton<IAlertSinks>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlAlertRules(new(config["Tenant:ConnectionString"]!, id)) : provider.GetRequiredService<UnavailableAlertConfigurations>();
+});
+builder.Services.TryAddSingleton<IAlertQueries>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlAlertQueries(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableAlertQueries();
+});
+builder.Services.TryAddSingleton<IAlertDeliveryStore>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
+        ? new SqlAlertDeliveryStore(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableAlertDeliveryStore();
+});
 var app = builder.Build();
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
@@ -169,6 +196,7 @@ app.MapSchedules();
 app.MapJobLifecycle();
 app.MapMonitoring();
 app.MapExecutionEventEndpoints();
+app.MapAlerts();
 app.MapHealthEndpoints();
 app.UseDefaultFiles();
 app.UseStaticFiles();
@@ -214,6 +242,30 @@ app.Map("/_test/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 app.Run();
 public partial class Program;
+internal sealed class UnavailableAlertQueries : IAlertQueries
+{
+    private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<IReadOnlyList<AlertIncidentDto>> ListIncidentsAsync(int limit, CancellationToken ct) => Unavailable<IReadOnlyList<AlertIncidentDto>>();
+    public ValueTask<IReadOnlyList<AlertDeliveryDto>> ListDeliveriesAsync(int limit, CancellationToken ct) => Unavailable<IReadOnlyList<AlertDeliveryDto>>();
+}
+internal sealed class UnavailableAlertDeliveryStore : IAlertDeliveryStore
+{
+    private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<AlertDeliveryClaim?> TryBeginAsync(Guid deliveryId, int expectedAttemptOrdinal, Guid ownerBootId, CancellationToken ct) => Unavailable<AlertDeliveryClaim?>();
+    public ValueTask<bool> RenewAsync(AlertDeliveryLease lease, CancellationToken ct) => Unavailable<bool>();
+    public ValueTask<bool> CompleteAsync(AlertDeliveryLease lease, WorkerDock.Contracts.Alerts.AlertDeliveryResult result, CancellationToken ct) => Unavailable<bool>();
+    public ValueTask<CommandReceipt> RetryFailedAsync(Guid deliveryId, int additionalAttempts, ActorContext actor, CancellationToken ct) => Unavailable<CommandReceipt>();
+}
+internal sealed class UnavailableAlertConfigurations : IAlertRules, IAlertSinks
+{
+    private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
+    ValueTask<IReadOnlyList<AlertRuleEditorDto>> IAlertRules.ListAsync(CancellationToken ct) => Unavailable<IReadOnlyList<AlertRuleEditorDto>>();
+    ValueTask<AlertRuleEditorDto> IAlertRules.GetAsync(Guid id, CancellationToken ct) => Unavailable<AlertRuleEditorDto>();
+    ValueTask<CommandReceipt> IAlertRules.SaveAsync(WorkerDock.Domain.Alerts.AlertRule rule, byte[]? expectedVersion, ActorContext actor, CancellationToken ct) => Unavailable<CommandReceipt>();
+    ValueTask<IReadOnlyList<AlertSinkEditorDto>> IAlertSinks.ListAsync(CancellationToken ct) => Unavailable<IReadOnlyList<AlertSinkEditorDto>>();
+    ValueTask<AlertSinkEditorDto> IAlertSinks.GetAsync(Guid id, CancellationToken ct) => Unavailable<AlertSinkEditorDto>();
+    ValueTask<CommandReceipt> IAlertSinks.SaveAsync(AlertSinkDefinition sink, byte[]? expectedVersion, ActorContext actor, CancellationToken ct) => Unavailable<CommandReceipt>();
+}
 public sealed record SettingsUpdate(string DisplayName, string DisplayTimeZone);
 internal sealed class UnavailableTenantSettingsService : ITenantSettingsService
 {
