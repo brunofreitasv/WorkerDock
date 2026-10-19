@@ -1,5 +1,11 @@
 # Windows deployment
 
+Use the [production deployment guide](how-to/deploy-production.md) for the
+current sequence, [tenant configuration](how-to/configure-tenants.md) for
+settings and Control Center registration, and
+[SQL setup](how-to/setup-sql-server.md) for runtime and test-only objects.
+This page retains additional installer behavior and operational detail.
+
 WorkerDock runs as separate tenant applications. A tenant installation contains an IIS application, a Quartz scheduler Windows service, and one or more generic WorkerDock worker Windows services. Adding a job or changing its template concurrency does not install or remove a Windows service. Install another worker service only when you want another process or host-capacity boundary.
 
 The Control Center is installed separately. It stores tenant URLs and health credential references in its own central database; it does not provision tenant databases or copy tenant job data. Tenant dashboard access follows the tenant's Entra authentication policy. The Control Center role requirement protects only management actions.

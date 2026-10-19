@@ -1,5 +1,11 @@
 # Local development
 
+Start with the [memory-only tutorial](tutorials/run-in-memory.md) or the
+[SQL Server tutorial](tutorials/run-with-sql-server.md). This page retains
+detailed test commands and earlier implementation notes. Use the tutorials for
+the current end-to-end startup procedure and the
+[configuration reference](reference/configuration.md) for host settings.
+
 Install .NET SDK 10.0.402 and Node.js 24.15.0 or a compatible maintained Node release (Node is needed only to build/test assets). From the repository root:
 
 ```powershell

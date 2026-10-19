@@ -1,0 +1,137 @@
+# Run WorkerDock with SQL Server
+
+This local setup runs the Tenant UI, Worker and Scheduler against one tenant
+database. The Control Center runs with its Development memory registry; a
+SQL-backed central registry needs separate central database provisioning.
+Keep all hosts bound to localhost.
+
+## Prerequisites
+
+- Windows, .NET SDK 10.0.402, Node.js 24.15.0 or a compatible maintained Node
+  release, and SQL Server 2022 or later.
+- A dedicated empty tenant database, a deployment-only migrator login with DDL
+  rights, and a restricted runtime login with membership in `WorkerDockRuntime`.
+- A stable, newly generated GUID for this database. Do not reuse the GUID from
+  a memory run or another tenant.
+
+For SQL Server installation, database creation, grants, and connection string
+details, follow the [SQL Server setup guide](../how-to/setup-sql-server.md).
+This tutorial uses placeholders and does not create or grant a database.
+
+## Migrate and build
+
+At the repository root, set the migrator connection and tenant identity from
+your local secret store or deployment configuration. Avoid committing these
+values or saving credentials in shell history.
+
+```powershell
+$env:WORKERDOCK_INSTANCE_ID='<stable-tenant-guid>'
+$env:WORKERDOCK_SQL='<dedicated-local-tenant-migrator-connection-string>'
+dotnet run --project src/WorkerDock.DatabaseMigrator -c Release -- apply tenant 0008_retention
+
+dotnet restore WorkerDock.slnx --locked-mode
+npm.cmd --prefix frontend ci
+npm.cmd --prefix frontend run build
+dotnet publish src/WorkerDock.Executor -c Release -r win-x64 --self-contained false
+dotnet dev-certs https --trust
+```
+
+`0008_retention` is the latest tenant migration in this checkout. Confirm the
+last ID in `database/tenant/manifest.json` if the checkout has advanced.
+
+Set the same tenant runtime settings in each service window:
+
+```powershell
+$env:Tenant__InstanceId='<stable-tenant-guid>'
+$env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
+```
+
+## Start the services
+
+Start each command in its own PowerShell window from the repository root.
+
+Tenant UI (serves the built frontend and API on the same origin):
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT='Development'
+$env:Tenant__Adapter='Sql'
+$env:Tenant__InstanceId='<stable-tenant-guid>'
+$env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
+dotnet run --project src/WorkerDock.Web --urls https://localhost:5001
+```
+
+Worker (choose a stable unique installation GUID). The digest below is the
+aggregate digest computed from the built-in SQL Server and HTTP descriptors in
+this checkout. Recompute it with `TemplateMetadata.AggregateDigest` when
+changing either descriptor or adding a trusted template; a mismatch prevents
+the worker from starting.
+
+```powershell
+$env:Tenant__InstanceId='<stable-tenant-guid>'
+$env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
+$env:Worker__InstallationId='<stable-unique-worker-installation-guid>'
+$env:Worker__CatalogDigest='01C0E4668C9E5DEF4CA97A1B1E2AF21CBA31A9697D34D824D9C9091094B48BB5'
+$env:Worker__HostCeiling='10'
+$env:Worker__DrainSeconds='40'
+$env:Executor__Path=(Resolve-Path 'src/WorkerDock.Executor/bin/Release/net10.0-windows/win-x64/publish/WorkerDock.Executor.exe').Path
+dotnet run --project src/WorkerDock.Worker -c Release
+```
+
+Scheduler:
+
+```powershell
+$env:Tenant__InstanceId='<stable-tenant-guid>'
+$env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
+dotnet run --project src/WorkerDock.Scheduler -c Release
+```
+
+Control Center, using a local memory registry:
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT='Development'
+$env:Central__Adapter='Memory'
+$env:Central__InstanceId=[guid]::NewGuid().ToString()
+$env:Central__Health__AllowedHosts__0='localhost'
+dotnet run --project src/WorkerDock.ControlCenter --urls https://localhost:5002
+```
+
+The Tenant UI is at <https://localhost:5001/> and Control Center at
+<https://localhost:5002/>. Check `/health/live` on both web hosts. Check
+`/health/ready` on the Control Center after startup; the Tenant readiness route
+may remain unavailable because its monitoring projection is not provided by
+this local setup. Confirm Worker registration and Scheduler startup in their
+console logs. The web process serves the frontend assets; Node is not a runtime
+dependency. The Control Center's tenant health probe accepts only HTTPS port
+443, so the tenant on port 5001 cannot be registered as a probe target in this
+local tutorial.
+
+Workers begin with zero acquisition limits. To allow one HTTP attempt, set
+both the template and this worker's limit after it has registered. In another
+PowerShell window, use the worker installation GUID chosen above:
+
+```powershell
+$origin='https://localhost:5001'
+$null=Invoke-WebRequest "$origin/api/session" -SessionVariable browser
+$csrf=Invoke-RestMethod "$origin/api/antiforgery" -WebSession $browser
+$headers=@{'X-WorkerDock-CSRF'=$csrf.requestToken;'Origin'=$origin}
+Invoke-RestMethod "$origin/api/templates/workerdock.http/limit" -Method Put -WebSession $browser -Headers $headers -ContentType 'application/json' -Body '{"limit":1}'
+Invoke-RestMethod "$origin/api/workers/<stable-unique-worker-installation-guid>/limit" -Method Put -WebSession $browser -Headers $headers -ContentType 'application/json' -Body '{"limit":1}'
+```
+
+These commands require management access. The responses are accepted command
+receipts; wait until `GET /api/capacity` reports the effective revision before
+expecting dispatch. A job also needs a valid configuration and must be enabled.
+Use the same API with `workerdock.sql-server` to open that template's limit.
+
+## Stop and clean up
+
+Stop all four processes with Ctrl+C. Keep the tenant database to preserve local
+SQL data. To remove a disposable database, stop the services, back up anything
+needed, then drop only that dedicated database using your SQL Server
+administration tool. Do not run migration rollback against a populated database;
+see the setup guide for rollback limits.
+
+See [Local development](../development.md) for SQL-independent test commands
+and [Database setup](../database.md) for migration and runtime role details.
+
+\n

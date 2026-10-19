@@ -1,27 +1,23 @@
 # WorkerDock
 
-WorkerDock is an open-source, self-hosted platform for scheduling, executing, monitoring, and auditing jobs. It uses a React dashboard, .NET services, Quartz.NET with SQL Server persistence, and isolated child processes for job attempts. The supported deployment model is Windows with IIS and SQL Server; SQL Server remains a separately installed prerequisite.
+WorkerDock is a self-hosted platform for creating, scheduling, running, monitoring, and auditing jobs. It includes a React operator dashboard, .NET services, SQL Server and Quartz.NET for deployed scheduling, and trusted SQL Server and HTTP worker templates. Each tenant has its own database and runtime services; the optional Control Center links to independently deployed tenants. No external message broker is required.
 
-## Status
+## Getting started
 
-This repository contains an implementation in progress. The documented design and deployment guides describe intended and implemented behavior, but do not establish that the full product has passed release validation. Live IIS, SQL Server, identity-provider, upgrade/restore, and workload validation must be completed on the target environment before production use. See the [release checklist](docs/release-checklist.md) and [release evidence guidance](docs/superpowers/plans/2026-10-17-workerdock-06-release.md).
+Choose the path that matches what you want to try:
 
-## Requirements and setup
+1. **No SQL Server:** [Run a local in-memory instance](docs/tutorials/run-in-memory.md). This disposable development mode starts the web dashboard and API without a database.
+2. **Real SQL Server:** [Set up runtime database objects](docs/how-to/setup-sql-server.md), then [run locally with SQL Server](docs/tutorials/run-with-sql-server.md).
+3. **Windows deployment:** [Deploy to production](docs/how-to/deploy-production.md), then [configure each tenant](docs/how-to/configure-tenants.md).
 
-Deployed instances require Windows Server 2022 or newer, IIS, PowerShell 7, the .NET 10 Hosting Bundle, and SQL Server 2022 or newer (compatibility level 160 by default). Windows 11 supports local development. Each tenant uses an independent database; the Control Center has a separate database. Redis, RabbitMQ, and an external message broker are not required. Entra ID/OIDC is optional, while job destination integrations and production secret providers are deployment-specific.
+The [documentation index](docs/index.md) groups tutorials, how-to guides, reference, and explanation using [Diátaxis](https://diataxis.fr/). It also links to template authoring, authentication, scheduling, monitoring, and troubleshooting.
 
-Use the [database setup guide](docs/database.md) for local SQL Server and migration instructions, [Windows deployment](docs/deployment.md) for package and installation steps, and [upgrade and restore](docs/upgrades.md) before changing a deployed release. The deployment examples in `deploy/config/` are placeholders; replace them in protected deployment storage and provide credentials through the configured secret mechanisms. Never commit real credentials.
+## Database scripts
 
-For frontend-only work, use the package scripts in `frontend/package.json`. For .NET work, use the pinned SDK in `global.json` and `WorkerDock.slnx`. A memory adapter exists for development and tests; it is not a deployed SQL substitute.
+Runtime migrations and their rollbacks are in [`database/tenant`](database/tenant) and [`database/central`](database/central). The migrator applies them from checksummed manifests. SQL fixtures under [`tests/sql`](tests/sql) and [`tests/WorkerDock.IntegrationTests/Sql`](tests/WorkerDock.IntegrationTests/Sql) are for disposable integration-test databases only; they are not part of production setup. See [database object reference](docs/reference/database-objects.md) and the [SQL setup guide](docs/how-to/setup-sql-server.md) for exact commands and permissions.
 
-## Architecture
+## Project status
 
-Read [architecture](docs/architecture.md) for service boundaries, data ownership, scheduling, execution guarantees, authentication, and operational limits. [Troubleshooting](docs/troubleshooting.md) covers common setup and runtime issues. Existing focused operational guides include [retention and archive operations](docs/retention-archive.md), [database setup](docs/database.md), [deployment](docs/deployment.md), and [upgrades](docs/upgrades.md).
+The implementation is still in release validation. Portable builds and tests do not establish live SQL Server, Windows/IIS, Entra ID, upgrade/restore, or workload readiness. See the [release checklist](docs/release-checklist.md) and [recorded evidence](docs/validation/release-evidence.md) before production use.
 
-## Security and contributions
-
-Review [SECURITY.md](SECURITY.md) before deployment and [CONTRIBUTING.md](CONTRIBUTING.md) before changing or extending the code. Custom template packages execute trusted code with access to the credentials and network destinations granted to their service identity. Review and deploy packages through a controlled worker release.
-
-## License
-
-WorkerDock is licensed under the MIT License; see [LICENSE](LICENSE). Third-party dependency licenses and notices continue to apply.
+WorkerDock uses the [MIT License](LICENSE). Read [SECURITY.md](SECURITY.md) for security reporting and [CONTRIBUTING.md](CONTRIBUTING.md) before contributing.

@@ -1,5 +1,10 @@
 # Tenant database setup and verification
 
+For a first installation, follow [Set up SQL Server](how-to/setup-sql-server.md).
+It separates runtime migrations from test-only SQL objects; the
+[database object reference](reference/database-objects.md) inventories both.
+This page retains detailed migration and test-suite notes.
+
 Use SQL Server 2022 or newer. The tenant database requires compatibility level 160. Set up a dedicated, disposable SQL instance for integration tests. The test login must be able to create and drop its own `WorkerDock_Test_<32 hex digits>` databases in `master`. `SqlDatabaseFixture` generates that name, creates the database, tests with `READ_COMMITTED_SNAPSHOT` both OFF and ON, and drops only that generated database. Never point the fixture at an existing user database.
 
 On Windows, install a local SQL Server 2022 Developer or Express instance, start its Database Engine service, and have an administrator provision a dedicated test login with permission to create databases. Use an integrated-authentication connection supplied through deployment secrets when that Windows identity is authorized. If Windows authentication is rejected, use a dedicated SQL test login provisioned by the administrator; do not change server permissions as part of the test run.
