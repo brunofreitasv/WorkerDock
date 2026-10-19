@@ -45,6 +45,8 @@ function Copy-Frontend([string] $WorkspaceName, [string] $WebRoot, [string] $Dis
         throw "Frontend package.json is missing: $relativeApp/package.json"
     }
     New-Item -ItemType Directory -Path $DistPath -Force | Out-Null
+    & node (Join-Path $frontendRoot 'scripts/licenses.mjs')
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend third-party notice generation failed.' }
     # Both Vite configs default to source-tree wwwroot. The CLI override directs this
     # release build to isolated staging, leaving development/runtime source untouched.
     & npm.cmd --prefix $frontendRoot run build --workspace $WorkspaceName -- --outDir $DistPath --configLoader runner
@@ -131,6 +133,12 @@ try {
     Copy-Item -LiteralPath $tenantConfig -Destination (Join-Path $tenantRoot 'tenant.example.json')
     Copy-Item -LiteralPath $workerConfig -Destination (Join-Path $tenantRoot 'worker.example.json')
     Copy-Item -LiteralPath $centerConfig -Destination (Join-Path $centerRoot 'center.example.json')
+
+    foreach ($packageRoot in @($tenantRoot, $centerRoot)) {
+        Copy-Item -LiteralPath (Get-RequiredPath 'LICENSE') -Destination (Join-Path $packageRoot 'LICENSE')
+        Copy-Item -LiteralPath (Get-RequiredPath 'NOTICE') -Destination (Join-Path $packageRoot 'NOTICE')
+        Copy-Item -LiteralPath (Get-RequiredPath 'docs/THIRD-PARTY-NOTICES-dotnet.md') -Destination (Join-Path $packageRoot 'THIRD-PARTY-NOTICES-dotnet.md')
+    }
 
     Write-PackageManifest $tenantRoot 'tenant' $TenantSchemaMinVersion $TenantSchemaMaxVersion
     Write-PackageManifest $centerRoot 'center' $CenterSchemaMinVersion $CenterSchemaMaxVersion

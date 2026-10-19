@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>WorkerDock.SampleTemplate</PackageId>
+    <Version>1.0.0</Version>
+    <Description>A harmless WorkerDock template demonstrating validation, safe logging, and cancellation.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/WorkerDock.Contracts/WorkerDock.Contracts.csproj" />
+  </ItemGroup>
+</Project>

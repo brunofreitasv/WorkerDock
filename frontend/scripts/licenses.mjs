@@ -26,6 +26,8 @@ for (const [location, entry] of Object.entries(lock.packages)) {
   for (const file of files)
     notices.push(await readFile(resolve(folder, file), "utf8"));
 }
-const target = resolve(root, "apps/tenant/public/THIRD-PARTY-NOTICES.txt");
-await mkdir(dirname(target), { recursive: true });
-await writeFile(target, notices.join("\n\n") + "\n");
+for (const app of ["tenant", "center"]) {
+  const target = resolve(root, `apps/${app}/public/THIRD-PARTY-NOTICES.txt`);
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, notices.join("\n\n") + "\n");
+}

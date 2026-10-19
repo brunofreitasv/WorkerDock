@@ -1,6 +1,5 @@
 using System.Data;
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
@@ -142,17 +141,6 @@ public class SqlTemplate : IWorkerTemplate
         "name":{"type":"string","maxLength":128},"dbType":{"type":"string","enum":["BigInt","Int","SmallInt","TinyInt","Bit","Decimal","Float","Real","Money","SmallMoney","NVarChar","VarChar","NChar","Char","UniqueIdentifier","Date","DateTime","DateTime2","DateTimeOffset","Time","Binary","VarBinary"]},"value":{"type":["string","number","boolean","null"]},"secret":{"type":["object","null"],"additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string","minLength":1,"maxLength":128,"x-workerDock-secretReference":true}}},"useExecutionKey":{"type":"boolean"},"isNull":{"type":"boolean"},"size":{"type":["integer","null"],"minimum":-1,"maximum":1048576},"precision":{"type":["integer","null"],"minimum":1,"maximum":38},"scale":{"type":["integer","null"],"minimum":0,"maximum":38}}}}}}
         """);
         var descriptor=new TemplateDescriptor("workerdock.sql-server","1.0.0","SQL Server","Execute a parameterized query or stored procedure using a named connection profile.",schema.RootElement.Clone(),JsonSerializer.SerializeToElement(new {}),"");
-        using var stream=new MemoryStream(); using(var writer=new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartArray(); writer.WriteStringValue(descriptor.Id);writer.WriteStringValue(descriptor.Version);writer.WriteStringValue(descriptor.DisplayName);writer.WriteStringValue(descriptor.Description);
-            Canonical(writer,descriptor.ConfigurationSchema);Canonical(writer,descriptor.UiHints);writer.WriteEndArray();
-        }
-        return descriptor with { MetadataDigest=Convert.ToHexString(SHA256.HashData(stream.ToArray())) };
-    }
-    private static void Canonical(Utf8JsonWriter writer,JsonElement element)
-    {
-        if(element.ValueKind==JsonValueKind.Object) { writer.WriteStartObject();foreach(var p in element.EnumerateObject().OrderBy(x=>x.Name,StringComparer.Ordinal)){writer.WritePropertyName(p.Name);Canonical(writer,p.Value);}writer.WriteEndObject(); }
-        else if(element.ValueKind==JsonValueKind.Array){writer.WriteStartArray();foreach(var v in element.EnumerateArray())Canonical(writer,v);writer.WriteEndArray();}
-        else element.WriteTo(writer);
+        return TemplateDescriptorMetadata.WithDigest(descriptor);
     }
 }

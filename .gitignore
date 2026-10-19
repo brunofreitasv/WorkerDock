@@ -9,6 +9,8 @@ TestResults/
 .env
 
 **/node_modules/
+artifacts/
 src/WorkerDock.Web/wwwroot/
 src/WorkerDock.ControlCenter/wwwroot/
 frontend/apps/tenant/public/THIRD-PARTY-NOTICES.txt
+frontend/apps/center/public/THIRD-PARTY-NOTICES.txt

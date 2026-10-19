@@ -256,25 +256,7 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
           "maxResponseBytes":{"type":"integer","minimum":1,"maximum":2097152},"responseMode":{"type":"string","default":"SafeSummary","enum":["Discard","SafeSummary"]}}}
         """);
         var descriptor = new TemplateDescriptor("workerdock.http", "1.0.0", "HTTP request", "Send a bounded HTTP request through the deployment outbound policy.", schema.RootElement.Clone(), JsonSerializer.SerializeToElement(new { }), "");
-        return descriptor with { MetadataDigest = ComputeDigest(descriptor) };
-    }
-
-    private static string ComputeDigest(TemplateDescriptor descriptor)
-    {
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartArray(); writer.WriteStringValue(descriptor.Id); writer.WriteStringValue(descriptor.Version);
-            writer.WriteStringValue(descriptor.DisplayName); writer.WriteStringValue(descriptor.Description);
-            WriteCanonical(writer, descriptor.ConfigurationSchema); WriteCanonical(writer, descriptor.UiHints); writer.WriteEndArray();
-        }
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream.ToArray()));
-    }
-    private static void WriteCanonical(Utf8JsonWriter w, JsonElement e)
-    {
-        if (e.ValueKind == JsonValueKind.Object) { w.WriteStartObject(); foreach (var p in e.EnumerateObject().OrderBy(x => x.Name, StringComparer.Ordinal)) { w.WritePropertyName(p.Name); WriteCanonical(w, p.Value); } w.WriteEndObject(); }
-        else if (e.ValueKind == JsonValueKind.Array) { w.WriteStartArray(); foreach (var x in e.EnumerateArray()) WriteCanonical(w, x); w.WriteEndArray(); }
-        else e.WriteTo(w);
+        return TemplateDescriptorMetadata.WithDigest(descriptor);
     }
 
     private sealed class CancellationSchedule : IDisposable
