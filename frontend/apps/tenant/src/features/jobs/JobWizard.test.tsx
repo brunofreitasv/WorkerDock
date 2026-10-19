@@ -137,6 +137,7 @@ test("duplicating a scheduled job uses the target 404 schedule state and enables
 test("a selected persisted schedule can be enabled after review", async () => {
   const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };
   const jobId = "11111111-1111-4111-8111-111111111111";
+  let scheduleConfirmed = false;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
     const method = init?.method ?? "GET";
@@ -147,6 +148,7 @@ test("a selected persisted schedule can be enabled after review", async () => {
     else if (url.pathname === "/api/jobs" && method === "POST") { status = 202; body = { targetId: jobId }; }
     else if (url.pathname === `/api/jobs/${jobId}/configuration`) body = { revision: { jobId, revision: 1, name: "Scheduled job", templateId: "sample", templateVersion: "1", configuration: {}, profileId: null, policy: { timeout: null } }, version: [1], enabled: false, archived: false, concurrencyLimit: 1 };
     else if (url.pathname === `/api/jobs/${jobId}/schedule` && method === "PUT") { status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}/schedule` && method === "GET") { scheduleConfirmed = true; body = { input: { kind: "Cron", cron: "0 9 * * 1-5", zoneId: "UTC", localOnce: null, selectedOffset: null }, policy: { mode: "Skip" }, paused: false }; }
     else if (url.pathname === "/api/antiforgery") body = { requestToken: "test" };
     return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ETag: '"current"' } });
   }));
@@ -160,9 +162,63 @@ test("a selected persisted schedule can be enabled after review", async () => {
   await user.click(screen.getByRole("button", { name: "Next" }));
   await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
   await waitFor(() => expect(screen.getByText("Disabled draft saved.")).toBeVisible());
+  expect(scheduleConfirmed).toBe(true);
   await user.click(screen.getByRole("button", { name: "Next" }));
   expect(screen.getByRole("button", { name: "Enable job" })).toBeEnabled();
   expect(screen.queryByRole("button", { name: "Pause schedule" })).not.toBeInTheDocument();
+});
+
+async function startScheduledDraftWithPutFailure(status: 412 | 503) {
+  const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };
+  const jobId = "11111111-1111-4111-8111-111111111111";
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    const method = init?.method ?? "GET";
+    let responseStatus = 200;
+    let body: any = {};
+    if (url.pathname === "/api/templates") body = { items: [{ selectable: true, descriptor }] };
+    else if (url.pathname === "/api/time-zones") body = ["UTC"];
+    else if (url.pathname === "/api/jobs" && method === "POST") { responseStatus = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}/configuration`) body = { revision: { jobId, revision: 1, name: "Scheduled failure", templateId: "sample", templateVersion: "1", configuration: {}, profileId: null, policy: { timeout: null } }, version: [1], enabled: false, archived: false, concurrencyLimit: 1 };
+    else if (url.pathname === `/api/jobs/${jobId}/schedule` && method === "PUT") { responseStatus = status; body = { code: status === 412 ? "StaleVersion" : "Unavailable" }; }
+    else if (url.pathname === `/api/jobs/${jobId}/schedule` && method === "GET") { responseStatus = 404; body = { code: "NotFound" }; }
+    else if (url.pathname === "/api/antiforgery") body = { requestToken: "test" };
+    return new Response(JSON.stringify(body), { status: responseStatus, headers: { "Content-Type": "application/json", ETag: '"current"' } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "Scheduled failure");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByLabelText("Use a schedule"));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getAllByRole("alert").some(alert => status === 412 ? /draft is preserved/i.test(alert.textContent ?? "") : /schedule removal could not be confirmed/i.test(alert.textContent ?? ""))).toBe(true));
+  return user;
+}
+
+test("initial schedule PUT 412 enters explicit re-review and cannot enable unseen schedule state", async () => {
+  const user = await startScheduledDraftWithPutFailure(412);
+  expect(screen.getByRole("button", { name: "Load current revision" })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Load current revision" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "I reviewed this current revision" })).toBeVisible());
+  await user.click(screen.getByRole("button", { name: "Restore my draft" }));
+  expect(screen.getByText(/Scheduled failure/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Save disabled draft" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "I reviewed this current revision" }));
+  expect(screen.getByRole("button", { name: "Save disabled draft" })).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("button", { name: "Enable job" })).toBeDisabled();
+  expect(screen.queryByText(/Manual job/)).not.toBeInTheDocument();
+});
+
+test("initial schedule PUT 503 remains unresolved and blocks activation", async () => {
+  const user = await startScheduledDraftWithPutFailure(503);
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("button", { name: "Enable job" })).toBeDisabled();
+  expect(screen.getAllByRole("alert").some(alert => /schedule removal could not be confirmed/i.test(alert.textContent ?? ""))).toBe(true);
+  expect(screen.queryByText(/Manual job/)).not.toBeInTheDocument();
 });
 
 test("manual enable is available only after a deleted schedule is confirmed absent", async () => {

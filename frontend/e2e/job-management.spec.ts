@@ -98,6 +98,10 @@ test("guided create, stale edit, lifecycle, duplicate, retry and confirmed force
   expect((await failedSchedule).status()).toBe(412);
   await expect(page.getByText("Disabled", { exact: true })).toBeVisible();
   expect(requests.filter(request => request.path === "/api/jobs")).toHaveLength(1);
+  await expect(page.getByRole("button", { name: "Load current revision" })).toBeVisible();
+  await page.getByRole("button", { name: "Load current revision" }).click();
+  await page.getByRole("button", { name: "Restore my draft" }).click();
+  await page.getByRole("button", { name: "I reviewed this current revision" }).click();
   await page.getByRole("button", { name: "Save disabled draft" }).click();
   await expect(page.getByText("Disabled draft saved.")).toBeVisible();
   expect(requests.some(request => request.path.endsWith("/schedule") && request.method === "PUT")).toBe(true);
