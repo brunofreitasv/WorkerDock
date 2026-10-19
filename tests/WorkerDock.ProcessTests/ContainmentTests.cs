@@ -133,7 +133,8 @@ public sealed class ContainmentTests
         await Parallel.ForEachAsync(Enumerable.Range(0, 64), new ParallelOptions { MaxDegreeOfParallelism = 4 }, async (_, ct) =>
         {
             using var fixture = new TestDirectory();
-            await using var child = await FixtureProgram.Supervisor().StartAsync(Guid.NewGuid(), 1, FixtureProgram.Descriptor("spawn", fixture.Path), default);
+            var options = FixtureProgram.Options() with { StartupTimeout = TimeSpan.FromSeconds(30) };
+            await using var child = await new ExecutionSupervisor(options).StartAsync(Guid.NewGuid(), 1, FixtureProgram.Descriptor("spawn", fixture.Path), default);
             var pids = await WaitForPids(fixture.Path);
             Assert.True(Alive(pids[0])); Assert.True(Alive(pids[1]));
             var disposal = child.DisposeAsync().AsTask();

@@ -25,6 +25,7 @@ using WorkerDock.Infrastructure.Retention;
 using WorkerDock.Quartz.Retention;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddWindowsService();
 builder.Services.AddHostedService<SchedulerService>();
 await builder.Build().RunAsync();
 

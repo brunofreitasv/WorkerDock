@@ -1,0 +1,16 @@
+{
+  "Tenant": {
+    "InstanceId": "<TENANT_INSTANCE_GUID>",
+    "ConnectionString": "Server=<SQL_SERVER>;Database=<TENANT_DATABASE>;Integrated Security=true;Encrypt=true;TrustServerCertificate=false;Application Name=WorkerDock-Worker"
+  },
+  "Worker": {
+    "InstallationId": "<WORKER_INSTALLATION_GUID>",
+    "CatalogDigest": "<64_CHARACTER_TEMPLATE_CATALOG_SHA256>",
+    "HostCeiling": 10,
+    "DrainSeconds": 40
+  },
+  "Executor": {
+    "Path": "<INSTALL_ROOT>\\worker\\executor\\WorkerDock.Executor.exe",
+    "Arguments": []
+  }
+}

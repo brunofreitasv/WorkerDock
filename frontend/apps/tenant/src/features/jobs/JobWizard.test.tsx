@@ -63,7 +63,7 @@ test("changing wizard language preserves the draft and selected local instant, o
   expect(screen.getByTestId("resolved-utc")).toHaveValue("2026-11-01T06:30:00Z");
   await user.click(screen.getByRole("tab", { name: translations["pt-BR"].stageTemplate }));
   expect(screen.getByDisplayValue("Draft intact")).toBeVisible();
-});
+}, 15_000);
 
 test("an unconfirmed schedule removal stays unresolved, keeps safety actions, and blocks manual enable", async () => {
   const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };

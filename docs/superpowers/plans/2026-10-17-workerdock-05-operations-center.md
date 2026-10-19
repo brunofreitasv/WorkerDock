@@ -146,7 +146,7 @@ Assert.Equal(401, healthOnlyWithoutUserSession.StatusCode);
 - [x] **Step 2 — Verify red.** Test-first implementation exposed required OIDC test-host configuration and API contract issues before the passing checks below.
 - [x] **Step 3 — Implement.** Center owns only registry/health/audit/schema settings; reuse infrastructure modules without registering tenant persistence. HTTPS/approved destinations, fixed minimal health path bound to registered instance, scoped credential from central vault and no cookies/token proxy to tenant. Display direct links and last attempt/success/stale/unknown. Registration/update/removal requires Manage; tenant entry still requires tenant authorization. Probe only while IIS is active plus rate-limited refresh. Deployment and security constraints are documented. Center has its own en/pt-BR build and auth configuration.
 - [ ] **Step 4 — Verify green.** Solution build, 69 unit tests, 9 focused in-memory/migration-contract integration tests, 35 frontend tests, 2 Control Center browser tests and both frontend production builds pass. SQL-gated central migration tests compile but were not run because `WORKERDOCK_TEST_SQL` is not configured. Two-tenant outage continuity and cross-tenant principal checks remain unverified.
-- [ ] **Step 5 — Commit.** Stage Task 20 files; `git commit -m "feat: add isolated central tenant directory and health links"`.
+- [x] **Step 5 — Commit.** `b086c96 feat: add isolated central tenant directory and health links`.
 
 ## Stage exit
 

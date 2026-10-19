@@ -1,0 +1,23 @@
+{
+  "Central": {
+    "InstanceId": "<CENTER_INSTANCE_GUID>",
+    "ConnectionString": "Server=<SQL_SERVER>;Database=<CENTER_DATABASE>;Integrated Security=true;Encrypt=true;TrustServerCertificate=false;Application Name=WorkerDock-Center",
+    "Adapter": "Sql",
+    "Health": {
+      "AllowedHosts": [
+        "<TENANT_HEALTH_HOST>"
+      ],
+      "AllowedPrivateCidrs": []
+    }
+  },
+  "Access": {
+    "Authority": "<HTTPS_IDENTITY_AUTHORITY>",
+    "ClientId": "<CENTER_WEB_CLIENT_ID>",
+    "ClientSecretReference": "CENTER_OIDC_CLIENT_SECRET",
+    "RequiredManagementRole": "<CENTER_MANAGEMENT_ROLE>",
+    "RoleClaimType": "roles"
+  },
+  "DataProtection": {
+    "KeyDirectory": "<PROTECTED_CENTER_KEY_DIRECTORY>"
+  }
+}

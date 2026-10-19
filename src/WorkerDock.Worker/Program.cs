@@ -20,6 +20,7 @@ using WorkerDock.Application.Observability;
 using WorkerDock.Infrastructure.Observability;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddWindowsService();
 builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(90));
 builder.Services.AddHostedService<WorkerService>();
 await builder.Build().RunAsync();

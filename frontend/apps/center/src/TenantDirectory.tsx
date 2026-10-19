@@ -101,3 +101,4 @@ export default function TenantDirectory({ tenants, canManage, loading, refreshin
       <Alert severity="info">Health checks are advisory. A tenant can keep running if this Control Center is offline; a stale or unknown result does not prove that the tenant is stopped.</Alert>
     </Stack>
   );
+}

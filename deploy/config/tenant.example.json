@@ -1,0 +1,23 @@
+{
+  "Tenant": {
+    "InstanceId": "<TENANT_INSTANCE_GUID>",
+    "ConnectionString": "Server=<SQL_SERVER>;Database=<TENANT_DATABASE>;Integrated Security=true;Encrypt=true;TrustServerCertificate=false;Application Name=WorkerDock-Tenant",
+    "Adapter": "Sql"
+  },
+  "Access": {
+    "Authority": "<HTTPS_IDENTITY_AUTHORITY>",
+    "ClientId": "<TENANT_WEB_CLIENT_ID>",
+    "ClientSecretReference": "TENANT_OIDC_CLIENT_SECRET",
+    "RequiredManagementRole": "<TENANT_MANAGEMENT_ROLE>",
+    "RoleClaimType": "roles"
+  },
+  "DataProtection": {
+    "KeyDirectory": "<PROTECTED_TENANT_KEY_DIRECTORY>"
+  },
+  "Health": {
+    "CredentialReference": "<TENANT_HEALTH_CREDENTIAL_REFERENCE>"
+  },
+  "Retention": {
+    "ArchiveRoot": "<TENANT_ARCHIVE_ROOT>"
+  }
+}
