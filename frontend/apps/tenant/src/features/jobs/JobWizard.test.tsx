@@ -4,8 +4,18 @@ import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { translations, type Language } from "@workerdock/ui";
 import { JobWizard } from "./JobWizard";
+import { sameScheduleInput } from "./scheduleInput";
 
 afterEach(() => vi.unstubAllGlobals());
+
+test.each([
+  ["-05:00", "-05:00:00"],
+  ["+05:30", "05:30:00"],
+  ["-00:00", "00:00:00"],
+])("schedule confirmation compares equivalent offsets %s and %s", (draftOffset, persistedOffset) => {
+  const base = { kind: "Once" as const, cron: null, zoneId: "UTC", localOnce: "2026-11-01T01:30:00" };
+  expect(sameScheduleInput({ ...base, selectedOffset: draftOffset }, { ...base, selectedOffset: persistedOffset })).toBe(true);
+});
 
 test("changing wizard language preserves the draft and selected local instant, offset, and preview UTC", async () => {
   const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };
@@ -259,6 +269,63 @@ test("restoring a different local schedule after 412 stays blocked until PUT and
   await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
   await waitFor(() => expect(screen.getByText("Disabled draft saved.")).toBeVisible());
   expect(confirmedCrons.at(-1)).toBe("0 9 * * 1-5");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("button", { name: "Enable job" })).toBeEnabled();
+});
+
+test("restored one-time schedule confirms semantic UTC offset despite server seconds formatting", async () => {
+  const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };
+  const jobId = "11111111-1111-4111-8111-111111111111";
+  let schedulePutCount = 0;
+  let persistedSchedule = { kind: "Once", cron: null, zoneId: "America/New_York", localOnce: "2026-11-01T01:30:00", selectedOffset: "-05:00:00" };
+  let confirmedOffset = "";
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    const method = init?.method ?? "GET";
+    let status = 200;
+    let body: any = {};
+    if (url.pathname === "/api/templates") body = { items: [{ selectable: true, descriptor }] };
+    else if (url.pathname === "/api/time-zones") body = ["America/New_York", "UTC"];
+    else if (url.pathname === "/api/jobs" && method === "POST") { status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}/configuration`) body = { revision: { jobId, revision: 1, name: "One-time draft", templateId: "sample", templateVersion: "1", configuration: {}, profileId: null, policy: { timeout: null } }, version: [1], enabled: false, archived: false, concurrencyLimit: 1 };
+    else if (url.pathname === `/api/jobs/${jobId}/schedule` && method === "PUT") {
+      schedulePutCount++;
+      if (schedulePutCount === 1) { status = 412; body = { code: "StaleVersion" }; }
+      else {
+        const submitted = JSON.parse(String(init?.body)).input;
+        persistedSchedule = { ...submitted, selectedOffset: submitted.selectedOffset.length === 6 ? `${submitted.selectedOffset}:00` : submitted.selectedOffset };
+        confirmedOffset = persistedSchedule.selectedOffset;
+        status = 202; body = { targetId: jobId };
+      }
+    }
+    else if (url.pathname === `/api/jobs/${jobId}/schedule` && method === "GET") body = { input: persistedSchedule, policy: { mode: "Skip" }, paused: false };
+    else if (url.pathname === "/api/antiforgery") body = { requestToken: "test" };
+    else if (url.pathname === `/api/jobs/${jobId}` && method === "PUT") { status = 202; body = { targetId: jobId }; }
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ETag: '"current"' } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "One-time draft");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByLabelText("Use a schedule"));
+  await user.click(screen.getByRole("combobox", { name: "Schedule kind" }));
+  await user.click(await screen.findByRole("option", { name: translations.en.oneTimeSchedule }));
+  await user.type(screen.getByLabelText("Local date and time"), "2026-11-01T01:30");
+  await user.type(screen.getByLabelText("UTC offset"), "-05:00");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Load current revision" })).toBeVisible());
+  await user.click(screen.getByRole("button", { name: "Load current revision" }));
+  await waitFor(() => expect(screen.getByDisplayValue("-05:00")).toBeVisible());
+  await user.click(screen.getByRole("button", { name: "Restore my draft" }));
+  expect(screen.getByDisplayValue("2026-11-01T01:30")).toBeVisible();
+  expect(screen.getByDisplayValue("-05:00")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "I reviewed this current revision" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getByText("Disabled draft saved.")).toBeVisible());
+  expect(confirmedOffset).toBe("-05:00:00");
   await user.click(screen.getByRole("button", { name: "Next" }));
   expect(screen.getByRole("button", { name: "Enable job" })).toBeEnabled();
 });

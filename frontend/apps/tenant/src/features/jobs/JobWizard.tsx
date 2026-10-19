@@ -7,6 +7,7 @@ import { ScheduleEditor, type ScheduleEditorInputDto } from "../schedules/Schedu
 import { SchedulePreview, type SchedulePreviewItemDto } from "../schedules/SchedulePreview";
 import { JobDetails } from "./JobDetails";
 import type { JobStateDto } from "./JobActions";
+import { sameScheduleInput } from "./scheduleInput";
 
 type Issue = { path: string; code: string };
 type Revision = { jobId: string; revision: number; name: string; templateId: string; templateVersion: string; configuration: Record<string, unknown>; profileId: string | null; policy: Record<string, unknown> };
@@ -269,7 +270,6 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
 }
 
 function schedulePayload(value: ScheduleEditorInputDto) { return { kind: value.kind, cron: value.kind === "Cron" ? value.cron : null, zoneId: value.zoneId, localOnce: value.kind === "Once" && value.localOnce ? `${value.localOnce}:00` : null, selectedOffset: value.kind === "Once" ? value.selectedOffset : null }; }
-function sameScheduleInput(left: ScheduleEditorInputDto, right: ScheduleEditorInputDto): boolean { return left.kind === right.kind && left.cron === right.cron && left.zoneId === right.zoneId && left.localOnce === right.localOnce && left.selectedOffset === right.selectedOffset; }
 function secondsToTimeSpan(seconds: number): string { const safe = Math.max(1, Math.floor(seconds)); return `${String(Math.floor(safe / 3600)).padStart(2, "0")}:${String(Math.floor((safe % 3600) / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`; }
 function timeSpanSeconds(value: string | null): number | "" { if (!value) return ""; const parts = value.split(":"); if (parts.length < 3) return ""; const dayHour = parts[0].split("."); const days = dayHour.length === 2 ? Number(dayHour[0]) : 0; const hours = Number(dayHour.at(-1)); return days * 86400 + hours * 3600 + Number(parts[1]) * 60 + Number(parts[2]); }
 function defaults(schema: any): Record<string, unknown> { const result: Record<string, unknown> = {}; for (const [key, property] of Object.entries<any>(schema.properties ?? {})) { if (Object.hasOwn(property, "default")) result[key] = property.default; else if (property.$ref?.startsWith("#/$defs/")) result[key] = ""; else if (property.type === "object" || property.properties) result[key] = defaults(property); else if (property.type === "array") result[key] = []; else if (property.enum?.length) result[key] = property.enum[0]; else if (Array.isArray(property.type) && property.type.includes("null")) result[key] = null; else if (property.type === "boolean") result[key] = false; else result[key] = ""; } return result; }
