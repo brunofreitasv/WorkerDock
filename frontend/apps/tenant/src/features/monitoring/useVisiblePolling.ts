@@ -15,6 +15,7 @@ const MAX_DELAY_MS = 60000;
 export function useVisiblePolling<T>(load: () => Promise<T>, reloadKey?: string): VisiblePollingState<T> {
   const loadRef = useRef(load);
   const inFlight = useRef(false);
+  const active = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const delay = useRef(BASE_DELAY_MS);
   const [data, setData] = useState<T>();
@@ -38,11 +39,12 @@ export function useVisiblePolling<T>(load: () => Promise<T>, reloadKey?: string)
     } finally {
       inFlight.current = false;
       setLoading(false);
-      if (document.visibilityState === "visible") timer.current = setTimeout(() => void poll(), delay.current);
+      if (active.current && document.visibilityState === "visible") timer.current = setTimeout(() => void poll(), delay.current);
     }
   }, []);
 
   useEffect(() => {
+    active.current = true;
     const stop = () => { if (timer.current !== null) clearTimeout(timer.current); timer.current = null; };
     const visibilityChanged = () => {
       stop();
@@ -50,7 +52,7 @@ export function useVisiblePolling<T>(load: () => Promise<T>, reloadKey?: string)
     };
     document.addEventListener("visibilitychange", visibilityChanged);
     if (document.visibilityState === "visible") void poll();
-    return () => { stop(); document.removeEventListener("visibilitychange", visibilityChanged); };
+    return () => { active.current = false; stop(); document.removeEventListener("visibilitychange", visibilityChanged); };
   }, [poll, reloadKey]);
 
   const refresh = useCallback(() => { if (document.visibilityState === "visible") { if (timer.current !== null) clearTimeout(timer.current); timer.current = null; void poll(); } }, [poll]);

@@ -47,3 +47,19 @@ test("backs off failed refreshes and preserves the last successful timestamp", a
   await act(async () => { await vi.advanceTimersByTimeAsync(1); });
   expect(load).toHaveBeenCalledTimes(3);
 });
+
+test("does not schedule another poll when an in-flight request resolves after unmount", async () => {
+  vi.useFakeTimers();
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  let resolveRequest!: (value: { count: number }) => void;
+  const pending = new Promise<{ count: number }>(resolve => { resolveRequest = resolve; });
+  const load = vi.fn(() => pending);
+  const { unmount } = renderHook(() => useVisiblePolling(load));
+  expect(load).toHaveBeenCalledTimes(1);
+
+  unmount();
+  await act(async () => { resolveRequest({ count: 1 }); await pending; });
+  expect(vi.getTimerCount()).toBe(0);
+  await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+  expect(load).toHaveBeenCalledTimes(1);
+});

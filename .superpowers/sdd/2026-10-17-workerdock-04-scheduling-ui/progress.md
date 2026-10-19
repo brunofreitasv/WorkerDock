@@ -42,5 +42,5 @@ Final Task 14 closeout (supersedes earlier pending entries): commits `09e01b2`, 
 - [x] Added safe bounded SQL projections, read-authorized dashboard/jobs/execution/workers/audit APIs, health readiness, and en/pt-BR operator views.
 - [x] Added visible-only polling, hidden-tab pause, failure backoff/stale indicators, access/query tests, frontend unit polling tests, and monitoring E2E scenarios.
 - [x] Documented monitoring and health credential configuration in `docs/monitoring.md`; added `WorkersAsync` as required for worker capability view.
-- [x] Targeted server access/monitoring tests 32/32, frontend unit tests 29/29, frontend build, Playwright discovery (16 tests), and diff check passed.
+- [x] Targeted server access/monitoring tests 32/32, frontend unit tests 30/30, frontend build, Playwright discovery (16 tests), and diff check passed. Follow-up unmount/deferred-request hook regression first reproduced a lingering timer, then passed with the active-effect scheduling guard (focused hook tests 3/3).
 - [ ] Browser execution is `PLAYWRIGHT_BLOCKED`: Chromium executable missing at the configured Playwright path. SQL runtime is `SQL_TEST_BLOCKED`: `WORKERDOCK_TEST_SQL` is unset. Production host must register its managed `ISecretVault` provider.
