@@ -18,6 +18,6 @@ Runtime migrations and their rollbacks are in [`database/tenant`](database/tenan
 
 ## Project status
 
-The implementation is still in release validation. Portable builds and tests do not establish live SQL Server, Windows/IIS, Entra ID, upgrade/restore, or workload readiness. See the [release checklist](docs/release-checklist.md) and [recorded evidence](docs/validation/release-evidence.md) before production use.
+The implementation is still in release validation. Production secret-vault adapters are deployment-specific and are not included; the Control Center requires one to start in Production. Portable builds and tests do not establish live SQL Server, Windows/IIS, Entra ID, upgrade/restore, or workload readiness. See the [release checklist](docs/release-checklist.md) and [recorded evidence](docs/validation/release-evidence.md) before production use.
 
 WorkerDock uses the [MIT License](LICENSE). Read [SECURITY.md](SECURITY.md) for security reporting and [CONTRIBUTING.md](CONTRIBUTING.md) before contributing.

@@ -10,7 +10,7 @@ The evaluator uses bounded batches and a SQL-backed rule-and-subject cursor. It 
 
 ## Webhook sink and secrets
 
-Webhook configuration contains an HTTPS destination and optional header names whose values are secret references. Inline header values, credentials in URLs, transport-controlled headers, and secret values in the database are rejected. At send time the delivery worker resolves references through `ISecretVault`; the development adapter reads environment-backed secrets. Replace that adapter at composition time to integrate an internal vault.
+Webhook configuration contains an HTTPS destination and optional header names whose values are secret references. Inline header values, credentials in URLs, transport-controlled headers, and secret values in the database are rejected. At send time the delivery worker resolves references through `ISecretVault`. The scheduler currently registers the development vault adapter, which is unavailable unless its development-only environment mapping is explicitly enabled. No production vault adapter is included, so live secret-backed delivery remains unverified until a trusted provider is integrated and tested.
 
 Destinations are checked against the tenant outbound policy at execution time. Configure that policy with explicit host and port allowlists. Private, loopback, link-local, and otherwise unsafe destinations are denied by default to reduce SSRF risk. Keep vault identities and webhook credentials scoped to the tenant.
 
@@ -26,7 +26,7 @@ Only users with the management permission can edit rules and sinks or retry a de
 
 Apply tenant migration `0007_alerts` after the preceding tenant migrations using the database migrator. The matching rollback is `database/tenant/0007_alerts.down.sql`; it refuses to drop populated alert tables. The migration manifest contains SHA-256 checksums for both scripts. The database principal needs the migration permissions plus the runtime table grants declared at the end of the up migration.
 
-For local development, use the [documented memory instance](development.md#disposable-memory-instance); it does not exercise SQL alert evaluation, leases, or outbox recovery. To verify delivery recovery, configure `WORKERDOCK_TEST_SQL` with a disposable SQL Server 2022+ instance as described in [database setup](database.md), then run `dotnet test tests/WorkerDock.IntegrationTests --filter FullyQualifiedName~AlertDeliveryTests`. Migration checks that do not need SQL Server are `dotnet test tests/WorkerDock.IntegrationTests --filter 'FullyQualifiedName~CustomSqlSchemaTests|FullyQualifiedName~MigrationInputTests'`. Never put credentials in source control or test output.
+For local development, use the [in-memory tutorial](tutorials/run-in-memory.md); it does not exercise SQL alert evaluation, leases, or outbox recovery. To verify delivery recovery, configure `WORKERDOCK_TEST_SQL` with a disposable SQL Server 2022+ instance as described in [SQL setup](how-to/setup-sql-server.md), then run `dotnet test tests/WorkerDock.IntegrationTests --filter FullyQualifiedName~AlertDeliveryTests`. Migration checks that do not need SQL Server are `dotnet test tests/WorkerDock.IntegrationTests --filter 'FullyQualifiedName~CustomSqlSchemaTests|FullyQualifiedName~MigrationInputTests'`. Never put credentials in source control or test output.
 
 ## Adding another sink
 

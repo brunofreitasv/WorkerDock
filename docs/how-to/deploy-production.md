@@ -106,5 +106,3 @@ pwsh -File .\deploy\Upgrade-Instance.ps1 `
 ```
 
 For a center upgrade, pass its `center.json` and center package. The script verifies release hashes and schema compatibility, makes and verifies a SQL `COPY_ONLY` checksum backup plus application archive, applies included migrations, switches the release and leaves services and IIS stopped for review. Start them manually and inspect readiness and executions. If the new release is incompatible with the database or recovery is needed, restore the verified SQL backup and run the previous compatible release; preserve instance GUID and Data Protection keys. Do not use a down migration as a production rollback. An incomplete upgrade journal requires manual reconciliation against migration history and both backups before retrying.
-
-\n

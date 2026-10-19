@@ -85,7 +85,8 @@ Register a `WorkerDockPolicyCalendar` under the revision's calendar name with
 `IScheduler.AddCalendar`, then schedule the trigger returned by `CreateTrigger`.
 Recurring triggers explicitly use `FireAndProceed`; one-time native simple
 triggers use `FireNow`. A misfire is a dispatcher wake-up, not a new nominal
-occurrence. Durable cursor/catch-up projection remains later-stage work.
+occurrence. `OccurrenceWriter` uses the durable SQL cursor and configured Skip,
+Coalesce, or CatchUp policy to decide which business occurrences are accepted.
 
 `ResolveLocalOnce` accepts only `DateTimeKind.Unspecified`. It rejects gaps and
 requires an explicitly selected valid offset during an overlap. A forged offset
@@ -113,7 +114,7 @@ Quartz references: [five-field parser and DST behavior](https://www.quartz-sched
 Public signatures were verified against the installed Quartz 4.5.1 XML API
 reference and assembly (upstream commit `81aa09d71cc73c4e83f225d026ed1da4896852d9`).
 
-Schedule validation codes for the later editor use these English / pt-BR texts:
+Schedule validation codes returned by the evaluator use these English / pt-BR texts:
 
 | Code | English | Português (Brasil) |
 | --- | --- | --- |
@@ -133,8 +134,8 @@ Schedule validation codes for the later editor use these English / pt-BR texts:
 
 One common `ProjectionEnvelope` reads the existing `[workerdock].Outbox`; its `IntentId`
 is the outbox EventId, distinct from ExecutionId. Version 1 allowlists
-ExecutionDispatch, ScheduleProjection and AlertDispatch. Only ExecutionDispatch
-has a decoder in Task06. Unknown kinds, the two deferred kinds and unsupported
+ExecutionDispatch, ScheduleProjection and AlertDispatch. The scheduler routes
+each supported kind to its projection handler. Unknown kinds and unsupported
 versions remain failed with `UnsupportedProjection`, never acknowledged.
 Execution payloads contain `executionId`, `jobRevision` and optional
 `attemptOrdinal` (default 1). No configuration/profile/secret payload enters
@@ -146,8 +147,8 @@ priority, execution availability and existing attempt ordinals. DeliveryId is
 the immutable outbox intent ID. The port never inserts attempts, claims work,
 allocates permits or authorizes effects. An existing attempt, Running,
 NeedsReview or a terminal execution retires that delivery. Only Queued and
-RetryWaiting executions without that attempt may be published. Task08's
-transactional start gate must still recheck eligibility after acquisition.
+RetryWaiting executions without that attempt may be published. The worker's
+transactional start gate rechecks eligibility after acquisition.
 
 Quartz job/trigger keys encode execution, delivery and authorized ordinal in
 the template group; execution groups use that same template ID. Each durable,
@@ -158,8 +159,8 @@ priority and Quartz fire bookkeeping. Replay verifies the stored identity and
 type before repairing a missing trigger. It rejects a stored trigger with a
 different due time, wrong template execution group, unexpected input, repeat
 schedule or retry policy. Triggers explicitly use FireNow misfires and
-RetryPolicy.None. Guarded recovery means the future worker start gate decides
-whether an attempt may run; Quartz recovery never authorizes a business retry.
+RetryPolicy.None. Guarded recovery means the worker start gate decides whether
+an attempt may run; Quartz recovery never authorizes a business retry.
 
 All Quartz calls use public APIs outside a business transaction. A crash before
 Quartz write leaves Pending/Failed intent. A crash after write but before ack
@@ -179,21 +180,19 @@ Scheduler directly and idempotently registers projection/reconciliation control
 jobs at startup (15s/60s), before starting only WorkerDock.Schedule. Each firing
 has a 100-envelope batch and 20s cancellation deadline; pending publication and
 published review each have reserved batch capacity. The execution publisher
-uses ZeroSizeThreadPool and is never started. Quartz's public lazy JobType
-stores the exact future `WorkerDock.Quartz.Dispatch.ExecuteTemplateJob,
-WorkerDock.Quartz` identity with explicit execution metadata flags. Task06
-memory tests prove that unloaded identity can be stored/replayed without
-starting execution. Task08 installs its guarded implementation; no test or
-no-op executor is shipped in the Scheduler.
+uses ZeroSizeThreadPool and is never started. Quartz's public lazy JobType stores
+the exact `WorkerDock.Quartz.Dispatch.ExecuteTemplateJob, WorkerDock.Quartz`
+identity with explicit execution metadata flags. The Scheduler can publish and
+reconcile execution jobs without loading the Worker job implementation; the
+Worker process supplies that implementation and owns execution acquisition.
 
 Run `PublicationRecoveryTests` for in-process faults, concurrent publishers,
 actual probe consumption and control-job bootstrap. `ProjectionSqlTests` adds
 restricted-runtime SQL reads/writes, lost ack, concurrent replay after a fresh
 Quartz handle, retirement, retry metadata, instance fencing and paired migration
-checks in both isolation modes. These SQL proofs, SQL type loading and actual
-multi-process/cluster restart/fault proofs are pending until the disposable SQL
-fixture and Task08 worker are available. Memory success is not evidence for
-those properties. See [database.md](database.md) for exact setup/tests and
+checks in both isolation modes. These SQL and multi-process/cluster proofs require
+the disposable SQL fixture; memory success does not establish those properties.
+See [Set up SQL Server](how-to/setup-sql-server.md) for test prerequisites and
 [development.md](development.md) for memory tests.
 
 
@@ -271,9 +270,10 @@ receipts remain Pending until the corresponding revision is effective.
 The Development web-only memory adapter does not run a capacity cluster; the
 capacity algorithm, wrapper and actual RAMJobStore tests are disposable fixtures.
 
-Current verification establishes memory policy races, actual local Quartz
-3-to-1-to-0-to-2 draining, publication/ownership fault guards and Windows process
-containment. Real SQL adapter/migration tests, restricted-runtime grants,
-three-service live policy propagation, and capacity-one across real SQL workers
-remain pending until an authorized disposable SQL instance and runtime login run
-the commands in database.md. Task 09A converts all executable tenant SQL, history and both Quartz stores to `[workerdock]` for fresh installation. Unpublished prototype `dbo` databases require a fresh database or a separately reviewed data-move upgrade.
+The memory adapter supports local policy and Quartz tests, but does not establish
+SQL adapter behavior, migration execution, restricted-runtime grants, or
+capacity coordination across SQL-backed workers. Run those checks using the
+disposable SQL setup in [Set up SQL Server](how-to/setup-sql-server.md). All
+current tenant and Quartz objects use the `[workerdock]` schema; an older
+unreleased database created with a different schema requires a fresh database
+or a separately planned data migration.

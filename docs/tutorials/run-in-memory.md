@@ -38,6 +38,11 @@ access allows anyone who can reach this local instance to manage it, so keep it
 bound to localhost. `/health/live` reports liveness. `/health/ready` stays
 unavailable because the monitoring adapter cannot verify durable persistence.
 
+To confirm the UI is using memory state, open **Jobs**, select the HTTP
+template, enter a name and save a disabled draft. It appears in the current
+browser session; after restarting the tenant host, the draft is gone. This
+mode does not run the worker or execute jobs.
+
 ## Control Center
 
 In a second PowerShell window at the repository root:
@@ -58,5 +63,3 @@ cleanup is needed.
 
 For SQL-backed local development, follow [Run WorkerDock with SQL Server](run-with-sql-server.md)
 and the [SQL Server setup guide](../how-to/setup-sql-server.md).
-
-\n

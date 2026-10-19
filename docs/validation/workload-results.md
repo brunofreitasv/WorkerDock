@@ -34,7 +34,7 @@ Version 1 is JSON with this shape:
 }
 ```
 
-Provide at least `-Tenants` entries with unique names and instance IDs. `FixtureUrl` must be a bounded disposable test endpoint with no credentials, query, or fragment. The runner does not accept OIDC or fixture credentials. Keep this configuration outside the evidence output directory. Supply SQL Server version and resource counts as non-secret metadata. The evidence includes host facts, SQL Server version/resources, discovered worker counts, run counts, concurrency, latency percentiles, states, attempt safe codes, and invariant violations; it omits configured URLs and secrets.
+The JSON above shows one entry to explain the shape. Provide at least as many tenant entries as the `-Tenants` argument, with unique names and instance IDs. `FixtureUrl` must be a bounded disposable test endpoint with no credentials, query, or fragment. The runner does not accept OIDC or fixture credentials. Keep this configuration outside the evidence output directory. Supply SQL Server version and resource counts as non-secret metadata. The evidence includes host facts, SQL Server version/resources, discovered worker counts, run counts, concurrency, latency percentiles, states, attempt safe codes, and invariant violations; it omits configured URLs and secrets.
 
 ## Required run
 
@@ -43,8 +43,8 @@ pwsh -File tests/load/Invoke-Workload.ps1 `
   -Tenants 10 `
   -JobsPerTenant 100 `
   -ConcurrencyPerTenant 10 `
-  -ConfigPath <protected-test-config> `
-  -OutputPath <existing-evidence-directory>
+  -ConfigPath '<protected-test-config>' `
+  -OutputPath '<existing-evidence-directory>'
 ```
 
 One run per tenant is excluded as warmup. The remaining jobs are submitted in batches limited by `ConcurrencyPerTenant`; tenants run concurrently. A JSON evidence file is written to `OutputPath`. Non-success executions, retries, missing timestamps, incorrect run counts, timeouts, or cleanup failures cause a nonzero exit after evidence is written.

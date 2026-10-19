@@ -97,9 +97,9 @@ dotnet run --project src/WorkerDock.ControlCenter --urls https://localhost:5002
 
 The Tenant UI is at <https://localhost:5001/> and Control Center at
 <https://localhost:5002/>. Check `/health/live` on both web hosts. Check
-`/health/ready` on the Control Center after startup; the Tenant readiness route
-may remain unavailable because its monitoring projection is not provided by
-this local setup. Confirm Worker registration and Scheduler startup in their
+`/health/ready` on the Control Center after startup. The Tenant readiness route
+checks the real SQL-backed monitoring state and can return 503 until its
+dependencies are healthy. Confirm Worker registration and Scheduler startup in their
 console logs. The web process serves the frontend assets; Node is not a runtime
 dependency. The Control Center's tenant health probe accepts only HTTPS port
 443, so the tenant on port 5001 cannot be registered as a probe target in this
@@ -133,5 +133,3 @@ see the setup guide for rollback limits.
 
 See [Local development](../development.md) for SQL-independent test commands
 and [Database setup](../database.md) for migration and runtime role details.
-
-\n

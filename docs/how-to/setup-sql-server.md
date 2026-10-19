@@ -107,6 +107,6 @@ $env:WORKERDOCK_TEST_SQL_TARGET_RUNTIME='<same-server-restricted-target-login>'
 dotnet test tests/WorkerDock.IntegrationTests -c Release
 ```
 
-The fixtures own their generated databases and test objects. Their test-only SQL lives under `tests/sql` and `tests/WorkerDock.IntegrationTests/Sql`; it is not part of runtime provisioning. Missing SQL configuration causes the SQL fixtures to report `SQL_TEST_BLOCKED`. A test command has not been run as part of this documentation update.
+The fixtures own their generated databases and test objects. Their test-only SQL lives under `tests/sql` and `tests/WorkerDock.IntegrationTests/Sql`; it is not part of runtime provisioning. Missing SQL configuration causes the SQL fixtures to report `SQL_TEST_BLOCKED`. Record actual runs in the [release evidence](../validation/release-evidence.md).
 
 See [database object reference](../reference/database-objects.md), [Control Center setup](../control-center.md), and [Quartz integration](../quartz-integration.md) for object inventories and design details.

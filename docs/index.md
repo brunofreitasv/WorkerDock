@@ -6,6 +6,7 @@ Choose a path by what you need to do. The [Diátaxis framework](https://diataxis
 
 - [Run locally without SQL Server](tutorials/run-in-memory.md): start the disposable development instance and see what the memory adapter can do.
 - [Run locally with SQL Server](tutorials/run-with-sql-server.md): use a dedicated local tenant database and the SQL adapter.
+- [Run local development checks](development.md): choose the test suites that need no SQL Server and identify those that do.
 
 ## How-to guides: complete a specific task
 
@@ -26,7 +27,7 @@ Choose a path by what you need to do. The [Diátaxis framework](https://diataxis
 - [Schedules and job lifecycle](scheduling.md), [manual jobs](manual-jobs.md), and [execution guarantees](execution-guarantees.md).
 - [Monitoring](monitoring.md), [observability](observability.md), [alerts](alerts.md), and [retention/archive operations](retention-archive.md).
 - [Outbound destination policy](outbound-policy.md) and [secret facade](secrets.md).
-- [Release checklist](release-checklist.md) and [recorded validation evidence](validation/release-evidence.md).
+- [Release checklist](release-checklist.md), [recorded validation evidence](validation/release-evidence.md), [fault matrix](validation/fault-matrix.md), and [workload procedure](validation/workload-results.md).
 
 ## Explanation: understand the design
 
@@ -34,4 +35,4 @@ Choose a path by what you need to do. The [Diátaxis framework](https://diataxis
 - [Quartz scheduling and dispatch](quartz-integration.md).
 - [Control Center and tenant isolation](control-center.md).
 
-The older topic pages remain at their existing paths so incoming links continue to work. Start with the tutorials or task guides for an end-to-end procedure; use topic pages to inspect a specific contract or design decision. Memory-mode results do not prove SQL persistence or production readiness. The [release checklist](release-checklist.md) identifies validation that still needs a real deployment.
+Start with a tutorial or task guide for an end-to-end procedure; use the reference and explanation pages to inspect a contract or design decision. Memory-mode results do not prove SQL persistence or production readiness. The [release checklist](release-checklist.md) identifies validation that still needs a real deployment.

@@ -4,23 +4,7 @@ The Control Center is an optional, separate ASP.NET Core application with its ow
 
 ## Run locally
 
-Use a unique central instance GUID and list the exact tenant hostnames that this instance may probe. Memory mode is disposable and is available only in Development:
-
-```powershell
-$env:ASPNETCORE_ENVIRONMENT='Development'
-$env:Central__Adapter='Memory'
-$env:Central__InstanceId='11111111-1111-4111-8111-111111111111'
-$env:Central__Health__AllowedHosts__0='tenant.example.test'
-$env:WORKERDOCK_DEVELOPMENT_VAULT='1'
-$env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"TENANT_HEALTH_TOKEN":"WORKERDOCK_LOCAL_HEALTH_TOKEN"}'
-$env:WORKERDOCK_LOCAL_HEALTH_TOKEN='<local-only-health-token>'
-npm.cmd --prefix frontend ci
-npm.cmd --prefix frontend run build
-dotnet dev-certs https --trust
-dotnet run --project src/WorkerDock.ControlCenter --urls https://localhost:5010
-```
-
-The in-memory directory and health cache disappear on restart. Add a tenant's logical health credential reference `TENANT_HEALTH_TOKEN`; the mapped environment value is sent only in the `X-WorkerDock-Health` request header. Do not use a production credential in local development.
+Follow the [memory-only tutorial](tutorials/run-in-memory.md) for a disposable Control Center UI or the [SQL Server tutorial](tutorials/run-with-sql-server.md) for a tenant with persistent execution. The local tenant URLs in those tutorials use a non-443 port, so they cannot serve as Control Center health-probe targets. A real health probe needs an HTTPS tenant URL on port 443, an allowlisted host, an expected instance ID and a secret reference resolved by the Center's vault identity.
 
 ## SQL Server setup
 
@@ -37,7 +21,7 @@ Add the Central application database identity to the `WorkerDockCentralRuntime` 
 Example Central configuration (supply values through protected deployment configuration):
 
 ```powershell
-$env:Central__Adapter='SqlServer'
+$env:Central__Adapter='Sql'
 $env:Central__InstanceId='<same-stable-central-instance-guid>'
 $env:Central__ConnectionString='<central-runtime-connection-string>'
 $env:Central__Health__AllowedHosts__0='tenant-a.example.com'

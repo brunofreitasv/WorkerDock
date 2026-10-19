@@ -2,7 +2,7 @@
 
 Record the exact checkout, tool versions, command, result and artifact location for each candidate. The source and portable checks below are not a live deployment certification.
 
-## Current worktree
+## Last recorded verification (2026-10-19)
 
 - Date: 2026-10-19.
 - .NET non-SQL Release tests: `dotnet test WorkerDock.slnx --no-restore -c Release --filter "Store!=Sql"` — PASS; 384 tests (71 unit, 37 Windows process, 276 integration).
@@ -17,6 +17,7 @@ Record the exact checkout, tool versions, command, result and artifact location 
 - Patch hygiene: `git diff --check` — PASS; Git reported only line-ending normalization warnings.
 - Fault coverage and evidence boundaries: see [fault matrix](fault-matrix.md); portable test results are separated from SQL/IIS/Entra and host-suspension proofs that remain NOT RUN.
 - SQL-backed tests, disposable IIS installation, Entra sign-in, upgrade interruption, restore, cross-tenant host boundary and measured workload — NOT RUN. A provisioned SQL Server 2022+ fixture and disposable Windows/IIS environment are still required.
+- Production vault integration and secret rotation — NOT RUN; production adapters must first be implemented and installed for the relevant hosts.
 - Hosted GitHub workflows — NOT RUN from this worktree; CI workflow outcomes must be attached to a reviewed revision before release.
 
 ## Candidate evidence to attach

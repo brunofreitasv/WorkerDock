@@ -17,11 +17,12 @@ Use this checklist for a candidate release. A checked source build or portable s
 - [ ] Run integration tests against the supported SQL Server version and record schema compatibility.
 - [ ] Complete disposable Windows/IIS installation and re-entry checks for tenant, center, and additional worker.
 - [ ] Verify HTTPS/SNI, service identities, runtime SQL permissions, Data Protection key ACLs, and archive ACLs.
+- [ ] Install and verify production `ISecretVault` adapters in the Control Center and each tenant process that resolves secrets. Confirm identity isolation, reference allowlists, rotation, and redaction; leave `WORKERDOCK_DEVELOPMENT_VAULT` disabled.
 - [ ] Exercise Entra/OIDC with a designated test registration, including role-protected management.
 - [ ] Verify Anonymous mode is not enabled on any network-exposed deployment.
 - [ ] Exercise upgrade, interrupted-upgrade recovery, verified backup, and restore on disposable infrastructure.
 - [ ] Complete the fault/security/isolation matrix and accessibility checks required by the release plan.
-- [ ] Run the target workload and publish hardware, workload mix, concurrency, throughput, latency, errors, and clock skew. The 10 tenant / 100 jobs / 10 concurrent executions target is not a capacity guarantee.
+- [ ] Run the target workload and publish hardware, workload mix, concurrency, throughput, latency, and errors. Measure clock skew and scheduled-work behavior separately; the supplied manual-run load driver does not cover them. The 10 tenant / 100 jobs / 10 concurrent executions target is not a capacity guarantee.
 
 ## Operations and handoff
 

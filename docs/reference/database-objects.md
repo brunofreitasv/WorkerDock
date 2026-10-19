@@ -37,8 +37,9 @@ These SQL files exist only to support disposable integration fixtures and are no
 | --- | --- |
 | `tests/sql/target-fixture.up.sql` and `.down.sql` | Creates/drops the `[workerdock].SqlTemplateTarget` table, test procedures, and `WorkerDockSqlTarget` role in the fixture database. |
 | `tests/WorkerDock.IntegrationTests/Sql/quartz-probe.up.sql` and `.down.sql` | Creates/drops a Quartz process test probe's state/event tables and its restricted runtime user in a generated test database. |
-| `database/upstream/quartz-4.5.1/sql-server.sql` | Attributed upstream source retained for reference; the runtime migration is the customized, versioned copy. |
 
 `SqlDatabaseFixture` chooses a generated `WorkerDock_Test_<32 hex digits>` database, sets compatibility level 160, and drops that database at disposal. Target fixture scripts and Quartz probe scripts run only inside that generated database. Do not copy these scripts into a tenant or central installation.
+
+`database/upstream/quartz-4.5.1/sql-server.sql` is attributed upstream source retained for reference. It is neither a deployment migration nor a test fixture; do not run it in addition to `0002_quartz`.
 
 For exact provisioning, least-privilege identity setup, test prerequisites, and rollback commands, see [Set up SQL Server](../how-to/setup-sql-server.md).

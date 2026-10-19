@@ -27,7 +27,7 @@ Configuration can also be supplied through .NET environment variables, where `__
 
 Authentication is configured separately for each tenant and for the Control Center. With Entra configured, every valid user accepted by that app audience can read. If `RequiredManagementRole` is set, only a user with that exact role claim can manage; viewers can use read-protected views but receive 403 for direct management API calls. Omit the role to let any authenticated user manage. Omit all three authentication bootstrap settings and the management role for anonymous mode; anonymous users can both read and manage, so restrict reachability at the network boundary. A role without complete Entra configuration or partial Entra configuration fails startup. See [authentication and access policies](../authentication.md) for app callbacks, role claim configuration and secret injection.
 
-The dashboard currently reports monitoring and audit projections as unavailable where the implementation has not supplied them; the configured Read/Manage policy still applies. Control Center membership does not grant access to tenant dashboards. Opening a tenant link sends the user to the tenant's own authentication boundary.
+Monitoring and audit views use the tenant's Read policy; management actions and configuration use Manage. An unavailable data store produces an unavailable response, not an empty result. Control Center membership does not grant access to tenant dashboards. Opening a tenant link sends the user to the tenant's own authentication boundary.
 
 ## Health credentials and Control Center registration
 
@@ -49,5 +49,3 @@ The production center must provide its own `ISecretVault` implementation in the 
 ## Separate identity and storage
 
 Give each tenant and the center its own Entra app registration, database, runtime identity and Data Protection key directory. Web, scheduler and worker service identities only read their respective configs and key material as required. Use a tenant-specific SQL runtime principal assigned to `WorkerDockRuntime`; the center principal belongs to `WorkerDockCentralRuntime` in the center database only. Only the deployment migrator needs schema creation rights. See [SQL setup](setup-sql-server.md) for migrations and runtime grants.
-
-\n

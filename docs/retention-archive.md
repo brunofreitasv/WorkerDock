@@ -26,7 +26,7 @@ Include an `ETag` response header (for example, `"retention-v1"`) and have `PUT`
 
 ## SQL Server installation and migration
 
-Use SQL Server 2022 or newer with the database compatibility level required by the WorkerDock installation (160 by default). Back up the tenant database and verify the backup before applying the numbered migration. Task 19 adds tenant migration `0008_retention`; use the repository's `WorkerDock.DatabaseMigrator` and the paired `0008_retention.up.sql` script rather than applying ad hoc edits. The migrator verifies the recorded checksum and schema history, checks prerequisites and transactional boundaries, and records the applied migration. Preserve the migration manifest with the release.
+Use SQL Server 2022 or newer with database compatibility level 160. Back up the tenant database and verify the backup before applying migration `0008_retention` with the repository's `WorkerDock.DatabaseMigrator`; do not apply ad hoc SQL edits. The migrator verifies recorded checksums and schema history, checks prerequisites and transactional boundaries, and records the applied migration. Preserve the migration manifest with the release. See [SQL setup and migrations](how-to/setup-sql-server.md) for the current migration command and identity requirements.
 
 Use a separate migration identity for schema changes. The IIS, scheduler and worker runtime identities must not have schema-change rights. Runtime retention access is limited to the application's required data operations and the restricted purge routine. Ordinary service principals cannot directly delete audit events. Inspect the migration's documented prerequisites and current schema history before applying it to an existing tenant.
 
@@ -54,6 +54,6 @@ WorkerDock does not claim exactly-once external effects. A durable archive or de
 
 ## Limits and operations
 
-The scheduler runs maintenance with bounded batch size and execution time. Archive capacity, ACL correctness, SQL availability and retention-job health remain operational dependencies. A prolonged outage delays cleanup; it does not authorize deleting unarchived rows. Monitor retention failures, archive volume, free space, finalization/verification errors and the age of the oldest eligible record. Alerting itself may be unavailable during a full scheduler/database outage, so check service and host health independently.
+The scheduler runs a bounded retention batch every minute (up to 100 rows and two minutes per run). A policy change does not purge data immediately. Archive capacity, ACL correctness, SQL availability and retention-job health remain operational dependencies. A prolonged outage delays cleanup; it does not authorize deleting unarchived rows. Monitor retention failures, archive volume, free space, finalization/verification errors and the age of the oldest eligible record. Alerting itself may be unavailable during a full scheduler/database outage, so check service and host health independently.
 
 Retention settings do not shorten required audit, replay or active-work safeguards. Archive retention controls finalized archive batches independently; it does not change SQL history eligibility. Database administrators can still alter data, so application audit is append-only by permission design rather than an immutable external ledger.

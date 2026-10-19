@@ -2,6 +2,8 @@
 
 Production configuration is normally kept in protected JSON files copied from `deploy/config/tenant.example.json`, `worker.example.json` and `center.example.json`. Files are stored under the installation root's `config` directory and retained across installer reruns and upgrades. A .NET environment variable uses double underscore (`__`) for each nested section. For example, `Tenant__ConnectionString` maps to `Tenant.ConnectionString`.
 
+`WORKERDOCK_DEVELOPMENT_VAULT=1` enables the explicitly mapped environment-backed development secret provider; it is not a production vault integration. The tenant hosts currently register this development provider, which otherwise resolves no secrets. A production deployment must register its own `ISecretVault` adapter in every process that needs one. The Control Center rejects a missing production adapter at startup. See [secret integration](../secrets.md).
+
 | Host | Configuration keys | Notes |
 | --- | --- | --- |
 | Tenant web | `Tenant:InstanceId`, `Tenant:ConnectionString`, `Tenant:Adapter`; `Access:*`; `DataProtection:KeyDirectory`; `Health:CredentialReference`; `Retention:ArchiveRoot` | SQL adapter in production. Optional Entra uses Authority, ClientId and ClientSecretReference together. |
@@ -28,5 +30,3 @@ The scheduler uses `Retention.ArchiveRoot` for archive output. If set, this must
 ## SQL and migration variables
 
 The database migrator accepts `WORKERDOCK_SQL` and `WORKERDOCK_INSTANCE_ID`, then the command `apply|rollback tenant|central <migration>`. It checks migration checksums and server/database compatibility before applying schema changes. See [database setup and migrations](../how-to/setup-sql-server.md) for exact SQL commands, IDs, role grants and rollback constraints. Production upgrades use [Upgrade-Instance.ps1](../how-to/deploy-production.md) to back up the SQL database and application package, verify the compatibility window and apply package migrations.
-
-\n

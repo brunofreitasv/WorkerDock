@@ -27,7 +27,7 @@ Schedules use five-field cron semantics and an explicit time zone. DST gaps and 
 
 OIDC/Entra authentication is optional in configuration. When configured, readers need an authenticated session and management actions may additionally require the configured role. When OIDC settings are absent, **Anonymous mode allows both read and management access**; do not expose an instance in this mode to an untrusted network.
 
-Connection profiles store nonsecret settings and credential references, not passwords or full connection strings. Secret values resolve at execution time from the configured vault adapter. The repository includes an environment-backed adapter for development; production secret storage must be selected and operated by the deployer. The Control Center's health credential is not a tenant management credential.
+Connection profiles store nonsecret settings and credential references, not passwords or full connection strings. Secret values resolve at execution time through `ISecretVault`. The repository includes an environment-backed adapter for development; production vault adapters are not supplied and must be installed in the relevant service composition roots before secret-backed production work. The Control Center currently refuses Production startup without its adapter. Its health credential is not a tenant management credential. See [secret integration](secrets.md) and [deployment](how-to/deploy-production.md).
 
 ## Capacity and limits
 
