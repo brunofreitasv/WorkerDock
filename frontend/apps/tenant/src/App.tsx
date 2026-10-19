@@ -253,7 +253,7 @@ export default function App() {
                 )
               ) : (
                 active === "jobs" ? (
-                  session.canManage ? <ManualJobEditor t={t} defaultZone={preferences.timeZone} /> : <Alert severity="error">{t.permission}</Alert>
+                  session.canManage ? <ManualJobEditor t={t} defaultZone={preferences.timeZone} language={preferences.language} setLanguage={preferences.setLanguage} /> : <Alert severity="error">{t.permission}</Alert>
                 ) : active === "templates" ? (
                   <Paper variant="outlined" sx={{ p: 3, mb: 3, maxWidth: 900 }}>
                     <Stack spacing={2}>

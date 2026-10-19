@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem, Paper, Stack, Step, StepButton, Stepper, Switch, TextField, Typography } from "@mui/material";
-import { TemplateForm, validateSchema, type Labels } from "@workerdock/ui";
+import { TemplateForm, validateSchema, type Labels, type Language } from "@workerdock/ui";
 import { ApiError, mutate, read } from "../../api/client";
 import { TemplatePicker, type CatalogItem } from "../templates/TemplatePicker";
 import { ScheduleEditor, type ScheduleEditorInputDto } from "../schedules/ScheduleEditor";
@@ -11,10 +11,11 @@ import type { JobStateDto } from "./JobActions";
 type Issue = { path: string; code: string };
 type Revision = { jobId: string; revision: number; name: string; templateId: string; templateVersion: string; configuration: Record<string, unknown>; profileId: string | null; policy: Record<string, unknown> };
 type EditorDto = { revision: Revision; version: number[]; enabled: boolean; archived: boolean; concurrencyLimit: number };
+type DraftSnapshot = { selected?: CatalogItem; name: string; configuration: Record<string, unknown>; policy: typeof blankPolicy; scheduleEnabled: boolean; schedule: ScheduleEditorInputDto; missedMode: string };
 const blankPolicy = { timeout: null as string | null, maxAttempts: 1, retryBaseDelay: "00:00:01", retryMaxDelay: "00:00:30", jitterRatio: 0, retryableCodes: [], retryUncertain: false, overlap: "Queue", backlogLimit: 100, priority: 50 };
 const blankSchedule: ScheduleEditorInputDto = { kind: "Cron", cron: "0 9 * * 1-5", zoneId: "UTC", localOnce: null, selectedOffset: null };
 
-export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?: string }) {
+export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage }: { t: Labels; defaultZone?: string; language?: Language; setLanguage?: (value: Language) => void }) {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [selected, setSelected] = useState<CatalogItem>();
   const [step, setStep] = useState(0);
@@ -23,6 +24,7 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
   const [policy, setPolicy] = useState({ ...blankPolicy });
   const [missedMode, setMissedMode] = useState("Skip");
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [hasSchedule, setHasSchedule] = useState(false);
   const [schedule, setSchedule] = useState<ScheduleEditorInputDto>(() => ({ ...blankSchedule, zoneId: defaultZone }));
   const [job, setJob] = useState<JobStateDto & { name: string }>();
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -31,14 +33,19 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
   const [loading, setLoading] = useState(true);
   const [runKey, setRunKey] = useState("");
   const [deleteScheduleOpen, setDeleteScheduleOpen] = useState(false);
+  const [staleConflict, setStaleConflict] = useState(false);
+  const [recoveryDraft, setRecoveryDraft] = useState<DraftSnapshot>();
+  const [reviewAcknowledged, setReviewAcknowledged] = useState(true);
   const summary = useRef<HTMLDivElement>(null);
   const localIssues = useMemo(() => selected ? validateSchema(selected.descriptor.configurationSchema, configuration) : [], [selected, configuration]);
   const labels = [t.stageTemplate, t.stageConfiguration, t.stageSchedule, t.stagePolicy, t.stageReview, t.stageActivation];
-  useEffect(() => { let current = true; void read<{ items: CatalogItem[] }>("/api/templates").then(result => { if (current) { setCatalog(result.data.items); setSelected(result.data.items.find(item => item.selectable)); } }).catch(() => { if (current) setMessage(t.requestError); }).finally(() => { if (current) setLoading(false); }); return () => { current = false; }; }, [t.requestError]);
+  useEffect(() => { let current = true; void read<{ items: CatalogItem[] }>("/api/templates").then(result => { if (current) { setCatalog(result.data.items); setSelected(result.data.items.find(item => item.selectable)); } }).catch(() => { if (current) setMessage(t.requestError); }).finally(() => { if (current) setLoading(false); }); return () => { current = false; }; }, []);
   useEffect(() => { if (message) summary.current?.focus(); }, [message]);
   const saveDraft = async () => {
+    if (staleConflict || !reviewAcknowledged) return false;
     if (!selected || !name.trim()) { setMessage(t.templateRequired); setStep(0); return false; }
     setBusy(true); setMessage("");
+    let removingSchedule = false;
     const revision: Revision = { jobId: job?.jobId ?? "00000000-0000-0000-0000-000000000000", revision: 0, name: name.trim(), templateId: selected.descriptor.id, templateVersion: selected.descriptor.version, configuration, profileId: typeof configuration.profileId === "string" && configuration.profileId ? configuration.profileId : null, policy };
     try {
       const saved = job ? await mutate<{ commandId?: string; targetId?: string; targetJobId?: string }>(`/api/jobs/${job.jobId}`, "PUT", revision, job.etag ?? undefined) : await mutate<{ commandId?: string; targetId?: string; targetJobId?: string }>("/api/jobs", "POST", revision);
@@ -46,22 +53,71 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
       if (!id) throw new Error("JobIdUnavailable");
       let current = await read<EditorDto>(`/api/jobs/${id}/configuration`);
       setJob({ jobId: id, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived, projectionPending: Boolean(saved.commandId) });
+      setHasSchedule(scheduleEnabled || hasSchedule);
       if (scheduleEnabled) {
         const input = schedulePayload(schedule);
         await mutate("/api/jobs/" + id + "/schedule", "PUT", { input, policy: { mode: missedMode, latenessTolerance: "00:01:00", catchUpCount: 3, catchUpAge: "1.00:00:00" } }, current.etag ?? undefined);
         current = await read<EditorDto>(`/api/jobs/${id}/configuration`);
+        setHasSchedule(true);
+      } else if (hasSchedule) {
+        removingSchedule = true;
+        await mutate(`/api/jobs/${id}/schedule`, "DELETE", undefined, current.etag ?? undefined);
+        current = await read<EditorDto>(`/api/jobs/${id}/configuration`);
+        try {
+          await read(`/api/jobs/${id}/schedule`);
+          setHasSchedule(true);
+          setJob({ jobId: id, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived });
+          setMessage(t.scheduleDeleteFailed);
+          return false;
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 404) throw error;
+        }
+        setHasSchedule(false);
+        removingSchedule = false;
       }
       setJob({ jobId: id, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived, projectionPending: Boolean(saved.commandId) || scheduleEnabled });
+      setStaleConflict(false);
       setMessage(t.draftSaved);
       return true;
     } catch (error) {
-      if (error instanceof ApiError && error.status === 412 && job?.jobId) {
-        try { const current = await read<EditorDto>(`/api/jobs/${job.jobId}/configuration`); setJob(previous => previous ? { ...previous, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived } : previous); }
-        catch { /* keep the current draft and its known ETag */ }
-      }
-      setMessage(error instanceof ApiError && error.status === 412 ? t.staleDraftPreserved : t.requestError);
+      if (error instanceof ApiError && error.status === 412 && job?.jobId) recordStaleConflict();
+      setMessage(removingSchedule ? t.scheduleDeleteFailed : error instanceof ApiError && error.status === 412 ? t.staleDraftPreserved : t.requestError);
       return false;
     } finally { setBusy(false); }
+  };
+  const restoreDraft = () => {
+    if (!recoveryDraft) return;
+    setSelected(recoveryDraft.selected); setName(recoveryDraft.name); setConfiguration(recoveryDraft.configuration); setPolicy(recoveryDraft.policy);
+    setScheduleEnabled(recoveryDraft.scheduleEnabled); setSchedule(recoveryDraft.schedule); setMissedMode(recoveryDraft.missedMode);
+    setRecoveryDraft(undefined); setReviewAcknowledged(false); setStep(4); setMessage(t.draftRestoredReviewRequired);
+  };
+  const recordStaleConflict = () => {
+    setRecoveryDraft({ selected, name, configuration, policy, scheduleEnabled, schedule, missedMode });
+    setStaleConflict(true); setMessage(t.staleDraftPreserved);
+  };
+  const loadCurrentRevision = async () => {
+    if (!job?.jobId) return;
+    setBusy(true); setMessage("");
+    try {
+      const current = await read<EditorDto>(`/api/jobs/${job.jobId}/configuration`);
+      const template = catalog.find(item => item.descriptor.id === current.data.revision.templateId && item.descriptor.version === current.data.revision.templateVersion);
+      if (template) setSelected(template);
+      setName(current.data.revision.name);
+      setConfiguration(current.data.revision.configuration);
+      setPolicy({ ...blankPolicy, ...current.data.revision.policy });
+      let currentHasSchedule = false;
+      try {
+        const savedSchedule = await read<{ input: ScheduleEditorInputDto; policy: { mode: string } }>(`/api/jobs/${job.jobId}/schedule`);
+        const input = savedSchedule.data.input;
+        setSchedule({ ...input, localOnce: input.localOnce?.slice(0, 16) ?? null, selectedOffset: input.selectedOffset?.slice(0, 6) ?? null });
+        setMissedMode(savedSchedule.data.policy.mode); currentHasSchedule = true;
+      } catch (error) { if (!(error instanceof ApiError) || error.status !== 404) throw error; }
+      setScheduleEnabled(currentHasSchedule); setHasSchedule(currentHasSchedule);
+      setIssues([]); setJob({ jobId: job.jobId, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived });
+      setStaleConflict(false); setStep(4); setMessage(t.draftMustBeReviewed);
+      setReviewAcknowledged(false);
+    } catch { setMessage(t.requestError); }
+    finally { setBusy(false); }
   };
   const preview = async (value: ScheduleEditorInputDto): Promise<SchedulePreviewItemDto[]> => {
     const result = await mutate<SchedulePreviewItemDto[]>("/api/schedules/preview", "POST", { input: schedulePayload(value), afterUtc: new Date().toISOString(), count: 5 });
@@ -81,12 +137,8 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
       setJob({ ...job, etag: current.etag, enabled: current.data.enabled, projectionPending: true });
       setMessage(t.manualEnabled);
     } catch (error) {
-      try {
-        const current = await read<EditorDto>(`/api/jobs/${job.jobId}/configuration`);
-        const activated = current.data.enabled;
-        setJob(previous => previous ? { ...previous, etag: current.etag, enabled: activated, archived: current.data.archived } : previous);
-        setMessage(activated ? t.manualEnabled : error instanceof ApiError && error.status === 412 ? t.staleDraftPreserved : t.requestError);
-      } catch { setMessage(error instanceof ApiError && error.status === 412 ? t.staleDraftPreserved : t.requestError); }
+      if (error instanceof ApiError && error.status === 412) recordStaleConflict();
+      setMessage(error instanceof ApiError && error.status === 412 ? t.staleDraftPreserved : t.requestError);
     }
     finally { setBusy(false); }
   };
@@ -96,7 +148,14 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
     try {
       await mutate(`/api/jobs/${job.jobId}/schedule`, "DELETE", undefined, job.etag);
       const current = await read<EditorDto>(`/api/jobs/${job.jobId}/configuration`);
-      setJob({ ...job, etag: current.etag, projectionPending: true }); setScheduleEnabled(false); setDeleteScheduleOpen(false); setMessage(t.scheduleDeleted);
+      try {
+        await read(`/api/jobs/${job.jobId}/schedule`);
+        setHasSchedule(true); setMessage(t.scheduleDeleteFailed);
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 404) throw error;
+        setHasSchedule(false); setScheduleEnabled(false); setDeleteScheduleOpen(false); setMessage(t.scheduleDeleted);
+      }
+      setJob({ ...job, etag: current.etag, projectionPending: true });
     } catch (error) { setMessage(error instanceof ApiError && error.status === 412 ? t.staleDraftPreserved : t.actionError); }
     finally { setBusy(false); }
   };
@@ -135,6 +194,7 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
     finally { setBusy(false); }
   };
   const next = async () => {
+    if (step === 4 && !reviewAcknowledged) return;
     if (step === 0 && (!selected || !name.trim())) { setMessage(t.templateRequired); return; }
     if (step === 4 && !job) { if (!(await saveDraft())) return; }
     setMessage(""); setStep(value => Math.min(5, value + 1));
@@ -147,6 +207,9 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
   return <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1000 }}>
     <Stack spacing={3}>
       <Typography variant="h5">{t.createJob}</Typography>
+      {staleConflict && <Button disabled={busy} onClick={() => void loadCurrentRevision()}>{t.loadCurrentRevision}</Button>}
+      {step === 4 && recoveryDraft && !staleConflict && <Button onClick={restoreDraft}>{t.restoreMyDraft}</Button>}
+      <TextField select label={t.wizardLanguage} value={language} onChange={event => setLanguage?.(event.target.value === "pt-BR" ? "pt-BR" : "en")} sx={{ maxWidth: 260 }}><MenuItem value="en">English</MenuItem><MenuItem value="pt-BR">Português (Brasil)</MenuItem></TextField>
       {message && <Alert ref={summary} tabIndex={-1} role="alert" severity={message === t.requestError || message === t.validation ? "error" : "info"}>{message}{issues.length > 0 && <ul>{issues.map((issue, index) => <li key={`${issue.path}-${index}`}>{issue.path}: {issue.code}</li>)}</ul>}</Alert>}
       <Stepper activeStep={step} alternativeLabel sx={{ overflowX: "auto" }}>{labels.map((label, index) => <Step key={label}><StepButton onClick={() => setStep(index)}>{label}</StepButton></Step>)}</Stepper>
       {step === 0 && <Stack spacing={2}><TextField label={t.jobName} value={name} onChange={event => setName(event.target.value)} required autoFocus fullWidth /><TemplatePicker label={t.template} value={selected} onChange={selectTemplate} /></Stack>}
@@ -165,8 +228,9 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
         <TextField label={t.priority} type="number" value={policy.priority} onChange={event => updatePolicy("priority", Number(event.target.value))} />
         {scheduleEnabled && <TextField select label={t.missedWork} helperText={t.missedPolicyHelp} value={missedMode} onChange={event => setMissedMode(event.target.value)}><MenuItem value="Skip">{t.skipMissed}</MenuItem><MenuItem value="Coalesce">{t.coalesceMissed}</MenuItem><MenuItem value="CatchUp">{t.catchUpMissed}</MenuItem></TextField>}
       </Stack>}
-      {step === 4 && <Stack spacing={2}><Typography variant="h6">{t.stageReview}</Typography><Typography>{name} · {selected?.descriptor.displayName} · {scheduleEnabled ? schedule.kind : t.manualJobType}</Typography>{job && <Typography>{t.jobStatus}: {job.enabled ? t.enabled : t.disabled}</Typography>}{scheduleEnabled && <ScheduleEditor value={schedule} onChange={setSchedule} preview={preview} t={t} />}<Typography>{policy.timeout === null ? t.noTimeout : `${timeSpanSeconds(policy.timeout)} ${t.seconds}`} · {policy.maxAttempts} {t.attempts} · {policy.overlap}</Typography>{issues.length > 0 && <Alert severity="error" role="alert">{t.validation}</Alert>}<Button variant="contained" disabled={busy || localIssues.length > 0 || issues.length > 0} onClick={() => void saveDraft()}>{t.saveDraft}</Button></Stack>}
-      {step === 5 && <Stack spacing={2}><Typography variant="h6">{t.reviewAndEnable}</Typography>{job ? <><JobDetails job={{ ...job, name }} canManage t={t} onDuplicate={id => void reviewDuplicate(id)} onRefresh={() => void refreshJob()} /><Button variant="contained" disabled={busy || job.enabled || localIssues.length > 0 || issues.length > 0} onClick={() => void activate()}>{t.enableJob}</Button><Button disabled={!job.enabled || busy} onClick={() => void runNow()}>{t.runNow}</Button></> : <Alert severity="info">{t.draftSaved}</Alert>}</Stack>}
+      {step === 4 && !reviewAcknowledged && <Button onClick={() => setReviewAcknowledged(true)}>{t.confirmCurrentRevisionReview}</Button>}
+      {step === 4 && <Stack spacing={2}><Typography variant="h6">{t.stageReview}</Typography><Typography>{name} · {selected?.descriptor.displayName} · {scheduleEnabled ? schedule.kind : t.manualJobType}</Typography>{job && <Typography>{t.jobStatus}: {job.enabled ? t.enabled : t.disabled}</Typography>}{scheduleEnabled && <ScheduleEditor value={schedule} onChange={setSchedule} preview={preview} t={t} />}<Typography>{policy.timeout === null ? t.noTimeout : `${timeSpanSeconds(policy.timeout)} ${t.seconds}`} · {policy.maxAttempts} {t.attempts} · {policy.overlap}</Typography>{issues.length > 0 && <Alert severity="error" role="alert">{t.validation}</Alert>}<Button variant="contained" disabled={busy || staleConflict || !reviewAcknowledged || localIssues.length > 0 || issues.length > 0} onClick={() => void saveDraft()}>{t.saveDraft}</Button></Stack>}
+      {step === 5 && <Stack spacing={2}><Typography variant="h6">{t.reviewAndEnable}</Typography>{job ? <><JobDetails job={{ ...job, name }} canManage t={t} actionsDisabled={busy || staleConflict || !reviewAcknowledged || (hasSchedule && !scheduleEnabled)} onDuplicate={id => void reviewDuplicate(id)} onRefresh={() => void refreshJob()} onStale={recordStaleConflict} /><Button variant="contained" disabled={busy || staleConflict || !reviewAcknowledged || (hasSchedule && !scheduleEnabled) || job.enabled || localIssues.length > 0 || issues.length > 0} onClick={() => void activate()}>{t.enableJob}</Button><Button disabled={!job.enabled || busy} onClick={() => void runNow()}>{t.runNow}</Button></> : <Alert severity="info">{t.draftSaved}</Alert>}</Stack>}
       <Stack direction="row" sx={{ justifyContent: "space-between" }}><Button disabled={step === 0 || busy} onClick={() => setStep(value => Math.max(0, value - 1))}>{t.back}</Button>{step < 5 && <Button variant="contained" disabled={busy} onClick={() => void next()}>{t.next}</Button>}</Stack>
     </Stack>
   </Paper>;
