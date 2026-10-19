@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using WorkerDock.Application.Common;
 
 namespace WorkerDock.Infrastructure.Authentication;
@@ -27,7 +28,8 @@ public static class SessionEndpoints
             }
         }
         var protector = context.RequestServices.GetRequiredService<IDataProtectionProvider>().CreateProtector("WorkerDock.AnonymousSession.v1");
-        var protectedSubject = context.Request.Cookies["__Host-WorkerDock.Session"];
+        var cookieName = SessionCookieName(context);
+        var protectedSubject = context.Request.Cookies[cookieName];
         string? subject = null;
         if (protectedSubject is not null)
         {
@@ -41,7 +43,7 @@ public static class SessionEndpoints
         if (subject is null)
         {
             subject = Guid.NewGuid().ToString("N");
-            context.Response.Cookies.Append("__Host-WorkerDock.Session", protector.Protect(subject + "|" + DateTimeOffset.UtcNow.AddHours(8).ToUnixTimeSeconds()),
+            context.Response.Cookies.Append(cookieName, protector.Protect(subject + "|" + DateTimeOffset.UtcNow.AddHours(8).ToUnixTimeSeconds()),
                 new CookieOptions { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict, Path = "/", MaxAge = TimeSpan.FromHours(8), IsEssential = true });
         }
         context.Items[SubjectItem] = subject;
@@ -63,6 +65,9 @@ public static class SessionEndpoints
         context.Response.StatusCode = 400;
         return Results.Problem(statusCode: 400, extensions: new Dictionary<string, object?> { ["code"] = "AntiforgeryFailed", ["field"] = "headers.xWorkerDockCsrf" }).ExecuteAsync(context);
     }
+
+    private static string SessionCookieName(HttpContext context) => "__Host-" +
+        (context.RequestServices.GetRequiredService<IConfiguration>()["Access:CookiePrefix"] ?? "WorkerDock") + ".Session";
 
     public static ActorContext Actor(HttpContext context) => new(
         context.User.Identity?.IsAuthenticated == true ? context.User.FindFirst("iss")?.Value + ":" + context.User.FindFirst("sub")!.Value : "session:" + context.Items[SubjectItem],

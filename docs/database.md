@@ -39,7 +39,7 @@ transactionally. An idle process that could submit work must also be stopped;
 the empty-table guard cannot prevent future writes by a process that remains
 running.
 
-The migration script is checked into `database/tenant` with its SHA-256 values in `manifest.json`. Central database migrations begin in Task 20. SQL integration outcomes must be reported separately from memory tests.
+The migration script is checked into `database/tenant` with its SHA-256 values in `manifest.json`. The separate central registry migration and Control Center SQL setup are documented in [control-center.md](control-center.md), with paired scripts under `database/central`. SQL integration outcomes must be reported separately from memory tests.
 
 ## Tenant integration settings
 

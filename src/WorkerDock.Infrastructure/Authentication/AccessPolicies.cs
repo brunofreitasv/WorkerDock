@@ -20,8 +20,10 @@ public static class AccessPolicies
 {
     public const string Read = "WorkerDock.Read";
     public const string Manage = "WorkerDock.Manage";
-    public static IServiceCollection AddWorkerDockAccess(this IServiceCollection services)
+    public static IServiceCollection AddWorkerDockAccess(this IServiceCollection services, string cookiePrefix = "WorkerDock")
     {
+        if (cookiePrefix.Length is < 1 or > 48 || cookiePrefix.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '-')))
+            throw new InvalidOperationException("AccessCookiePrefixInvalid");
         services.AddSingleton(provider =>
         {
             var config = provider.GetRequiredService<IConfiguration>();
@@ -35,7 +37,13 @@ public static class AccessPolicies
             return options;
         });
         services.AddDataProtection();
-        services.AddOptions<DataProtectionOptions>().Configure<IConfiguration>((o, config) => o.ApplicationDiscriminator = "WorkerDock.Tenant." + config["Tenant:InstanceId"]);
+        services.AddOptions<DataProtectionOptions>().Configure<IConfiguration>((o, config) =>
+        {
+            var centerId = config["ControlCenter:InstanceId"];
+            var instanceId = centerId ?? config["Tenant:InstanceId"];
+            var boundary = centerId is null ? "Tenant" : "ControlCenter";
+            o.ApplicationDiscriminator = "WorkerDock." + boundary + "." + instanceId;
+        });
         services.AddOptions<KeyManagementOptions>().Configure<IConfiguration, ILoggerFactory>((o, config, logger) =>
         {
             var directory = config["DataProtection:KeyDirectory"];
@@ -47,13 +55,13 @@ public static class AccessPolicies
         });
         services.AddAntiforgery(o =>
         {
-            o.HeaderName = "X-WorkerDock-CSRF"; o.Cookie.Name = "__Host-WorkerDock.Csrf";
+            o.HeaderName = "X-WorkerDock-CSRF"; o.Cookie.Name = "__Host-" + cookiePrefix + ".Csrf";
             o.Cookie.HttpOnly = true; o.Cookie.SecurePolicy = CookieSecurePolicy.Always; o.Cookie.SameSite = SameSiteMode.Strict; o.Cookie.Path = "/";
         });
         var auth = services.AddAuthentication(o => { o.DefaultScheme = "cookie"; o.DefaultChallengeScheme = "cookie"; })
             .AddCookie("cookie", o =>
             {
-                o.Cookie.Name = "__Host-WorkerDock.Auth"; o.Cookie.HttpOnly = true; o.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                o.Cookie.Name = "__Host-" + cookiePrefix + ".Auth"; o.Cookie.HttpOnly = true; o.Cookie.SecurePolicy = CookieSecurePolicy.Always;
                 o.Cookie.SameSite = SameSiteMode.Lax; o.Cookie.Path = "/"; o.ExpireTimeSpan = TimeSpan.FromHours(8); o.SlidingExpiration = false;
                 o.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 401; return Task.CompletedTask; };
                 o.Events.OnRedirectToAccessDenied = c => { c.Response.StatusCode = 403; return Task.CompletedTask; };
@@ -61,7 +69,14 @@ public static class AccessPolicies
         auth.AddOpenIdConnect("oidc", _ => { });
         services.AddOptions<OpenIdConnectOptions>("oidc").Configure<AccessOptions>((o, options) =>
         {
-            if (!options.AuthenticationConfigured) return;
+            if (!options.AuthenticationConfigured)
+            {
+                // ASP.NET may validate every registered remote scheme while initializing the
+                // authentication stack. Keep the dormant scheme structurally valid; access
+                // policies never challenge it while authentication is disabled.
+                o.Authority = "https://disabled.invalid"; o.ClientId = "disabled"; o.ClientSecret = "disabled";
+                return;
+            }
             o.SignInScheme = "cookie"; o.Authority = options.Authority; o.ClientId = options.ClientId; o.ClientSecret = Environment.GetEnvironmentVariable("WORKERDOCK_BOOTSTRAP_" + options.ClientSecretReference);
             o.ResponseType = OpenIdConnectResponseType.Code; o.ResponseMode = OpenIdConnectResponseMode.Query; o.UsePkce = true;
             o.SaveTokens = false; o.MapInboundClaims = false; o.RequireHttpsMetadata = true;
@@ -108,4 +123,5 @@ public static class AccessPolicies
         });
         return services;
     }
+
 }

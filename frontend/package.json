@@ -10,6 +10,7 @@
     "test": "vitest",
     "build": "node scripts/licenses.mjs && npm run build --workspaces --if-present",
     "e2e": "playwright test --config playwright.config.ts",
+    "e2e:center": "playwright test --config playwright.center.config.ts",
     "dev": "npm run dev --workspace @workerdock/tenant",
     "format": "prettier --write apps packages scripts *.ts *.json"
   },

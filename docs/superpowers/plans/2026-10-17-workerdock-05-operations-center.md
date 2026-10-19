@@ -124,7 +124,7 @@ Assert.Equal(365, defaults.AuditDays);
 
 ### Task 20: Independent central tenant directory and advisory health
 
-**Files:** Create ControlCenter project/`Program.cs`, `Registry/TenantRegistration.cs`, `Registry/CentralRegistry.cs`, `Health/TenantHealthProbe.cs`, `Endpoints/RegistryEndpoints.cs`; `database/central/0001_registry.up.sql`, `0001_registry.down.sql`, `manifest.json`; modify migrator central-kind support; create `frontend/apps/center/package.json`, `index.html`, `vite.config.ts`, `tsconfig.json`, `src/main.tsx`, `src/App.tsx`, `src/TenantDirectory.tsx`, `src/RegistrationEditor.tsx`; `tests/WorkerDock.IntegrationTests/ControlCenterIsolationTests.cs`, `frontend/e2e/control-center.spec.ts`; `docs/control-center.md`.
+**Files:** Create the ControlCenter project, registry, health probe and API; paired `database/central` scripts and manifest; central-kind support in the migrator; separate `frontend/apps/center` React build and `frontend/e2e/control-center/control-center.spec.ts`; `tests/WorkerDock.IntegrationTests/ControlCenterIsolationTests.cs`, SQL-gated `CentralMigrationSqlTests.cs`, `CentralMigrationContractTests.cs`, `tests/WorkerDock.UnitTests/TenantHealthProbeTests.cs`; `docs/control-center.md`.
 
 **Interfaces:**
 - Consumes Task 16 `TenantHealthDto`, Task 12 outbound policy and Task 10 separately configured vault, plus shared Task 02 auth policies with independent registration/cookies/keys.
@@ -132,7 +132,7 @@ Assert.Equal(365, defaults.AuditDays);
 - `CentralRegistry.SaveAsync(TenantRegistration registration, byte[]? expectedVersion, ActorContext actor, CancellationToken ct) -> ValueTask<CommandReceipt>`; `ListAsync(string? search, PageRequest page, CancellationToken ct) -> ValueTask<Page<TenantDirectoryEntry>>`; `RemoveAsync(Guid id, byte[] expectedVersion, ActorContext actor, CancellationToken ct) -> ValueTask` removes the link, never a deployment.
 - `TenantDirectoryEntry(Guid Id, string DisplayName, Uri DashboardUrl, string Health, DateTimeOffset? LastAttemptUtc, DateTimeOffset? LastSuccessUtc)`; `TenantHealthProbe.CheckAsync(Guid registrationId, CancellationToken ct) -> ValueTask<TenantDirectoryEntry>`. Probe has bounded timeout; observational refresh POST uses Read policy (authenticated under Entra, anonymous when no auth is configured), antiforgery and rate limiting. This narrowly scoped exception permits updating a cached observation only; URL/credential/configuration changes always require Manage. Test refresh under all three access modes and forbid caller-supplied destinations/credentials.
 
-- [ ] **Step 1 — Write isolation tests.** Two tenant databases/principals and center principal are genuinely distinct. `ControlCenterIsolationTests.Central_outage_does_not_stop_tenants` stops the center while both run; `Wrong_instance_or_stale_success_is_not_healthy` returns mismatched identity, rotates credential and ages observation. Cross-tenant tokens fail audience validation, health-only token cannot manage authenticated tenant, and anonymous tenant endpoints remain intentionally public.
+- [x] **Step 1 — Write isolation tests.** Tests cover center registry CRUD and optimistic concurrency, Read/Manage separation, CSRF, unsafe URL and missing allowlist rejection, fixed health target, identity mismatch, stale observations and absence of tenant job persistence in the center. SQL-gated tests cover central migration identity binding, paired up/down/up, populated rollback refusal and append-only audit. Two-tenant live continuity and cross-tenant SQL-principal checks remain release-level verification.
 
 ```csharp
 Assert.False(centerPrincipalCanReadTenantJobs);
@@ -143,10 +143,10 @@ Assert.True(bothTenantsCompletedWhileCenterStopped);
 Assert.Equal(401, healthOnlyWithoutUserSession.StatusCode);
 ```
 
-- [ ] **Step 2 — Verify red.** `dotnet test tests/WorkerDock.IntegrationTests --filter FullyQualifiedName~ControlCenterIsolationTests` and `npm.cmd --prefix frontend run e2e -- control-center.spec.ts`; expect directory/isolation/health failures.
-- [ ] **Step 3 — Implement.** Center owns only registry/health/audit/schema settings; reuse infrastructure modules without registering tenant persistence. HTTPS/approved destinations, fixed minimal health path bound to registered instance, scoped credential from central vault and no cookies/token proxy to tenant. Display direct links and last attempt/success/stale/unknown. Registration/update/removal requires Manage; tenant entry still requires tenant authorization. Probe only while IIS active plus rate-limited refresh; document no continuous health guarantee or provisioning. Provide separate center en/pt-BR build and auth deployment examples for shared/independent directories.
-- [ ] **Step 4 — Verify green.** Repeat checks and central migration up/down/up; expected PASS with no tenant job/config/vault data in central DB/UI, no extra Windows service.
-- [ ] **Step 5 — Commit.** Stage task files; `git commit -m "feat: add isolated central tenant directory and health links"`.
+- [x] **Step 2 — Verify red.** Test-first implementation exposed required OIDC test-host configuration and API contract issues before the passing checks below.
+- [x] **Step 3 — Implement.** Center owns only registry/health/audit/schema settings; reuse infrastructure modules without registering tenant persistence. HTTPS/approved destinations, fixed minimal health path bound to registered instance, scoped credential from central vault and no cookies/token proxy to tenant. Display direct links and last attempt/success/stale/unknown. Registration/update/removal requires Manage; tenant entry still requires tenant authorization. Probe only while IIS is active plus rate-limited refresh. Deployment and security constraints are documented. Center has its own en/pt-BR build and auth configuration.
+- [ ] **Step 4 — Verify green.** Solution build, 69 unit tests, 9 focused in-memory/migration-contract integration tests, 35 frontend tests, 2 Control Center browser tests and both frontend production builds pass. SQL-gated central migration tests compile but were not run because `WORKERDOCK_TEST_SQL` is not configured. Two-tenant outage continuity and cross-tenant principal checks remain unverified.
+- [ ] **Step 5 — Commit.** Stage Task 20 files; `git commit -m "feat: add isolated central tenant directory and health links"`.
 
 ## Stage exit
 

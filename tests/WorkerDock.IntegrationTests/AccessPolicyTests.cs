@@ -296,7 +296,7 @@ internal sealed class LocalOidcIssuer : HttpMessageHandler
     private string nonce = ""; private string challenge = "";
     public LocalOidcIssuer(string? role = null, string claimType = "roles", string tokenIssuer = "https://issuer.example", string tokenAudience = "tenant-client", string metadataIssuer = "https://issuer.example", bool expired = false, bool wrongKey = false)
     { this.role = role; this.claimType = claimType; this.tokenIssuer = tokenIssuer; this.tokenAudience = tokenAudience; this.metadataIssuer = metadataIssuer; this.expired = expired; this.wrongKey = wrongKey; key = new(rsa) { KeyId = "local-test-key" }; }
-    public async Task<string?> SignIn(HttpClient client, bool succeeds = true)
+    public async Task<string?> SignIn(HttpClient client, bool succeeds = true, string authCookieName = "__Host-WorkerDock.Auth")
     {
         using var start = await client.GetAsync("/auth/signin"); Assert.True(start.StatusCode == HttpStatusCode.Redirect, await start.Content.ReadAsStringAsync());
         var query = QueryHelpers.ParseQuery(start.Headers.Location!.Query); nonce = query["nonce"]!; challenge = query["code_challenge"]!;
@@ -305,7 +305,7 @@ internal sealed class LocalOidcIssuer : HttpMessageHandler
         Assert.Equal(succeeds ? HttpStatusCode.Redirect : HttpStatusCode.Unauthorized, finish.StatusCode);
         if (succeeds)
         {
-            var authCookie = finish.Headers.GetValues("Set-Cookie").Single(x => x.StartsWith("__Host-WorkerDock.Auth=", StringComparison.Ordinal));
+            var authCookie = finish.Headers.GetValues("Set-Cookie").Single(x => x.StartsWith(authCookieName + "=", StringComparison.Ordinal));
             Assert.Contains("secure", authCookie, StringComparison.OrdinalIgnoreCase); Assert.Contains("httponly", authCookie, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("domain=", authCookie, StringComparison.OrdinalIgnoreCase);
             return authCookie.Split(';')[0].Split('=', 2)[1];

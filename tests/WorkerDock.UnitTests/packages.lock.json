@@ -386,6 +386,12 @@
       "workerdock.contracts": {
         "type": "Project"
       },
+      "workerdock.controlcenter": {
+        "type": "Project",
+        "dependencies": {
+          "WorkerDock.Infrastructure": "[1.0.0, )"
+        }
+      },
       "workerdock.domain": {
         "type": "Project"
       },

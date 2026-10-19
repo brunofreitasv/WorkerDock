@@ -10,4 +10,5 @@ TestResults/
 
 **/node_modules/
 src/WorkerDock.Web/wwwroot/
+src/WorkerDock.ControlCenter/wwwroot/
 frontend/apps/tenant/public/THIRD-PARTY-NOTICES.txt
