@@ -7,7 +7,7 @@ import { ScheduleEditor, type ScheduleEditorInputDto } from "../schedules/Schedu
 import { SchedulePreview, type SchedulePreviewItemDto } from "../schedules/SchedulePreview";
 import { JobDetails } from "./JobDetails";
 import type { JobStateDto } from "./JobActions";
-import { sameScheduleInput } from "./scheduleInput";
+import { confirmsScheduleWrite } from "./scheduleInput";
 
 type Issue = { path: string; code: string };
 type Revision = { jobId: string; revision: number; name: string; templateId: string; templateVersion: string; configuration: Record<string, unknown>; profileId: string | null; policy: Record<string, unknown> };
@@ -65,7 +65,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
         const input = schedulePayload(schedule);
         await mutate("/api/jobs/" + id + "/schedule", "PUT", { input, policy: { mode: missedMode, latenessTolerance: "00:01:00", catchUpCount: 3, catchUpAge: "1.00:00:00" } }, current.etag ?? undefined);
         const persisted = await read<{ input: ScheduleEditorInputDto }>(`/api/jobs/${id}/schedule`);
-        if (!sameScheduleInput(persisted.data.input, input)) throw new Error("ScheduleConfirmationMismatch");
+        if (!confirmsScheduleWrite(input, persisted.data.input)) throw new Error("ScheduleConfirmationMismatch");
         setScheduleState("present");
         writingSchedule = false;
         current = await read<EditorDto>(`/api/jobs/${id}/configuration`);

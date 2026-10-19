@@ -4,7 +4,7 @@ import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { translations, type Language } from "@workerdock/ui";
 import { JobWizard } from "./JobWizard";
-import { sameScheduleInput } from "./scheduleInput";
+import { confirmsScheduleWrite, sameScheduleInput } from "./scheduleInput";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -15,6 +15,14 @@ test.each([
 ])("schedule confirmation compares equivalent offsets %s and %s", (draftOffset, persistedOffset) => {
   const base = { kind: "Once" as const, cron: null, zoneId: "UTC", localOnce: "2026-11-01T01:30:00" };
   expect(sameScheduleInput({ ...base, selectedOffset: draftOffset }, { ...base, selectedOffset: persistedOffset })).toBe(true);
+});
+
+test("schedule write confirmation accepts a resolved offset only for the submitted local instant", () => {
+  const request = { kind: "Once" as const, cron: null, zoneId: "America/New_York", localOnce: "2026-01-15T09:00:00", selectedOffset: null };
+  expect(confirmsScheduleWrite(request, { ...request, selectedOffset: "-05:00:00" })).toBe(true);
+  expect(confirmsScheduleWrite(request, { ...request, selectedOffset: null })).toBe(false);
+  expect(confirmsScheduleWrite(request, { ...request, selectedOffset: "not-an-offset" })).toBe(false);
+  expect(confirmsScheduleWrite(request, { ...request, localOnce: "2026-01-15T10:00:00", selectedOffset: "-05:00:00" })).toBe(false);
 });
 
 test("changing wizard language preserves the draft and selected local instant, offset, and preview UTC", async () => {
@@ -326,6 +334,48 @@ test("restored one-time schedule confirms semantic UTC offset despite server sec
   await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
   await waitFor(() => expect(screen.getByText("Disabled draft saved.")).toBeVisible());
   expect(confirmedOffset).toBe("-05:00:00");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("button", { name: "Enable job" })).toBeEnabled();
+});
+
+test("unambiguous one-time schedule with no selected offset confirms the server-resolved offset and can be enabled", async () => {
+  const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };
+  const jobId = "11111111-1111-4111-8111-111111111111";
+  let submittedOffset: string | null | undefined;
+  let scheduleConfirmed = false;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    const method = init?.method ?? "GET";
+    let status = 200;
+    let body: any = {};
+    if (url.pathname === "/api/templates") body = { items: [{ selectable: true, descriptor }] };
+    else if (url.pathname === "/api/time-zones") body = ["America/New_York", "UTC"];
+    else if (url.pathname === "/api/jobs" && method === "POST") { status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}/configuration`) body = { revision: { jobId, revision: 1, name: "Winter once", templateId: "sample", templateVersion: "1", configuration: {}, profileId: null, policy: { timeout: null } }, version: [1], enabled: false, archived: false, concurrencyLimit: 1 };
+    else if (url.pathname === `/api/jobs/${jobId}/schedule` && method === "PUT") { submittedOffset = JSON.parse(String(init?.body)).input.selectedOffset; status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}/schedule` && method === "GET") { scheduleConfirmed = true; body = { input: { kind: "Once", cron: null, zoneId: "America/New_York", localOnce: "2026-01-15T09:00:00", selectedOffset: "-05:00:00" }, policy: { mode: "Skip" }, paused: false }; }
+    else if (url.pathname === "/api/antiforgery") body = { requestToken: "test" };
+    else if (url.pathname === `/api/jobs/${jobId}` && method === "PUT") { status = 202; body = { targetId: jobId }; }
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ETag: '"current"' } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "Winter once");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByLabelText("Use a schedule"));
+  await user.click(screen.getByRole("combobox", { name: "Schedule kind" }));
+  await user.click(await screen.findByRole("option", { name: translations.en.oneTimeSchedule }));
+  await user.type(screen.getByLabelText("Local date and time"), "2026-01-15T09:00");
+  await user.click(screen.getByRole("combobox", { name: "Time zone" }));
+  await user.click(await screen.findByRole("option", { name: "America/New_York" }));
+  expect(screen.getByLabelText("UTC offset")).toHaveValue("");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getByText("Disabled draft saved.")).toBeVisible());
+  expect(submittedOffset).toBeNull();
+  expect(scheduleConfirmed).toBe(true);
   await user.click(screen.getByRole("button", { name: "Next" }));
   expect(screen.getByRole("button", { name: "Enable job" })).toBeEnabled();
 });

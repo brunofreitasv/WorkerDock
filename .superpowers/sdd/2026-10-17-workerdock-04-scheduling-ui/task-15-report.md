@@ -36,6 +36,12 @@ Once-schedule confirmation now compares parsed offset durations, so the restored
 
 Verification: focused `JobWizard.test.tsx` PASS, 12/12 tests; frontend unit suite PASS, 25/25 tests; build PASS; Playwright discovery PASS, 7 tests/2 files; `git diff --check` PASS. Browser execution remains `PLAYWRIGHT_BLOCKED` because the configured Chromium executable is unavailable. SQL-backed lifecycle/live migration checks remain `SQL_TEST_BLOCKED` because `WORKERDOCK_TEST_SQL` is unset. Commit: `fix: compare semantic schedule offsets`.
 
+## Important review follow-up 7
+
+After a successful schedule PUT, Once-schedule confirmation now accepts a null request offset when the GET returns a parseable concrete resolved offset for the exact same kind, zone, and local time. This equivalence is limited to post-write confirmation; conflict revision review remains strict. Null-to-null and malformed returned offsets stay unconfirmed, and the backend's ambiguous-local-time rejection is unchanged. Added a New York winter Once round-trip regression and direct rejection checks for null, malformed, and mismatched local times.
+
+Verification: focused `JobWizard.test.tsx` PASS, 14/14 tests; frontend unit suite PASS, 27/27 tests; build PASS; Playwright discovery PASS, 7 tests/2 files; `git diff --check` PASS. Browser execution remains `PLAYWRIGHT_BLOCKED` because the configured Chromium executable is unavailable. SQL-backed lifecycle/live migration checks remain `SQL_TEST_BLOCKED` because `WORKERDOCK_TEST_SQL` is unset. Commit: `fix: confirm resolved once schedule offsets`.
+
 ## Important review follow-up 2
 
 Schedule removal now tracks persisted state as `none`, `present`, or `unknown`. DELETE failure and successful DELETE with an unconfirmed GET both remain visibly unresolved; the review does not claim “Manual job,” manual Enable stays disabled until a schedule GET confirms 404, and Pause/Disable remain available as safety actions. Duplicate review resets state from the target schedule GET, allowing a scheduled source to become a manual duplicate only when the target returns 404. Added unit regressions for unconfirmed schedule removal and scheduled-source duplication, plus Playwright scenarios for DELETE failure, GET failure, and duplicate state.

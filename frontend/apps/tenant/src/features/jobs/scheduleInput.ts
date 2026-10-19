@@ -8,6 +8,18 @@ export function sameScheduleInput(left: ScheduleEditorInputDto, right: ScheduleE
   return leftOffset !== null && rightOffset !== null && leftOffset === rightOffset;
 }
 
+export function confirmsScheduleWrite(request: ScheduleEditorInputDto, persisted: ScheduleEditorInputDto): boolean {
+  if (request.kind === "Once" && request.selectedOffset === null) {
+    return request.kind === persisted.kind
+      && request.cron === persisted.cron
+      && request.zoneId === persisted.zoneId
+      && request.localOnce === persisted.localOnce
+      && persisted.selectedOffset !== null
+      && normalizeOffset(persisted.selectedOffset) !== null;
+  }
+  return sameScheduleInput(request, persisted);
+}
+
 function normalizeOffset(value: string): bigint | null {
   const match = /^([+-])?(\d{1,2}):([0-5]\d)(?::([0-5]\d)(?:\.(\d{1,7}))?)?$/.exec(value);
   if (!match) return null;
