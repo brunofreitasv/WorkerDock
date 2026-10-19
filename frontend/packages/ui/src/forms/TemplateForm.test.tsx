@@ -32,3 +32,9 @@ it("shows server validation paths on their matching schema fields", () => {
   expect(screen.getByLabelText("Count")).toHaveAttribute("aria-invalid", "true");
   expect(screen.getByText("Minimum")).toBeInTheDocument();
 });
+
+it("shows root configuration errors when a required form value is missing", () => {
+  const descriptor = { id: "test", version: "1", displayName: "Test", description: "Test", configurationSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } };
+  render(<TemplateForm descriptor={descriptor} value={{}} onChange={() => {}} errors={{ configuration: "Required" }} />);
+  expect(screen.getByRole("alert")).toHaveTextContent("Required");
+});
