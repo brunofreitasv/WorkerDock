@@ -30,15 +30,16 @@ Task 17 extends the safe logging/audit/read model; 18 owns incidents and sink de
 
 ### Task 17: Bounded logs, audit queries, aggregates and optional OpenTelemetry
 
-**Files:** Create `src/WorkerDock.Application/Observability/IExecutionEvents.cs`, `src/WorkerDock.Infrastructure/Observability/SqlExecutionEvents.cs`, `MetricAggregation.cs`, `TelemetryRegistration.cs`, `AuditEventProjection.cs`; modify SafeExecutionLog/MonitoringQueries/host registrations; `database/tenant/0006_observability.up.sql`, `0006_observability.down.sql`, manifest; `tests/WorkerDock.IntegrationTests/ObservabilityTests.cs`, `tests/WorkerDock.UnitTests/TelemetryProjectionTests.cs`; `docs/observability.md`.
+**Files:** Create `src/WorkerDock.Application/Observability/IExecutionEvents.cs`, `IExecutionEventQueries.cs`, `src/WorkerDock.Infrastructure/Observability/SqlExecutionEvents.cs`, `SqlExecutionEventQueries.cs`, `MetricAggregation.cs`, `TelemetryRegistration.cs`, `AuditEventProjection.cs`, and `src/WorkerDock.Web/Endpoints/ExecutionEventEndpoints.cs`; modify SafeExecutionLog/host registrations without changing Task 16 monitoring contracts; `database/tenant/0006_observability.up.sql`, `0006_observability.down.sql`, manifest; `tests/WorkerDock.IntegrationTests/ObservabilityTests.cs`, `tests/WorkerDock.UnitTests/TelemetryProjectionTests.cs`; `docs/observability.md`.
 
 **Interfaces:**
 - Consumes Task 07 safe log contract, Task 08 required lifecycle events and Task 16 read DTOs.
 - `ExecutionEvent(Guid ExecutionId, Guid? AttemptId, string Source, long Sequence, DateTimeOffset AtUtc, string Code, IReadOnlyDictionary<string,string> SafeFields)`; identity is (ExecutionId, AttemptId, Source, Sequence), treating null AttemptId as a fixed execution-level scope. Source is a server-assigned bounded enum (Lifecycle/Supervisor/Handler); monotonic sequences persist for that scope across retries of a write. Independent attempts may each start handler sequence at 1. SQL uniqueness must cover nullable execution-level scope too.
 - `IExecutionEvents.AppendAsync(IReadOnlyList<ExecutionEvent> events, CancellationToken ct) -> ValueTask` for bounded optional diagnostics; mandatory lifecycle events remain in the attempt transaction. `MetricAggregation.AggregateAsync(DateTimeOffset throughUtc, int batchSize, CancellationToken ct) -> ValueTask<int>`.
+- Safe event/log paging is a separate additive `IExecutionEventQueries` contract and `/api/monitoring/executions/{id}/events` read route; do not change the Task 16 `IMonitoringQueries` contract. The DTO allowlists bounded safe fields and paginates by stable event identity.
 - Stable meter/source name `WorkerDock`; metrics: executions, retries, timeouts, duration, trigger delay, queue delay and heartbeat age. Labels limited to template ID, outcome and component; execution/correlation identifiers only in safe traces/logs.
 
-- [ ] **Step 1 — Write tests.** `ObservabilityTests.Oversized_logs_and_exporter_failure_do_not_replay_success` sends oversize/flooded diagnostics and unreachable exporter. Verify truncation/drop marker, bounded queue, committed success, event idempotency and aggregate counts. Runtime service login cannot update/delete audit; restricted purge is introduced later. Authentication/authorization events use safe coalescing rather than unbounded inserts.
+- [ ] **Step 1 — Write tests.** `ObservabilityTests.Oversized_logs_and_exporter_failure_do_not_replay_success` sends oversize/flooded diagnostics and unreachable exporter. Verify truncation/drop marker, bounded queue, committed success, event idempotency and aggregate counts. Add only `SELECT` on `[workerdock].AuditEvents` for the runtime read principal so Task 16 audit queries work; preserve the existing `INSERT` grant and verify the runtime principal still cannot update/delete audit. Authentication/authorization events use safe coalescing rather than unbounded inserts.
 
 ```csharp
 Assert.Equal("Succeeded", execution.State);
@@ -48,11 +49,12 @@ Assert.True(bufferedEvents <= configuredBufferLimit);
 Assert.Equal(1, storedEventsForRepeatedSequence);
 Assert.Equal(2, storedEventsForSequenceOneFromTwoAttempts);
 Assert.DoesNotContain("execution_id", metricLabelNames);
+Assert.True(runtimeCanSelectAudit);
 Assert.False(runtimeCanUpdateAudit);
 ```
 
 - [ ] **Step 2 — Verify red.** `dotnet test tests/WorkerDock.IntegrationTests --filter FullyQualifiedName~ObservabilityTests` and `dotnet test tests/WorkerDock.UnitTests --filter FullyQualifiedName~TelemetryProjectionTests`; expect bounds/aggregate/projection failures.
-- [ ] **Step 3 — Implement.** Allowlist event fields, bound field/event/batch sizes and local rotating log buffers, sanitize driver/provider exceptions into codes, deduplicate sequences. Aggregate counts/windows before history purge and keep metric labels bounded. Instrument Activity/Meter/log bridges with optional exporters disabled by default and bounded queues/sampling. Record auth events actually observable by the app, denied-request counts and worker lifecycle changes, not invented upstream events or each heartbeat. Expose safe log paging/aggregation through Task 16 queries.
+- [ ] **Step 3 — Implement.** Allowlist event fields, bound field/event/batch sizes and local rotating log buffers, sanitize driver/provider exceptions into codes, deduplicate sequences. Aggregate counts/windows before history purge and keep metric labels bounded. Instrument Activity/Meter/log bridges with optional exporters disabled by default and bounded queues/sampling. Record auth events actually observable by the app, denied-request counts and worker lifecycle changes, not invented upstream events or each heartbeat. Expose safe log paging through the separate `IExecutionEventQueries` contract and route, leaving Task 16 `IMonitoringQueries` unchanged.
 - [ ] **Step 4 — Verify green.** Repeat tests with collector disabled and failing; expected PASS, core execution/metrics remain visible from SQL, no secret sentinel anywhere in captured telemetry/logs/audit.
 - [ ] **Step 5 — Commit.** Stage task files; `git commit -m "feat: add bounded observability and optional OpenTelemetry"`.
 
