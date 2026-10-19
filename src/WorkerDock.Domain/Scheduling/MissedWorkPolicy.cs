@@ -1,5 +1,17 @@
 namespace WorkerDock.Domain.Scheduling;
 
+public sealed record CatchUpRecoveryBudget(int Limit, int Created)
+{
+    public int Remaining => Math.Max(0, Limit - Created);
+
+    public CatchUpRecoveryBudget Consume(int created)
+    {
+        if (Limit is < 1 or > MissedWorkPolicy.MaximumCatchUpCount || Created < 0 || created < 0 || Created + created > Limit)
+            throw new ArgumentOutOfRangeException(nameof(created));
+        return this with { Created = Created + created };
+    }
+}
+
 /// <summary>Business recovery behavior for schedule occurrences missed while the scheduler was unavailable.</summary>
 public sealed record MissedWorkPolicy(string Mode, TimeSpan LatenessTolerance, int CatchUpCount, TimeSpan CatchUpAge)
 {
@@ -9,12 +21,14 @@ public sealed record MissedWorkPolicy(string Mode, TimeSpan LatenessTolerance, i
     public IReadOnlyList<DateTimeOffset> SelectOccurrences(
         IEnumerable<DateTimeOffset> candidates,
         DateTimeOffset activatedUtc,
-        DateTimeOffset throughUtc)
+        DateTimeOffset throughUtc,
+        int? catchUpBudget = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (activatedUtc.Offset != TimeSpan.Zero || throughUtc.Offset != TimeSpan.Zero)
             throw new ArgumentException("Occurrence boundaries must be UTC.");
         Validate();
+        if (catchUpBudget is < 0) throw new ArgumentOutOfRangeException(nameof(catchUpBudget));
 
         var due = candidates.Where(value => value.Offset == TimeSpan.Zero && value > activatedUtc && value <= throughUtc)
             .Distinct().Order().ToArray();
@@ -23,15 +37,16 @@ public sealed record MissedWorkPolicy(string Mode, TimeSpan LatenessTolerance, i
         var timelyBoundary = throughUtc - LatenessTolerance;
         var missed = due.Where(value => value < timelyBoundary).ToArray();
         var timely = due.Where(value => value >= timelyBoundary).ToArray();
+        var catchUpLimit = Math.Min(CatchUpCount, catchUpBudget ?? CatchUpCount);
         var selectedMissed = Mode switch
         {
             "Skip" => Array.Empty<DateTimeOffset>(),
             "Coalesce" => missed.Length == 0 ? Array.Empty<DateTimeOffset>() : [missed[^1]],
             "CatchUp" => missed.Where(value => throughUtc - value <= CatchUpAge)
-                .Take(Math.Max(0, CatchUpCount - timely.Length)).ToArray(),
+                .Take(Math.Max(0, catchUpLimit - timely.Length)).ToArray(),
             _ => throw new InvalidOperationException("Unsupported missed-work mode.")
         };
-        var selectedTimely = Mode == "CatchUp" ? timely.TakeLast(CatchUpCount).ToArray() : timely;
+        var selectedTimely = Mode == "CatchUp" ? timely.TakeLast(catchUpLimit).ToArray() : timely;
         return selectedMissed.Concat(selectedTimely).Distinct().Order().ToArray();
     }
 

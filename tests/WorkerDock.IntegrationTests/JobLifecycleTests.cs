@@ -145,6 +145,29 @@ public sealed class JobLifecycleTests
 
     [Trait("Store", "Sql")]
     [Fact]
+    public async Task Catch_up_count_is_shared_across_bounded_occurrence_pages()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        var jobId = await SeedScheduledJobAsync(database, enabled: true);
+        var scheduleId = await ScheduleIdAsync(database, jobId);
+        await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:00:00',MissedMode=N'CatchUp',LatenessToleranceMs=60000,CatchUpCount=3,CatchUpAgeMs=10800000 WHERE ScheduleId='{scheduleId}'");
+        var writer = new OccurrenceWriter(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), new QuartzScheduleEvaluator());
+        var horizon = new DateTimeOffset(2026, 10, 18, 2, 30, 0, TimeSpan.Zero);
+
+        var firstPage = await writer.MaterializeAsync(scheduleId, 1, horizon, default);
+        var secondPage = await writer.MaterializeAsync(scheduleId, 1, horizon, default);
+
+        Assert.Equal(3, firstPage);
+        Assert.Equal(0, secondPage);
+        Assert.Equal(3, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ScheduleId='{scheduleId}' AND TriggerKind=N'Scheduled'"));
+        Assert.True(await database.ScalarAsync($"SELECT SUM(SkippedOccurrences) FROM [workerdock].ScheduleRecoveryEvents WHERE ScheduleId='{scheduleId}'") >= 147);
+    }
+
+    [Trait("Store", "Sql")]
+    [Fact]
     public async Task Changed_timezone_rules_advance_revision_and_enqueue_future_projection()
     {
         await using var database = new SqlDatabaseFixture();

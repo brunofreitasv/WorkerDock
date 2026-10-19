@@ -20,6 +20,8 @@ CREATE TABLE [workerdock].Schedules
     LatenessToleranceMs bigint NOT NULL,
     CatchUpCount int NOT NULL,
     CatchUpAgeMs bigint NOT NULL,
+    CatchUpRecoveryThroughUtc datetime2(7) NULL,
+    CatchUpRecoveryCreated int NOT NULL CONSTRAINT DF_Schedules_CatchUpRecoveryCreated DEFAULT 0,
     ZoneRulesFingerprint char(64) NOT NULL,
     ProjectionRevision bigint NOT NULL CONSTRAINT DF_Schedules_ProjectionRevision DEFAULT 0,
     CONSTRAINT FK_Schedules_Jobs FOREIGN KEY(JobId) REFERENCES [workerdock].Jobs(JobId),
@@ -28,6 +30,7 @@ CREATE TABLE [workerdock].Schedules
     CONSTRAINT CK_Schedules_Pause CHECK((Paused=0 AND PausedAtUtc IS NULL) OR (Paused=1 AND PausedAtUtc IS NOT NULL)),
     CONSTRAINT CK_Schedules_Policy CHECK(MissedMode IN(N'Skip',N'Coalesce',N'CatchUp') AND LatenessToleranceMs>=0 AND
         ((MissedMode=N'CatchUp' AND CatchUpCount BETWEEN 1 AND 100 AND CatchUpAgeMs>0) OR (MissedMode<>N'CatchUp' AND CatchUpCount=0 AND CatchUpAgeMs=0))),
+    CONSTRAINT CK_Schedules_CatchUpRecovery CHECK((CatchUpRecoveryThroughUtc IS NULL AND CatchUpRecoveryCreated=0) OR (CatchUpRecoveryThroughUtc IS NOT NULL AND CatchUpRecoveryCreated BETWEEN 0 AND 100)),
     CONSTRAINT CK_Schedules_Fingerprint CHECK(LEN(ZoneRulesFingerprint)=64 AND ZoneRulesFingerprint NOT LIKE '%[^0-9A-F]%')
 );
 GO
@@ -48,8 +51,9 @@ CREATE TABLE [workerdock].ScheduleRecoveryEvents
     Policy nvarchar(16) NOT NULL,
     CreatedExecutions int NOT NULL,
     ExactMissedCount bigint NULL,
+    SkippedOccurrences bigint NOT NULL CONSTRAINT DF_ScheduleRecoveryEvents_Skipped DEFAULT 0,
     CreatedAtUtc datetime2(7) NOT NULL CONSTRAINT DF_ScheduleRecoveryEvents_Created DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT CK_ScheduleRecoveryEvents_Range CHECK(ThroughUtc>=FromUtc AND CreatedExecutions>=0 AND (ExactMissedCount IS NULL OR ExactMissedCount>=0)),
+    CONSTRAINT CK_ScheduleRecoveryEvents_Range CHECK(ThroughUtc>=FromUtc AND CreatedExecutions>=0 AND SkippedOccurrences>=0 AND (ExactMissedCount IS NULL OR ExactMissedCount>=0)),
     CONSTRAINT CK_ScheduleRecoveryEvents_Policy CHECK(Policy IN(N'Skip',N'Coalesce',N'CatchUp'))
 );
 GO

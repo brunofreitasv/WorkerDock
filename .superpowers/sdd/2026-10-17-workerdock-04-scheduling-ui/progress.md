@@ -14,3 +14,6 @@
 - [x] Review follow-up regressions added for rowversion pause/resume, paused edit preservation, persisted no-op Enable, stale occurrence horizon, >100 timezone schedules, and per-occurrence recovery; policy RED confirmed before fix.
 - [x] Release build passed with 0 warnings/errors; unit tests passed 33/33; 6 policy and 3 migration checksum tests passed; `git diff --check` passed.
 - [ ] Thirteen SQL lifecycle tests and live migration apply/rollback remain `SQL_TEST_BLOCKED` because `WORKERDOCK_TEST_SQL` is unset; commit pending.
+- [x] Persisted CatchUp horizon/budget now spans 100-occurrence pages; overflow/age skips are recorded, with a 150-occurrence pure regression and SQL persistence regression added.
+- [x] Follow-up verification: Release solution build 0 warnings/errors; unit 33/33; policy 7/7; migration checksum tests 3/3; `git diff --check` passed.
+- [ ] Fourteen SQL lifecycle assertions (including cross-page persisted budget) remain `SQL_TEST_BLOCKED`; second review-fix commit pending.

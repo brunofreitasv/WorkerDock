@@ -26,7 +26,7 @@ public sealed class OccurrenceWriter(TenantDatabaseOptions options, IScheduleEva
             {
                 await using (var identity = Command(connection, transaction, "SELECT InstanceId FROM [workerdock].TenantSettings"))
                     if ((Guid?)await identity.ExecuteScalarAsync(token) != options.InstanceId) throw new WorkerDockException("TenantInstanceMismatch");
-                await using var read = Command(connection, transaction, "SELECT s.Revision,s.Kind,s.Cron,s.ZoneId,s.OneTimeUtc,s.ActivatedUtc,s.CursorUtc,s.MissedMode,s.LatenessToleranceMs,s.CatchUpCount,s.CatchUpAgeMs,s.Paused,s.Removed,j.JobId,j.CurrentRevision,j.Enabled,j.Archived,r.ProfileId,p.CurrentRevisionId FROM [workerdock].Schedules s WITH(UPDLOCK,HOLDLOCK) JOIN [workerdock].Jobs j WITH(UPDLOCK,HOLDLOCK) ON j.JobId=s.JobId JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision LEFT JOIN [workerdock].ConnectionProfiles p ON p.ProfileId=r.ProfileId WHERE s.ScheduleId=@schedule");
+                await using var read = Command(connection, transaction, "SELECT s.Revision,s.Kind,s.Cron,s.ZoneId,s.OneTimeUtc,s.ActivatedUtc,s.CursorUtc,s.MissedMode,s.LatenessToleranceMs,s.CatchUpCount,s.CatchUpAgeMs,s.Paused,s.Removed,j.JobId,j.CurrentRevision,j.Enabled,j.Archived,r.ProfileId,p.CurrentRevisionId,s.CatchUpRecoveryThroughUtc,s.CatchUpRecoveryCreated FROM [workerdock].Schedules s WITH(UPDLOCK,HOLDLOCK) JOIN [workerdock].Jobs j WITH(UPDLOCK,HOLDLOCK) ON j.JobId=s.JobId JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision LEFT JOIN [workerdock].ConnectionProfiles p ON p.ProfileId=r.ProfileId WHERE s.ScheduleId=@schedule");
                 Add(read, "@schedule", SqlDbType.UniqueIdentifier, scheduleId); await using var row = await read.ExecuteReaderAsync(token);
                 if (!await row.ReadAsync(token)) return 0;
                 var currentScheduleRevision = row.GetInt64(0); if (currentScheduleRevision != scheduleRevision || row.GetBoolean(11) || row.GetBoolean(12) || !row.GetBoolean(15) || row.GetBoolean(16)) return 0;
@@ -35,29 +35,41 @@ public sealed class OccurrenceWriter(TenantDatabaseOptions options, IScheduleEva
                 var definition = new ScheduleDefinition(scheduleId, scheduleRevision, row.GetString(1), row.IsDBNull(2) ? null : row.GetString(2), row.GetString(3),
                     row.IsDBNull(4) ? null : Utc(row.GetDateTime(4)), Utc(row.GetDateTime(5)));
                 var cursor = Utc(row.GetDateTime(6)); var policy = new MissedWorkPolicy(row.GetString(7), TimeSpan.FromMilliseconds(row.GetInt64(8)), row.GetInt32(9), TimeSpan.FromMilliseconds(row.GetInt64(10)));
+                DateTimeOffset? recoveryHorizon = row.IsDBNull(19) ? null : Utc(row.GetDateTime(19)); var recoveryCreated = row.GetInt32(20);
                 await row.CloseAsync(); policy.Validate();
-                if (throughUtc.UtcDateTime <= cursor) return 0;
-                if (evaluator.Validate(definition).Count != 0) throw new WorkerDockException("InvalidSchedule");
-                var raw = evaluator.Next(definition, cursor, EnumerationLimit);
-                var due = raw.Where(x => x <= throughUtc).ToArray();
-                if (due.Length == 0)
+                var materializationThrough = recoveryHorizon ?? throughUtc;
+                if (materializationThrough.UtcDateTime <= cursor)
                 {
-                    await AdvanceCursorAsync(connection, transaction, scheduleId, scheduleRevision, throughUtc.UtcDateTime, token);
+                    if (recoveryHorizon is not null && cursor >= recoveryHorizon.Value)
+                        await AdvanceCursorAsync(connection, transaction, scheduleId, scheduleRevision, cursor.UtcDateTime, null, 0, token);
                     return 0;
                 }
-                var bounded = raw.Count == EnumerationLimit && raw[^1] <= throughUtc;
-                var late = due.Any(value => throughUtc - value > policy.LatenessTolerance);
-                IReadOnlyList<DateTimeOffset> selected = policy.SelectOccurrences(due, definition.ActivatedUtc, throughUtc);
+                if (evaluator.Validate(definition).Count != 0) throw new WorkerDockException("InvalidSchedule");
+                var raw = evaluator.Next(definition, cursor, EnumerationLimit);
+                var due = raw.Where(x => x <= materializationThrough).ToArray();
+                if (due.Length == 0)
+                {
+                    await AdvanceCursorAsync(connection, transaction, scheduleId, scheduleRevision, materializationThrough.UtcDateTime, null, 0, token);
+                    return 0;
+                }
+                var bounded = raw.Count == EnumerationLimit && raw[^1] <= materializationThrough;
+                var late = due.Any(value => materializationThrough - value > policy.LatenessTolerance);
+                var startsCatchUpRecovery = recoveryHorizon is null && policy.Mode == "CatchUp" && bounded && late;
+                var isCatchUpRecovery = recoveryHorizon is not null || startsCatchUpRecovery;
+                var budget = policy.Mode == "CatchUp"
+                    ? new CatchUpRecoveryBudget(policy.CatchUpCount, recoveryHorizon is null ? 0 : recoveryCreated)
+                    : null;
+                IReadOnlyList<DateTimeOffset> selected = policy.SelectOccurrences(due, definition.ActivatedUtc, materializationThrough, budget?.Remaining);
                 DateTime cursorAfter;
-                bool exactCount = !bounded && (policy.Mode != "CatchUp" || due.Count(value => throughUtc - value > policy.LatenessTolerance) <= policy.CatchUpCount);
+                bool exactCount = !bounded && (policy.Mode != "CatchUp" || due.Count(value => materializationThrough - value > policy.LatenessTolerance) <= policy.CatchUpCount);
                 if (policy.Mode == "Coalesce" && bounded)
                 {
-                    selected = selected.Where(value => throughUtc - value <= policy.LatenessTolerance).ToArray();
+                    selected = selected.Where(value => materializationThrough - value <= policy.LatenessTolerance).ToArray();
                     cursorAfter = due[^1].UtcDateTime; exactCount = false;
                 }
                 else
                 {
-                    cursorAfter = bounded ? due[^1].UtcDateTime : throughUtc.UtcDateTime;
+                    cursorAfter = bounded ? due[^1].UtcDateTime : materializationThrough.UtcDateTime;
                 }
                 var created = 0;
                 foreach (var scheduledUtc in selected)
@@ -69,12 +81,19 @@ public sealed class OccurrenceWriter(TenantDatabaseOptions options, IScheduleEva
                     await using var status = Command(connection, transaction, "INSERT [workerdock].AttemptStatusEvents(EventId,ExecutionId,State,OccurredAtUtc) VALUES(NEWID(),@id,N'Queued',SYSUTCDATETIME())"); Add(status,"@id",SqlDbType.UniqueIdentifier,executionId); await status.ExecuteNonQueryAsync(token);
                     created++;
                 }
-                if (late)
+                var missed = due.Count(value => materializationThrough - value > policy.LatenessTolerance);
+                var selectedMissed = selected.Count(value => materializationThrough - value > policy.LatenessTolerance);
+                var selectedTimely = selected.Count - selectedMissed;
+                var skippedOccurrences = Math.Max(0, missed - selectedMissed) + (isCatchUpRecovery ? Math.Max(0, due.Length - missed - selectedTimely) : 0);
+                if (late || (isCatchUpRecovery && skippedOccurrences > 0))
                 {
-                    await using var recovery = Command(connection, transaction, "INSERT [workerdock].ScheduleRecoveryEvents(RecoveryEventId,ScheduleId,ScheduleRevision,FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount) VALUES(NEWID(),@schedule,@revision,@from,@through,@policy,@created,@exact)");
-                    Add(recovery,"@schedule",SqlDbType.UniqueIdentifier,scheduleId); Add(recovery,"@revision",SqlDbType.BigInt,scheduleRevision); Add(recovery,"@from",SqlDbType.DateTime2,cursor.UtcDateTime); Add(recovery,"@through",SqlDbType.DateTime2,throughUtc.UtcDateTime); Add(recovery,"@policy",SqlDbType.NVarChar,policy.Mode,16); Add(recovery,"@created",SqlDbType.Int,created); Add(recovery,"@exact",SqlDbType.BigInt,exactCount?due.Count(value => throughUtc - value > policy.LatenessTolerance):(object)DBNull.Value); await recovery.ExecuteNonQueryAsync(token);
+                    await using var recovery = Command(connection, transaction, "INSERT [workerdock].ScheduleRecoveryEvents(RecoveryEventId,ScheduleId,ScheduleRevision,FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount,SkippedOccurrences) VALUES(NEWID(),@schedule,@revision,@from,@through,@policy,@created,@exact,@skipped)");
+                    Add(recovery,"@schedule",SqlDbType.UniqueIdentifier,scheduleId); Add(recovery,"@revision",SqlDbType.BigInt,scheduleRevision); Add(recovery,"@from",SqlDbType.DateTime2,cursor.UtcDateTime); Add(recovery,"@through",SqlDbType.DateTime2,materializationThrough.UtcDateTime); Add(recovery,"@policy",SqlDbType.NVarChar,policy.Mode,16); Add(recovery,"@created",SqlDbType.Int,created); Add(recovery,"@exact",SqlDbType.BigInt,exactCount?missed:(object)DBNull.Value); Add(recovery,"@skipped",SqlDbType.BigInt,skippedOccurrences); await recovery.ExecuteNonQueryAsync(token);
                 }
-                await AdvanceCursorAsync(connection, transaction, scheduleId, scheduleRevision, cursorAfter, token);
+                var keepCatchUpRecovery = isCatchUpRecovery && bounded;
+                var nextBudget = keepCatchUpRecovery ? (budget ?? new CatchUpRecoveryBudget(policy.CatchUpCount, 0)).Consume(selected.Count) : null;
+                DateTimeOffset? nextRecoveryHorizon = keepCatchUpRecovery ? recoveryHorizon ?? materializationThrough : null;
+                await AdvanceCursorAsync(connection, transaction, scheduleId, scheduleRevision, cursorAfter, nextRecoveryHorizon?.UtcDateTime, nextBudget?.Created ?? 0, token);
                 await JobAdmission.AdmitAsync(connection, transaction, jobId, token);
                 return created;
             }, ct);
@@ -82,9 +101,9 @@ public sealed class OccurrenceWriter(TenantDatabaseOptions options, IScheduleEva
         catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
     }
 
-    private static async ValueTask AdvanceCursorAsync(DbConnection c, DbTransaction t, Guid id, long revision, DateTime cursor, CancellationToken ct)
+    private static async ValueTask AdvanceCursorAsync(DbConnection c, DbTransaction t, Guid id, long revision, DateTime cursor, DateTime? recoveryThrough, int recoveryCreated, CancellationToken ct)
     {
-        await using var command=Command(c,t,"UPDATE [workerdock].Schedules SET CursorUtc=@cursor WHERE ScheduleId=@id AND Revision=@revision AND Paused=0 AND Removed=0"); Add(command,"@cursor",SqlDbType.DateTime2,cursor); Add(command,"@id",SqlDbType.UniqueIdentifier,id); Add(command,"@revision",SqlDbType.BigInt,revision); if(await command.ExecuteNonQueryAsync(ct)!=1)throw new WorkerDockException("StaleScheduleRevision");
+        await using var command=Command(c,t,"UPDATE [workerdock].Schedules SET CursorUtc=@cursor,CatchUpRecoveryThroughUtc=@recoveryThrough,CatchUpRecoveryCreated=@recoveryCreated WHERE ScheduleId=@id AND Revision=@revision AND Paused=0 AND Removed=0"); Add(command,"@cursor",SqlDbType.DateTime2,cursor); Add(command,"@recoveryThrough",SqlDbType.DateTime2,recoveryThrough??(object)DBNull.Value); Add(command,"@recoveryCreated",SqlDbType.Int,recoveryCreated); Add(command,"@id",SqlDbType.UniqueIdentifier,id); Add(command,"@revision",SqlDbType.BigInt,revision); if(await command.ExecuteNonQueryAsync(ct)!=1)throw new WorkerDockException("StaleScheduleRevision");
     }
     private static DateTimeOffset Utc(DateTime value)=>new(DateTime.SpecifyKind(value,DateTimeKind.Utc));
 }

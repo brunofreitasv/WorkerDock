@@ -44,6 +44,26 @@ public sealed class OccurrencePolicyTests
         Assert.Equal([due[0], due[1], due[4]], catchUp);
     }
 
+    [Fact]
+    public void Catch_up_budget_is_consumed_once_across_two_bounded_pages()
+    {
+        var activation = new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero);
+        var horizon = activation.AddMinutes(150);
+        var occurrences = Enumerable.Range(1, 150).Select(i => activation.AddMinutes(i)).ToArray();
+        var policy = new MissedWorkPolicy("CatchUp", TimeSpan.FromSeconds(60), 3, TimeSpan.FromHours(3));
+        var budget = new CatchUpRecoveryBudget(policy.CatchUpCount, 0);
+
+        var first = policy.SelectOccurrences(occurrences.Take(100), activation, horizon, budget.Remaining);
+        budget = budget.Consume(first.Count);
+        var second = policy.SelectOccurrences(occurrences.Skip(100), activation, horizon, budget.Remaining);
+        budget = budget.Consume(second.Count);
+
+        Assert.Equal(3, first.Count);
+        Assert.Empty(second);
+        Assert.Equal(3, budget.Created);
+        Assert.Equal(0, budget.Remaining);
+    }
+
     [Theory]
     [InlineData("CatchUp", 0, 1)]
     [InlineData("CatchUp", 3, 0)]
