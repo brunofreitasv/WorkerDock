@@ -8,6 +8,18 @@ public static partial class ParameterSubstitution
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(100);
 
     public static string Apply(string template, IReadOnlyDictionary<string, JsonElement> parameters, string idempotencyKey)
+        => ApplyCore(template, parameters, idempotencyKey, encode: true);
+
+    public static string ApplyUrl(string text, IReadOnlyDictionary<string, JsonElement> parameters, string idempotencyKey) =>
+        ApplyCore(text, parameters, idempotencyKey, encode: true);
+
+    public static string ApplyHeader(string text, IReadOnlyDictionary<string, JsonElement> parameters, string idempotencyKey) =>
+        ApplyCore(text, parameters, idempotencyKey, encode: false);
+
+    public static string ApplyText(string text, IReadOnlyDictionary<string, JsonElement> parameters, string idempotencyKey) =>
+        ApplyCore(text, parameters, idempotencyKey, encode: false);
+
+    private static string ApplyCore(string template, IReadOnlyDictionary<string, JsonElement> parameters, string idempotencyKey, bool encode)
     {
         if (template is null || template.Length > 65_536 || parameters.Count > 128 || idempotencyKey.Length > 256)
             throw new InvalidOperationException("HttpConfigurationInvalid");
@@ -16,7 +28,7 @@ public static partial class ParameterSubstitution
             return Placeholder().Replace(template, match =>
             {
                 var key = match.Groups[1].Value;
-                if (key == "execution.idempotencyKey") return Uri.EscapeDataString(idempotencyKey);
+                if (key == "execution.idempotencyKey") return encode ? Uri.EscapeDataString(idempotencyKey) : idempotencyKey;
                 if (!parameters.TryGetValue(key, out var value)) throw new InvalidOperationException("HttpParameterMissing");
                 var text = value.ValueKind switch
                 {
@@ -25,7 +37,7 @@ public static partial class ParameterSubstitution
                     JsonValueKind.Null => string.Empty,
                     _ => throw new InvalidOperationException("HttpParameterInvalid")
                 };
-                return Uri.EscapeDataString(text);
+                return encode ? Uri.EscapeDataString(text) : text;
             });
         }
         catch (RegexMatchTimeoutException) { throw new InvalidOperationException("HttpConfigurationInvalid"); }

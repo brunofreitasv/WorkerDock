@@ -110,6 +110,109 @@ public sealed class OutboundPolicyTests
 public sealed class HttpTemplateTests
 {
     [Fact]
+    public void Dynamic_http_substitution_is_location_specific_and_preserves_json_scalars()
+    {
+        var parameters = new Dictionary<string, JsonElement>
+        {
+            ["value"] = JsonSerializer.SerializeToElement("a&b + ç \"\\")
+        };
+        Assert.Equal("a%26b%20%2B%20%C3%A7%20%22%5C", ParameterSubstitution.ApplyUrl("{value}", parameters, "key"));
+        Assert.Equal("a&b + ç \"\\", ParameterSubstitution.ApplyHeader("{value}", parameters, "key"));
+        Assert.Equal("a&b + ç \"\\", ParameterSubstitution.ApplyText("{value}", parameters, "key"));
+        using var json = JsonDocument.Parse(ParameterSubstitution.ApplyJson("{\"value\":{value}}", parameters, "key"));
+        Assert.Equal("a&b + ç \"\\", json.RootElement.GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public void Http_template_versions_keep_legacy_metadata_and_publish_dynamic_v1_1()
+    {
+        var legacy = new HttpTemplate(new HttpClient());
+        var dynamic = new HttpTemplate(new HttpClient(), version: "1.1.0");
+        Assert.Equal("1.0.0", legacy.Descriptor.Version);
+        Assert.Equal("1.1.0", dynamic.Descriptor.Version);
+        Assert.Equal("D2D2BF6AC72E90F986BC3347E7B96D831CA9D63789FF600C5072B50F37855956", legacy.Descriptor.MetadataDigest);
+        Assert.Equal(JsonValueKind.Object, legacy.Descriptor.ConfigurationSchema.GetProperty("properties").GetProperty("parameters").GetProperty("additionalProperties").ValueKind);
+        Assert.True(dynamic.Descriptor.ConfigurationSchema.GetProperty("properties").GetProperty("parameters").GetProperty("additionalProperties").GetProperty("x-workerDock-dynamicValue").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Dynamic_http_preserves_json_types_and_encodes_only_url_components()
+    {
+        string? query = null, header = null, body = null;
+        using var client = new HttpClient(new DelegateHandler(async (request, _) =>
+        {
+            query = request.RequestUri!.Query;
+            header = request.Headers.GetValues("X-Value").Single();
+            body = await request.Content!.ReadAsStringAsync();
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }));
+        using var config = JsonDocument.Parse("""{"method":"GET","url":"https://example.com","query":{"q":"{value}"},"headers":{"X-Value":"{value}"},"secretHeaders":{},"parameters":{"value":"a&b + ç","epoch":1792512000,"date":"2026-10-20"},"body":"{\"epoch\":{epoch},\"referenceDate\":\"{date}\"}","contentType":"application/json","maxResponseBytes":100}""");
+        var template = new HttpTemplate(client, version: "1.1.0");
+        var result = await template.ExecuteAsync(Context(config.RootElement, null, version: "1.1.0"), default);
+        using var sent = JsonDocument.Parse(body!);
+        Assert.Equal("Success", result.Outcome);
+        Assert.Equal("?q=a%26b%20%2B%20%C3%A7", query);
+        Assert.Equal("a&b + ç", header);
+        Assert.Equal(JsonValueKind.Number, sent.RootElement.GetProperty("epoch").ValueKind);
+        Assert.Equal(JsonValueKind.String, sent.RootElement.GetProperty("referenceDate").ValueKind);
+    }
+
+    [Fact]
+    public async Task Header_control_character_stops_before_send()
+    {
+        var sendCount = 0;
+        using var client = new HttpClient(new DelegateHandler((_, _) =>
+        {
+            sendCount++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }));
+        using var config = JsonDocument.Parse("""{"method":"GET","url":"https://example.com","query":{},"headers":{"X-Value":"{value}"},"secretHeaders":{},"parameters":{"value":"safe\r\nInjected: yes"},"maxResponseBytes":100}""");
+        var result = await new HttpTemplate(client, version: "1.1.0").ExecuteAsync(Context(config.RootElement, null, version: "1.1.0"), default);
+        Assert.Equal("HttpHeaderInvalid", result.SafeCode);
+        Assert.Equal(0, sendCount);
+    }
+
+    [Fact]
+    public async Task Expanded_url_and_body_over_limits_stop_before_send()
+    {
+        var sendCount = 0;
+        using var client = new HttpClient(new DelegateHandler((_, _) =>
+        {
+            sendCount++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }));
+        var value = new string('x', 8000);
+        using var urlConfig = JsonDocument.Parse(JsonSerializer.Serialize(new { method = "GET", url = "https://example.com/{value}", query = new { }, headers = new { }, secretHeaders = new { }, parameters = new { value }, maxResponseBytes = 100 }));
+        using var bodyConfig = JsonDocument.Parse(JsonSerializer.Serialize(new { method = "POST", url = "https://example.com", query = new { }, headers = new { }, secretHeaders = new { }, parameters = new { value }, body = "{\"value\":\"" + string.Concat(Enumerable.Repeat("{value}", 9)) + "\"}", contentType = "application/json", maxResponseBytes = 100 }));
+        var template = new HttpTemplate(client, version: "1.1.0");
+        Assert.Equal("HttpConfigurationInvalid", (await template.ExecuteAsync(Context(urlConfig.RootElement, null, version: "1.1.0"), default)).SafeCode);
+        Assert.Equal("HttpConfigurationInvalid", (await template.ExecuteAsync(Context(bodyConfig.RootElement, null, version: "1.1.0"), default)).SafeCode);
+        Assert.Equal(0, sendCount);
+    }
+
+    [Fact]
+    public async Task Destination_policy_receives_final_dynamic_url_before_send()
+    {
+        var sendCount = 0;
+        Uri? approved = null;
+        using var client = new HttpClient(new DelegateHandler((_, _) =>
+        {
+            sendCount++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }));
+        using var config = JsonDocument.Parse("""{"method":"GET","url":"https://{host}/","query":{},"headers":{},"secretHeaders":{},"parameters":{"host":"example.com"},"maxResponseBytes":100}""");
+        var template = new HttpTemplate(client, (uri, _) =>
+        {
+            approved = uri;
+            return ValueTask.FromException(new OutboundDestinationDeniedException("OutboundDestinationDenied"));
+        }, "1.1.0");
+        var result = await template.ExecuteAsync(Context(config.RootElement, null, version: "1.1.0"), default);
+        Assert.Equal("OutboundDestinationDenied", result.SafeCode);
+        Assert.Equal("example.com", approved?.Host);
+        Assert.Equal(0, sendCount);
+    }
+
+    [Fact]
     public async Task Direct_handler_rejects_http_when_policy_disallows_it()
     {
         await using var server = new ControlledHttpServer("200 OK", "", "no-request-expected");
@@ -351,7 +454,7 @@ public sealed class HttpTemplateTests
     }
 
     private static JsonElement Config(string url, int? timeoutSeconds = null, string method = "GET") => JsonSerializer.SerializeToElement(new { method, url, query = new { }, headers = new { }, secretHeaders = new { }, parameters = new { }, timeoutSeconds, successStatuses = Array.Empty<int>(), maxResponseBytes = 1024, responseMode = "SafeSummary" });
-    private static TemplateExecutionContext Context(JsonElement configuration, DateTimeOffset? deadline, ISecretVault? secrets = null) => new(new(Guid.NewGuid(), 1, "workerdock.http", "1.0.0", "stable-key", configuration, null, null, JsonDocument.Parse("{}").RootElement, deadline), secrets ?? new NoSecrets(), new NoLog());
+    private static TemplateExecutionContext Context(JsonElement configuration, DateTimeOffset? deadline, ISecretVault? secrets = null, string version = "1.0.0") => new(new(Guid.NewGuid(), 1, "workerdock.http", version, "stable-key", configuration, null, null, JsonDocument.Parse("{}").RootElement, deadline), secrets ?? new NoSecrets(), new NoLog());
     private sealed class NoSecrets : ISecretVault { public ValueTask<SecretValue> ResolveAsync(SecretReference reference, CancellationToken ct) => throw new SecretUnavailableException(); }
     private sealed class FixedPolicy(ApprovedDestination destination) : IOutboundPolicy { public ValueTask<ApprovedDestination> ResolveAsync(OutboundTarget target, CancellationToken ct) => ValueTask.FromResult(destination); }
     private sealed class HttpsOnlyTestPolicy(ApprovedDestination destination) : IOutboundPolicy

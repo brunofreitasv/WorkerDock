@@ -41,7 +41,8 @@ builder.Services.TryAddSingleton<IScheduleEvaluator, QuartzScheduleEvaluator>();
 var trustedTemplates = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
 {
     new SqlTemplate().Descriptor,
-    new HttpTemplate(new HttpClient()).Descriptor
+    HttpTemplateDescriptors.Get("1.0.0"),
+    HttpTemplateDescriptors.Get("1.1.0")
 };
 builder.Services.TryAddSingleton<IJobCommands>(provider =>
 {

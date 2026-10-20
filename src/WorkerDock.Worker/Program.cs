@@ -42,7 +42,7 @@ internal sealed class WorkerService(IConfiguration configuration) : BackgroundSe
         var database = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(configuration["Tenant:ConnectionString"]!, instanceId);
         await using var bufferedEvents = new BufferedExecutionEvents(new SqlExecutionEvents(database));
         // Explicit installed descriptors only. Built-in packages are added here with their reviewed handler references.
-        IReadOnlyList<TemplateDescriptor> installedDescriptors=[new WorkerDock.Templates.SqlServer.SqlTemplate().Descriptor, new WorkerDock.Templates.Http.HttpTemplate(new HttpClient(new HttpClientHandler())).Descriptor];
+        IReadOnlyList<TemplateDescriptor> installedDescriptors=[new WorkerDock.Templates.SqlServer.SqlTemplate().Descriptor, WorkerDock.Templates.Http.HttpTemplateDescriptors.Get("1.0.0"), WorkerDock.Templates.Http.HttpTemplateDescriptors.Get("1.1.0")];
         var registeredDigest=TemplateMetadata.AggregateDigest(installedDescriptors);
         if(registeredDigest!=catalogDigest) throw new WorkerDockException("CatalogMismatch");
         await new SqlTemplateCatalog(database,installedDescriptors).RegisterAsync(installedDescriptors,stoppingToken);

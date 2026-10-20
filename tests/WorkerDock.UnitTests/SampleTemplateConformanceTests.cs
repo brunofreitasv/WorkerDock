@@ -10,13 +10,23 @@ namespace WorkerDock.UnitTests;
 public sealed class SampleTemplateConformanceTests
 {
     [Fact]
+    public void Sample_custom_template_opts_in_and_accepts_an_ordinary_resolved_value()
+    {
+        var template = new SampleTemplateHandler();
+        Assert.Equal("1.1.0", template.Descriptor.Version);
+        Assert.True(template.Descriptor.ConfigurationSchema.GetProperty("properties").GetProperty("text").GetProperty("x-workerDock-dynamicValue").GetBoolean());
+        using var resolved = JsonDocument.Parse("""{"text":"2026-10-20"}""");
+        Assert.Empty(template.Validate(resolved.RootElement));
+    }
+
+    [Fact]
     public void Metadata_and_validation_follow_public_contract()
     {
         var template = new SampleTemplateHandler();
         using var invalid = JsonDocument.Parse("""{"text": ""}""");
         using var valid = JsonDocument.Parse("""{"text":" hello "}""");
 
-        Assert.Equal("1.0.0", template.Descriptor.Version);
+        Assert.Equal("1.1.0", template.Descriptor.Version);
         Assert.Equal("workerdock.sample-normalize", template.Descriptor.Id);
         Assert.Equal(
             TemplateDescriptorMetadata.ComputeDigest(template.Descriptor),

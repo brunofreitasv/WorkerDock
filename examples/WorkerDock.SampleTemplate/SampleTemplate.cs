@@ -69,6 +69,7 @@ public sealed class SampleTemplate : IWorkerTemplate
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 256,
+                  "x-workerDock-dynamicValue": true,
                   "title": "Text",
                   "description": "Text to normalize",
                   "default": "hello",
@@ -88,7 +89,7 @@ public sealed class SampleTemplate : IWorkerTemplate
 
         return TemplateDescriptorMetadata.WithDigest(new TemplateDescriptor(
             "workerdock.sample-normalize",
-            "1.0.0",
+            "1.1.0",
             "Sample text normalizer",
             "Trims and measures text without performing external side effects.",
             schema.RootElement.Clone(),

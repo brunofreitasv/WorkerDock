@@ -10,7 +10,7 @@ using WorkerDock.Contracts.Templates;
 
 namespace WorkerDock.Templates.Http;
 
-public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken, ValueTask>? approveDestination = null) : IWorkerTemplate
+public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken, ValueTask>? approveDestination = null, string version = "1.0.0") : IWorkerTemplate
 {
     private const int MaxUrlLength = 2048;
     private const int MaxBodyLength = 65_536;
@@ -23,9 +23,8 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
         "Content-Length", "TE", "Trailer", "Upgrade", "Expect"
     };
     private static readonly HashSet<string> Methods = new(StringComparer.OrdinalIgnoreCase) { "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD" };
-    private static readonly TemplateDescriptor StaticDescriptor = CreateDescriptor();
-
-    public TemplateDescriptor Descriptor => StaticDescriptor;
+    public TemplateDescriptor Descriptor => HttpTemplateDescriptors.Get(version);
+    private bool IsDynamicVersion => version == "1.1.0";
 
     public IReadOnlyList<ValidationIssue> Validate(JsonElement configuration)
     {
@@ -82,8 +81,10 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
 
             foreach (var header in config.Headers)
             {
-                var value = Substitute(header.Value, config, context.Execution.IdempotencyKey);
-                if (value.Length > 8192 || !request.Headers.TryAddWithoutValidation(header.Key, value))
+                var value = IsDynamicVersion
+                    ? ParameterSubstitution.ApplyHeader(header.Value, config.Parameters, context.Execution.IdempotencyKey)
+                    : Substitute(header.Value, config, context.Execution.IdempotencyKey);
+                if (value.Length > 8192 || HasControl(value) || !request.Headers.TryAddWithoutValidation(header.Key, value))
                     return Result("PermanentFailure", "HttpHeaderInvalid", false);
             }
             if (!string.IsNullOrWhiteSpace(config.IdempotencyHeader))
@@ -133,7 +134,7 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
         catch { return Result("PermanentFailure", "HttpExecutionFailed", sendStarted); }
     }
 
-    private static bool Valid(HttpJobConfiguration c)
+    private bool Valid(HttpJobConfiguration c)
     {
         if (c.Method is not { Length: > 0 and <= 16 } || !Methods.Contains(c.Method) ||
             c.Url is not { Length: > 0 and <= MaxUrlLength } || c.Query is null || c.Query.Count > 128 ||
@@ -165,15 +166,15 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
         catch { return false; }
     }
 
-    private static Uri BuildUri(HttpJobConfiguration c, string key)
+    private Uri BuildUri(HttpJobConfiguration c, string key)
     {
-        var expanded = ParameterSubstitution.Apply(c.Url, c.Parameters, key);
+        var expanded = ApplyUrl(c.Url, c.Parameters, key);
         if (!Uri.TryCreate(expanded, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https") ||
             expanded.Length > MaxUrlLength || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment) || string.IsNullOrEmpty(uri.Host))
             throw new InvalidOperationException("HttpConfigurationInvalid");
         if (c.Query.Count == 0) return uri;
         var builder = new UriBuilder(uri);
-        var parts = c.Query.Select(x => $"{ParameterSubstitution.Apply(x.Key, c.Parameters, key)}={ParameterSubstitution.Apply(x.Value, c.Parameters, key)}");
+        var parts = c.Query.Select(x => $"{ApplyUrl(x.Key, c.Parameters, key)}={ApplyUrl(x.Value, c.Parameters, key)}");
         var existing = builder.Query.TrimStart('?');
         builder.Query = string.Join("&", new[] { existing }.Concat(parts).Where(x => x.Length != 0));
         var result = builder.Uri;
@@ -191,12 +192,17 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
         ResponseMode = string.IsNullOrWhiteSpace(c.ResponseMode) ? "SafeSummary" : c.ResponseMode
     };
 
-    private static string Substitute(string text, HttpJobConfiguration config, string key) => ParameterSubstitution.Apply(text, config.Parameters, key);
-    private static string ApplyBody(HttpJobConfiguration config, string key)
+    private string Substitute(string text, HttpJobConfiguration config, string key) => IsDynamicVersion
+        ? ParameterSubstitution.ApplyHeader(text, config.Parameters, key)
+        : ParameterSubstitution.Apply(text, config.Parameters, key);
+    private string ApplyUrl(string text, IReadOnlyDictionary<string, JsonElement> parameters, string key) => IsDynamicVersion
+        ? ParameterSubstitution.ApplyUrl(text, parameters, key)
+        : ParameterSubstitution.Apply(text, parameters, key);
+    private string ApplyBody(HttpJobConfiguration config, string key)
     {
         var result = config.ContentType is null || IsJsonMediaType(config.ContentType)
             ? ParameterSubstitution.ApplyJson(config.Body!, config.Parameters, key)
-            : ParameterSubstitution.Apply(config.Body!, config.Parameters, key);
+            : (IsDynamicVersion ? ParameterSubstitution.ApplyText(config.Body!, config.Parameters, key) : ParameterSubstitution.Apply(config.Body!, config.Parameters, key));
         if (result.Length > MaxBodyLength || Encoding.UTF8.GetByteCount(result) > MaxBodyLength) throw new InvalidOperationException("HttpConfigurationInvalid");
         return result;
     }
@@ -244,20 +250,6 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
     private static bool HasTlsFailure(Exception error) => error is AuthenticationException || error is HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError } || error.InnerException is not null && HasTlsFailure(error.InnerException);
 
     public sealed class HttpTemplateException(string safeCode) : Exception(safeCode) { public string SafeCode { get; } = safeCode; }
-
-    private static TemplateDescriptor CreateDescriptor()
-    {
-        using var schema = JsonDocument.Parse("""
-        {"type":"object","additionalProperties":false,"required":["method","url","query","headers","secretHeaders","parameters","successStatuses","maxResponseBytes","responseMode"],"properties":{
-          "method":{"type":"string","enum":["GET","POST","PUT","PATCH","DELETE","HEAD"]},"url":{"type":"string","minLength":1,"maxLength":2048},"query":{"type":"object","maxProperties":128,"additionalProperties":{"type":"string","maxLength":8192}},
-          "headers":{"type":"object","maxProperties":64,"additionalProperties":{"type":"string","maxLength":8192}},"secretHeaders":{"type":"object","maxProperties":32,"additionalProperties":{"type":"object","additionalProperties":false,"required":["name"],"properties":{"name":{"type":"string","minLength":1,"maxLength":128,"x-workerDock-secretReference":true}}}},
-          "parameters":{"type":"object","maxProperties":128,"additionalProperties":{"type":["string","number","boolean","null"]}},"contentType":{"type":["string","null"],"maxLength":256},"body":{"type":["string","null"],"maxLength":65536},
-          "timeoutSeconds":{"type":["integer","null"],"minimum":0,"maximum":31536000},"successStatuses":{"type":"array","default":[],"maxItems":100,"items":{"type":"integer","minimum":100,"maximum":599}},"idempotencyHeader":{"type":["string","null"],"maxLength":128},
-          "maxResponseBytes":{"type":"integer","minimum":1,"maximum":2097152},"responseMode":{"type":"string","default":"SafeSummary","enum":["Discard","SafeSummary"]}}}
-        """);
-        var descriptor = new TemplateDescriptor("workerdock.http", "1.0.0", "HTTP request", "Send a bounded HTTP request through the deployment outbound policy.", schema.RootElement.Clone(), JsonSerializer.SerializeToElement(new { }), "");
-        return TemplateDescriptorMetadata.WithDigest(descriptor);
-    }
 
     private sealed class CancellationSchedule : IDisposable
     {
