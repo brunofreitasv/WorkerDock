@@ -53,4 +53,12 @@ public sealed class MigrationInputTests
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "missing", default));
         Assert.Equal("UnknownMigration", error.Code);
     }
+
+    [Fact]
+    public async Task Central_database_kind_is_rejected_before_connecting()
+    {
+        var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), Path.Combine(AppContext.BaseDirectory, "database"));
+        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("central", "0001_registry", default));
+        Assert.Equal("InvalidDatabaseKind", error.Code);
+    }
 }

@@ -17,8 +17,8 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
 
     private async ValueTask RunAsync(string kind, string target, bool rollback, CancellationToken ct)
     {
-        if (kind is not ("tenant" or "central")) throw new WorkerDockException("InvalidDatabaseKind");
-        var directory = Path.Combine(scriptsRoot, kind);
+        if (kind != "tenant") throw new WorkerDockException("InvalidDatabaseKind");
+        var directory = Path.Combine(scriptsRoot, "tenant");
         var manifestPath = Path.Combine(directory, "manifest.json");
         if (!File.Exists(manifestPath)) throw new WorkerDockException("UnknownMigration");
         var entries = JsonSerializer.Deserialize<List<MigrationEntry>>(await File.ReadAllTextAsync(manifestPath, ct),
@@ -39,9 +39,9 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
             await connection.OpenAsync(ct);
             await CheckPrerequisitesAsync(connection, ct);
             if (rollback)
-                await RollbackOneAsync(connection, directory, entries[index], kind, index == 0, ct);
+                await RollbackOneAsync(connection, directory, entries[index], index == 0, ct);
             else
-                for (var i = 0; i <= index; i++) await ApplyOneAsync(connection, directory, entries[i], kind, i == 0, ct);
+                for (var i = 0; i <= index; i++) await ApplyOneAsync(connection, directory, entries[i], i == 0, ct);
         }
         catch (SqlException error) when (error.Number == 51002) { throw new WorkerDockException("UnsafeRollback"); }
         catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
@@ -56,11 +56,11 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
         SqlServerPrerequisites.Validate(reader.GetInt32(0), reader.GetInt32(1));
     }
 
-    private async Task ApplyOneAsync(SqlConnection connection, string directory, MigrationEntry entry, string kind, bool bootstrap, CancellationToken ct)
+    private async Task ApplyOneAsync(SqlConnection connection, string directory, MigrationEntry entry, bool bootstrap, CancellationToken ct)
     {
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         await LockAsync(connection, transaction, ct);
-        var installed = await CheckInstanceAsync(connection, transaction, kind, ct);
+        var installed = await CheckInstanceAsync(connection, transaction, ct);
         if (installed)
         {
             var history = await ReadHistoryAsync(connection, transaction, entry.Id, ct);
@@ -73,14 +73,6 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
             }
         }
         await ExecuteScriptAsync(connection, transaction, Path.Combine(directory, entry.Id + ".up.sql"), ct);
-        if (kind == "central" && bootstrap)
-        {
-            await using var identity = connection.CreateCommand();
-            identity.Transaction = transaction;
-            identity.CommandText = "INSERT INTO [workerdock].CentralSettings(Singleton,CentralInstanceId) VALUES(1,@InstanceId)";
-            identity.Parameters.Add(new SqlParameter("@InstanceId", SqlDbType.UniqueIdentifier) { Value = instanceId });
-            await identity.ExecuteNonQueryAsync(ct);
-        }
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "INSERT INTO [workerdock].SchemaHistory(MigrationId,UpChecksum,DownChecksum,AppliedAtUtc) VALUES (@id,@up,@down,SYSUTCDATETIME())";
@@ -91,11 +83,11 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
         await transaction.CommitAsync(ct);
     }
 
-    private async Task RollbackOneAsync(SqlConnection connection, string directory, MigrationEntry entry, string kind, bool bootstrap, CancellationToken ct)
+    private async Task RollbackOneAsync(SqlConnection connection, string directory, MigrationEntry entry, bool bootstrap, CancellationToken ct)
     {
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         await LockAsync(connection, transaction, ct);
-        if (!await CheckInstanceAsync(connection, transaction, kind, ct)) throw new WorkerDockException("UnknownMigration");
+        if (!await CheckInstanceAsync(connection, transaction, ct)) throw new WorkerDockException("UnknownMigration");
         var history = await ReadHistoryAsync(connection, transaction, entry.Id, ct);
         if (history is null) throw new WorkerDockException("UnknownMigration");
         if (history.Value.Up != entry.UpSha256 || history.Value.Down != entry.DownSha256)
@@ -112,22 +104,18 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
         await transaction.CommitAsync(ct);
     }
 
-    private async Task<bool> CheckInstanceAsync(SqlConnection connection, SqlTransaction transaction, string kind, CancellationToken ct)
+    private async Task<bool> CheckInstanceAsync(SqlConnection connection, SqlTransaction transaction, CancellationToken ct)
     {
         await using var exists = connection.CreateCommand();
         exists.Transaction = transaction;
-        exists.CommandText = kind == "central"
-            ? "SELECT OBJECT_ID(N'[workerdock].CentralSettings', N'U')"
-            : "SELECT OBJECT_ID(N'[workerdock].TenantSettings', N'U')";
+        exists.CommandText = "SELECT OBJECT_ID(N'[workerdock].TenantSettings', N'U')";
         var objectId = await exists.ExecuteScalarAsync(ct);
         if (objectId is null or DBNull) return false;
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = kind == "central"
-            ? "SELECT CentralInstanceId FROM [workerdock].CentralSettings WHERE Singleton=1"
-            : "SELECT InstanceId FROM [workerdock].TenantSettings";
+        command.CommandText = "SELECT InstanceId FROM [workerdock].TenantSettings";
         if ((Guid?)await command.ExecuteScalarAsync(ct) != instanceId)
-            throw new WorkerDockException(kind == "central" ? "CentralInstanceMismatch" : "TenantInstanceMismatch");
+            throw new WorkerDockException("TenantInstanceMismatch");
         return true;
     }
 

@@ -4,7 +4,7 @@ if (args.Length != 3 || args[0] is not ("apply" or "rollback") ||
     !Guid.TryParse(Environment.GetEnvironmentVariable("WORKERDOCK_INSTANCE_ID"), out var instanceId) ||
     string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WORKERDOCK_SQL")))
 {
-    Console.Error.WriteLine("Usage: apply|rollback tenant|central <migration>; set WORKERDOCK_SQL and WORKERDOCK_INSTANCE_ID.");
+    Console.Error.WriteLine("Usage: apply|rollback tenant <migration>; set WORKERDOCK_SQL and WORKERDOCK_INSTANCE_ID.");
     return 2;
 }
 
