@@ -17,7 +17,12 @@ public static class DynamicValueJson
 {
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
-        Converters = { new JsonStringEnumConverter(allowIntegerValues: false) },
+        Converters =
+        {
+            new ExactEnumJsonConverter<DynamicValueSource>(),
+            new ExactEnumJsonConverter<DynamicValueBoundary>(),
+            new ExactEnumJsonConverter<DynamicValueFormat>()
+        },
         PropertyNameCaseInsensitive = false,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
     };
@@ -27,12 +32,14 @@ public static class DynamicValueJson
         try
         {
             RequireProperties(value, "resolverVersion", "timeZoneId", "bindings");
-            foreach (var binding in value.GetProperty("bindings").EnumerateArray())
+            var bindings = value.GetProperty("bindings");
+            if (bindings.ValueKind != JsonValueKind.Array) throw new JsonException();
+            foreach (var binding in bindings.EnumerateArray())
                 RequireProperties(binding, "target", "source", "timeZoneId", "months", "days", "boundary", "format");
             return Freeze(JsonSerializer.Deserialize<DynamicValuePlan>(value, Options)
                 ?? throw new JsonException());
         }
-        catch (Exception ex) when (ex is JsonException or NotSupportedException or ArgumentException)
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or ArgumentException or InvalidOperationException)
         {
             throw new ValueResolutionException("DynamicBindingInvalid", "");
         }
@@ -112,4 +119,21 @@ public static class DynamicValueJson
     }
 
     private static ValueResolutionException Invalid(int index) => new("DynamicBindingInvalid", $"bindings[{index}]");
+
+    private sealed class ExactEnumJsonConverter<TEnum> : JsonConverter<TEnum> where TEnum : struct, Enum
+    {
+        public override TEnum Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType != JsonTokenType.String) throw new JsonException();
+            var name = reader.GetString();
+            if (name is null || !Enum.GetNames<TEnum>().Contains(name, StringComparer.Ordinal)) throw new JsonException();
+            return Enum.Parse<TEnum>(name, ignoreCase: false);
+        }
+
+        public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options)
+        {
+            if (!Enum.IsDefined(value)) throw new JsonException();
+            writer.WriteStringValue(value.ToString());
+        }
+    }
 }

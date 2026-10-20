@@ -173,6 +173,20 @@ public sealed class DynamicValueResolverTests
         Assert.Equal("DynamicBindingInvalid", Assert.Throws<ValueResolutionException>(() => DynamicValueJson.Read(unknown.RootElement)).Code);
         using var missing = JsonDocument.Parse("""{"resolverVersion":1,"timeZoneId":"UTC","bindings":[{"target":"/x","source":"ReferenceDate","timeZoneId":null,"months":0,"days":0,"boundary":"None"}]}""");
         Assert.Equal("DynamicBindingInvalid", Assert.Throws<ValueResolutionException>(() => DynamicValueJson.Read(missing.RootElement)).Code);
+        using var wrongCase = JsonDocument.Parse("""{"resolverVersion":1,"timeZoneId":"UTC","bindings":[{"target":"/x","source":"referencedate","timeZoneId":null,"months":0,"days":0,"boundary":"None","format":"IsoDate"}]}""");
+        Assert.Equal("DynamicBindingInvalid", Assert.Throws<ValueResolutionException>(() => DynamicValueJson.Read(wrongCase.RootElement)).Code);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("{}")]
+    [InlineData("\"not-an-array\"")]
+    public void Dynamic_value_json_rejects_malformed_binding_collection(string bindingsJson)
+    {
+        using var doc = JsonDocument.Parse($"{{\"resolverVersion\":1,\"timeZoneId\":\"UTC\",\"bindings\":{bindingsJson}}}");
+        var error = Record.Exception(() => DynamicValueJson.Read(doc.RootElement));
+        var semantic = Assert.IsType<ValueResolutionException>(error);
+        Assert.Equal("DynamicBindingInvalid", semantic.Code);
     }
 
     [Fact]

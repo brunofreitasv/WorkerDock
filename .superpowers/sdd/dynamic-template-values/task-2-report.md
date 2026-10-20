@@ -31,3 +31,10 @@ Completed on `codex/workerdock-final` from the designated Task 2 base (`1b50a438
 ## Commit
 
 `feat: resolve typed execution values from pinned context`
+
+## Follow-up review fix
+
+- Added exact-case enum parsing for all dynamic value enums and malformed `bindings` shape checks. Invalid enum spellings and `null`, object, or string binding collections now raise `DynamicBindingInvalid` without leaking `InvalidOperationException`.
+- RED: the added focused regressions failed as expected: lowercase `referencedate` was accepted, and malformed collections leaked `InvalidOperationException`.
+- GREEN: the focused resolver suite passed after the fix: 21 passed, 0 failed.
+- Fix commit: recorded separately after the original Task 2 commit.
