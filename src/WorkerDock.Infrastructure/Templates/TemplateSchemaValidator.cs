@@ -11,7 +11,7 @@ public static class TemplateSchemaValidator
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
         "$schema","$defs","$ref","type","properties","required","additionalProperties","items","minItems","maxItems","maxProperties","uniqueItems",
-        "enum","const","minimum","maximum","exclusiveMinimum","exclusiveMaximum","multipleOf","minLength","maxLength","pattern","format","oneOf",
+        "enum","const","minimum","maximum","exclusiveMinimum","exclusiveMaximum","multipleOf","minLength","maxLength","pattern","format","oneOf","x-workerDock-dynamicValue",
         "title","description","default","x-workerDock-secretReference","x-workerDock-sensitive","x-workerDock-labelKey","x-workerDock-descriptionKey"
     };
     private static readonly HashSet<string> Types = new(StringComparer.Ordinal) { "object","array","string","integer","number","boolean","null" };
@@ -46,6 +46,7 @@ public static class TemplateSchemaValidator
         if (System.Text.Encoding.UTF8.GetByteCount(descriptor.ConfigurationSchema.GetRawText()) + System.Text.Encoding.UTF8.GetByteCount(descriptor.UiHints.GetRawText()) > MaximumDocumentBytes)
         { issues.Add(new("metadata","MetadataTooLarge")); return issues; }
         Inspect(descriptor.ConfigurationSchema,descriptor.ConfigurationSchema,"schema",issues,0,new HashSet<string>(StringComparer.Ordinal));
+        if(HasDynamicUnderSensitive(descriptor.ConfigurationSchema,descriptor.ConfigurationSchema,false,0,new HashSet<string>(StringComparer.Ordinal)) && issues.Count<64) issues.Add(new("schema","InvalidSchema"));
         InspectHints(descriptor.UiHints,descriptor.ConfigurationSchema,issues);
         return issues;
     }
@@ -56,6 +57,14 @@ public static class TemplateSchemaValidator
         if (configuration.ValueKind==JsonValueKind.Undefined || System.Text.Encoding.UTF8.GetByteCount(configuration.GetRawText())>MaximumDocumentBytes)
             return [new("configuration","ConfigurationTooLarge")];
         Check(descriptor.ConfigurationSchema,descriptor.ConfigurationSchema,configuration,"configuration",issues,0);
+        return issues;
+    }
+    public static IReadOnlyList<ValidationIssue> ValidateAuthoring(TemplateDescriptor descriptor,JsonElement configuration,IReadOnlySet<string> suppliedPointers)
+    {
+        var issues=ValidateDescriptor(descriptor).ToList();
+        if(issues.Count!=0) return issues;
+        if(configuration.ValueKind==JsonValueKind.Undefined || System.Text.Encoding.UTF8.GetByteCount(configuration.GetRawText())>MaximumDocumentBytes) return [new("configuration","ConfigurationTooLarge")];
+        Check(descriptor.ConfigurationSchema,descriptor.ConfigurationSchema,configuration,"configuration",issues,0,null,suppliedPointers,"");
         return issues;
     }
     private static void Inspect(JsonElement root,JsonElement schema,string path,List<ValidationIssue> issues,int depth,HashSet<string> references,int[]? budget=null)
@@ -110,6 +119,10 @@ public static class TemplateSchemaValidator
                 case "format": if(value.ValueKind!=JsonValueKind.String || value.GetString() is not ("uuid" or "date-time")) Add("UnsupportedSchemaFormat"); break;
                 case "uniqueItems": case "x-workerDock-secretReference": case "x-workerDock-sensitive":
                     if(value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) Add("InvalidSchema"); break;
+                case "x-workerDock-dynamicValue":
+                    if(value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) Add("InvalidSchema");
+                    if(value.ValueKind==JsonValueKind.True && (schema.TryGetProperty("x-workerDock-sensitive",out var sensitive) && sensitive.ValueKind==JsonValueKind.True || schema.TryGetProperty("x-workerDock-secretReference",out var secret) && secret.ValueKind==JsonValueKind.True || !IsScalarSchema(schema))) Add("InvalidSchema");
+                    break;
                 case "title": case "description": if(value.ValueKind!=JsonValueKind.String || !Text(value.GetString()!,2000)) Add("InvalidSchema"); break;
                 case "x-workerDock-labelKey": case "x-workerDock-descriptionKey": if(value.ValueKind!=JsonValueKind.String || !Identifier(value.GetString()!,160)) Add("InvalidSchema"); break;
                 case "enum":
@@ -167,7 +180,10 @@ public static class TemplateSchemaValidator
         }
         void Invalid() { if(issues.Count<64) issues.Add(new("uiHints","InvalidUiHints")); }
     }
-    private static void Check(JsonElement root,JsonElement schema,JsonElement value,string path,List<ValidationIssue> issues,int depth,int[]? budget=null)
+    private static bool IsScalarSchema(JsonElement schema) => schema.TryGetProperty("type",out var type) && (type.ValueKind==JsonValueKind.String
+        ? type.GetString() is "string" or "integer" or "number" or "boolean"
+        : type.ValueKind==JsonValueKind.Array && type.GetArrayLength()>0 && type.EnumerateArray().All(x=>x.ValueKind==JsonValueKind.String && x.GetString() is "string" or "integer" or "number" or "boolean" or "null"));
+    private static void Check(JsonElement root,JsonElement schema,JsonElement value,string path,List<ValidationIssue> issues,int depth,int[]? budget=null,IReadOnlySet<string>? supplied=null,string pointer="")
     {
         budget ??= [32768];
         if(--budget[0]<0) { if(issues.Count<64) issues.Add(new(path,"ValidationBudgetExceeded")); return; }
@@ -175,7 +191,7 @@ public static class TemplateSchemaValidator
         if(depth>32) { Add("ConfigurationTooDeep"); return; }
         if(schema.ValueKind==JsonValueKind.True) return;
         if(schema.ValueKind==JsonValueKind.False) { Add("SchemaRejected"); return; }
-        if(schema.TryGetProperty("$ref",out var reference)) { Resolve(root,reference.GetString()!,out var target); Check(root,target,value,path,issues,depth+1,budget); }
+        if(schema.TryGetProperty("$ref",out var reference)) { Resolve(root,reference.GetString()!,out var target); Check(root,target,value,path,issues,depth+1,budget,supplied,pointer); }
         if(schema.TryGetProperty("type",out var type) && !(type.ValueKind==JsonValueKind.Array ? type.EnumerateArray().Any(x=>Matches(x.GetString()!,value)) : Matches(type.GetString()!,value))) { Add("Type"); return; }
         if(schema.TryGetProperty("x-workerDock-secretReference",out var secret) && secret.ValueKind==JsonValueKind.True && (value.ValueKind!=JsonValueKind.String || !Identifier(value.GetString()!,128))) Add("SecretReferenceInvalid");
         if(schema.TryGetProperty("enum",out var allowed) && !allowed.EnumerateArray().Any(x=>JsonElement.DeepEquals(x,value))) Add("Enum");
@@ -183,7 +199,7 @@ public static class TemplateSchemaValidator
         if(schema.TryGetProperty("oneOf",out var alternatives))
         {
             var matches=0;
-            foreach(var branch in alternatives.EnumerateArray()) { var branchIssues=new List<ValidationIssue>(); Check(root,branch,value,path,branchIssues,depth+1,budget); if(branchIssues.Count==0) matches++; }
+            foreach(var branch in alternatives.EnumerateArray()) { var branchIssues=new List<ValidationIssue>(); Check(root,branch,value,path,branchIssues,depth+1,budget,supplied,pointer); if(branchIssues.Count==0) matches++; }
             if(budget[0]<0) { Add("ValidationBudgetExceeded"); return; }
             if(matches!=1) Add("OneOf");
         }
@@ -195,7 +211,8 @@ public static class TemplateSchemaValidator
                 if(schema.TryGetProperty("required",out var required)) foreach(var name in required.EnumerateArray())
                 {
                     var member=name.GetString()!;
-                    if(!value.TryGetProperty(member,out _))
+                    var memberPointer=pointer+"/"+member.Replace("~","~0").Replace("/","~1");
+                    if(!value.TryGetProperty(member,out _) && !(supplied?.Contains(memberPointer)==true && schema.TryGetProperty("properties",out var propsForMember) && propsForMember.TryGetProperty(member,out var suppliedSchema) && IsDynamicScalar(root,suppliedSchema)))
                     {
                         var memberPath=schema.TryGetProperty("properties",out var declared) && declared.ValueKind==JsonValueKind.Object && declared.TryGetProperty(member,out _) ? path+"."+member : path;
                         if(issues.Count<64) issues.Add(new(memberPath,"Required"));
@@ -204,9 +221,10 @@ public static class TemplateSchemaValidator
                 foreach(var property in value.EnumerateObject())
                 {
                     if(!propertyNames.Add(property.Name)) Add("DuplicateProperty");
-                    if(schema.TryGetProperty("properties",out var properties) && properties.TryGetProperty(property.Name,out var child)) Check(root,child,property.Value,path+"."+property.Name,issues,depth+1,budget);
+                    var childPointer=pointer+"/"+property.Name.Replace("~","~0").Replace("/","~1");
+                    if(schema.TryGetProperty("properties",out var properties) && properties.TryGetProperty(property.Name,out var child)) Check(root,child,property.Value,path+"."+property.Name,issues,depth+1,budget,supplied,childPointer);
                     else if(schema.TryGetProperty("additionalProperties",out var additional))
-                    { if(additional.ValueKind==JsonValueKind.False) Add("AdditionalProperty"); else Check(root,additional,property.Value,path+".additional",issues,depth+1,budget); }
+                    { if(additional.ValueKind==JsonValueKind.False) Add("AdditionalProperty"); else Check(root,additional,property.Value,path+".additional",issues,depth+1,budget,supplied,childPointer); }
                 }
                 break;
             case JsonValueKind.Array:
@@ -220,7 +238,7 @@ public static class TemplateSchemaValidator
                         if(JsonElement.DeepEquals(array[i],array[j])) { Add("UniqueItems"); return; }
                     }
                 }
-                if(schema.TryGetProperty("items",out var item)) for(var index=0;index<array.Length;index++) Check(root,item,array[index],path+"["+index.ToString(CultureInfo.InvariantCulture)+"]",issues,depth+1,budget);
+                if(schema.TryGetProperty("items",out var item)) for(var index=0;index<array.Length;index++) Check(root,item,array[index],path+"["+index.ToString(CultureInfo.InvariantCulture)+"]",issues,depth+1,budget,supplied,pointer+"/"+index.ToString(CultureInfo.InvariantCulture));
                 break;
             case JsonValueKind.String:
                 var text=value.GetString()!; var length=text.EnumerateRunes().Count();
@@ -243,6 +261,28 @@ public static class TemplateSchemaValidator
         }
         void Add(string code) { if(issues.Count<64) issues.Add(new(path,code)); }
         bool Bound(string key,decimal actual,string code,bool upper) { if(!schema.TryGetProperty(key,out var n) || !(upper?actual>n.GetDecimal():actual<n.GetDecimal())) return false; Add(code); return true; }
+    }
+    private static bool IsDynamicScalar(JsonElement root,JsonElement schema)
+    {
+        if(schema.ValueKind!=JsonValueKind.Object) return false;
+        if(schema.TryGetProperty("$ref",out var reference)) return Resolve(root,reference.GetString()!,out var target) && IsDynamicScalar(root,target);
+        return schema.TryGetProperty("x-workerDock-dynamicValue",out var flag) && flag.ValueKind==JsonValueKind.True && IsScalarSchema(schema) && !(schema.TryGetProperty("x-workerDock-sensitive",out var sensitive) && sensitive.ValueKind==JsonValueKind.True) && !(schema.TryGetProperty("x-workerDock-secretReference",out var secret) && secret.ValueKind==JsonValueKind.True);
+    }
+    private static bool HasDynamicUnderSensitive(JsonElement root,JsonElement schema,bool sensitiveAncestor,int depth,HashSet<string> references)
+    {
+        if(depth>16 || schema.ValueKind!=JsonValueKind.Object) return false;
+        var sensitive=sensitiveAncestor || schema.TryGetProperty("x-workerDock-sensitive",out var flag) && flag.ValueKind==JsonValueKind.True || schema.TryGetProperty("x-workerDock-secretReference",out var secret) && secret.ValueKind==JsonValueKind.True;
+        if(sensitive && schema.TryGetProperty("x-workerDock-dynamicValue",out var dynamicValue) && dynamicValue.ValueKind==JsonValueKind.True) return true;
+        if(schema.TryGetProperty("$ref",out var reference))
+        {
+            var name=reference.GetString();
+            if(name is not null && references.Add(name) && Resolve(root,name,out var target)) { var found=HasDynamicUnderSensitive(root,target,sensitive,depth+1,references); references.Remove(name); if(found) return true; }
+        }
+        foreach(var key in new[]{"properties","$defs"}) if(schema.TryGetProperty(key,out var children) && children.ValueKind==JsonValueKind.Object)
+            foreach(var child in children.EnumerateObject()) if(HasDynamicUnderSensitive(root,child.Value,sensitive,depth+1,references)) return true;
+        foreach(var key in new[]{"items","additionalProperties"}) if(schema.TryGetProperty(key,out var child) && HasDynamicUnderSensitive(root,child,sensitive,depth+1,references)) return true;
+        if(schema.TryGetProperty("oneOf",out var branches)) foreach(var branch in branches.EnumerateArray()) if(HasDynamicUnderSensitive(root,branch,sensitive,depth+1,references)) return true;
+        return false;
     }
     // TryGetDecimal can round excess digits; inspect normalized significant digits/scale first.
     private static bool TryExactDecimal(JsonElement number,out decimal exact)
