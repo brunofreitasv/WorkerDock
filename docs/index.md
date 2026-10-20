@@ -24,7 +24,7 @@ the [job flow](scheduling.md#job-flow), and the
 ## Reference: look up exact behavior and settings
 
 - [Configuration keys and locations](reference/configuration.md).
-- [Database objects and script ownership](reference/database-objects.md): current tenant migrations, archived legacy-center scripts, and test fixtures.
+- [Database objects and script ownership](reference/database-objects.md): tenant runtime migrations, test fixtures, and Quartz source provenance.
 - [Database migration and SQL test details](database.md).
 - [Authentication and role policy](authentication.md).
 - [SQL Server template](sql-template.md) and [HTTP template](http-template.md).

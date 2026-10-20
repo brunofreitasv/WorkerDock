@@ -1,7 +1,0 @@
-# Task 5 importer report
-
-Implemented the separate `WorkerDock.CentralImport` executable. It reads only the legacy center settings, registration, health, audit, and migration-history tables; checks the requested center identity and installed migration checksums; validates rows using the current tenant registration rules; and emits a nonsecret receipt with counts and SHA-256 checksums. The bootstrap builds and reopens a temporary journal, writes the latest health observations, and moves the completed directory into an empty target. Legacy audit events use their own event IDs and remain separate from the registration projection.
-
-Added unit coverage for identity/argument validation, registration and audit preservation, new eight-byte registration ETags, latest-health selection, unsafe registrations, secret-bearing audit details, and nonempty target preservation. Added a SQL-gated integration test that creates a disposable legacy center database, reads and imports its rows, and reopens the file registry. Registered the importer in the solution and the integration test project.
-
-Final coordinated verification: unit tests passed 100/100; focused Control Center integration passed 11 tests with the legacy SQL test skipped because `WORKERDOCK_TEST_SQL` was unset; full solution build passed with zero warnings/errors; final center/tenant package smoke passed. SQL import and Windows/IIS install/upgrade/ACL/restore remain release gates requiring disposable environments.

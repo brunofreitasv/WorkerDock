@@ -31,4 +31,4 @@ The scheduler uses `Retention.ArchiveRoot` for archive output. If set, this must
 
 ## SQL and migration variables
 
-The database migrator accepts `WORKERDOCK_SQL` and `WORKERDOCK_INSTANCE_ID` for current tenant migrations, using `apply|rollback tenant <migration>`. Do not use its historical `central` mode for a current deployment. An existing SQL-backed center is imported by reading its already-existing database: set `WORKERDOCK_LEGACY_CENTRAL_SQL` and `WORKERDOCK_INSTANCE_ID`, then run `dotnet run --project src/WorkerDock.CentralImport -- import --data-directory '<absolute-path>' --instance-id $env:WORKERDOCK_INSTANCE_ID`. See [database setup and migrations](../how-to/setup-sql-server.md) for tenant SQL commands and [Control Center](../control-center.md) for legacy import.
+The database migrator accepts `WORKERDOCK_SQL` and `WORKERDOCK_INSTANCE_ID` for tenant migrations, using `apply|rollback tenant <migration>`. Any database kind other than `tenant` is rejected before SQL access. See [database setup and migrations](../how-to/setup-sql-server.md) for the tenant SQL commands.

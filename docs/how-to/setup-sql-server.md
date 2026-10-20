@@ -1,6 +1,6 @@
 # Set up SQL Server
 
-WorkerDock tenant databases require SQL Server 2022 or newer with database compatibility level 160. Provision one separate database for each tenant. A fresh Control Center uses protected files and has no SQL Server requirement. Retain an old SQL-backed center database only as a backup and read-only import source while moving that old installation to the current file-backed center.
+WorkerDock tenant databases require SQL Server 2022 or newer with database compatibility level 160. Provision one separate database for each tenant. The Control Center uses protected files and has no SQL Server requirement.
 
 ## Runtime and test databases
 
@@ -19,10 +19,9 @@ flowchart LR
 
 The tenant runtime manifest under `database/tenant` creates application objects
 and includes paired rollback scripts. It is the only production migration
-source. `database/central` is an archived schema reference for recovering an
-old SQL-backed center before import; do not apply it to a new installation and
-do not use it for normal import. The `tests/sql` scripts create only fixture
-objects in generated disposable databases; never apply them to a runtime tenant.
+source. The `tests/sql` scripts create only fixture objects in generated
+disposable databases; never apply them to a runtime tenant. Quartz's attributed
+upstream source is retained for provenance and is not installed independently.
 The in-memory tutorial needs none of these SQL objects.
 
 ## Provision a tenant database
@@ -95,7 +94,7 @@ $env:WORKERDOCK_SQL='<tenant-migrator-connection-string>'
 dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0008_retention
 ```
 
-Continue with preceding IDs only when their down scripts' empty-state requirements are satisfied. For a populated database, restore a backup or perform a separately planned data migration; do not bypass a rollback guard. There is no current Control Center SQL rollback command. If an old SQL-backed center must be recovered, use the matching old-release recovery procedure, then perform the one-time file-journal import described in [Control Center](../control-center.md).
+Continue with preceding IDs only when their down scripts' empty-state requirements are satisfied. For a populated database, restore a backup or perform a separately planned data migration; do not bypass a rollback guard. The Control Center has no SQL rollback because it stores its state in protected files.
 
 ## SQL integration tests
 

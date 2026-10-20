@@ -1,6 +1,6 @@
 # Database objects
 
-WorkerDock's only current runtime SQL schema is the tenant schema in `database/tenant`. Tenant migrations have `.up.sql` and `.down.sql` files listed in a checksummed manifest. Apply current tenant migrations with `WorkerDock.DatabaseMigrator`; do not execute an individual runtime script by hand or edit a migration after it has been applied. New schema changes use a new migration pair. `database/central` is an archived pre-file-center schema reference, not a supported migration source.
+WorkerDock's only runtime SQL schema is the tenant schema in `database/tenant`. Tenant migrations have `.up.sql` and `.down.sql` files listed in a checksummed manifest. Apply tenant migrations with `WorkerDock.DatabaseMigrator`; do not execute an individual runtime script by hand or edit a migration after it has been applied. New schema changes use a new migration pair.
 
 All tenant-owned objects are under `[workerdock]`. Tenant application connections use the restricted runtime role created by tenant migrations. Current Control Center state is held in protected files, not SQL objects, and it has no SQL runtime principal. `deploy/permissions.sql` only adds an existing tenant database user or group to `WorkerDockRuntime`; it does not create roles, schemas, tables, procedures, or grants.
 
@@ -25,10 +25,6 @@ All tenant-owned objects are under `[workerdock]`. Tenant application connection
 
 Quartz schema is included in tenant migration `0002_quartz`; the source SQL Server script is preserved with its license and notices in `database/upstream/quartz-4.5.1/`. WorkerDock changes its table prefixes and schema to `[workerdock]`, and creates separate stores for scheduling and execution publishing. Do not install the upstream script independently. The paired down migration refuses to drop populated stores.
 
-## Archived pre-file-center schema reference
-
-`database/central/0001_registry.up.sql` describes the schema used by older SQL-backed centers. It created `SchemaHistory`, `CentralSettings`, `TenantRegistrations`, `TenantHealthObservations`, append-only `AuditEvents`, supporting indexes, and `WorkerDockCentralRuntime`. Current Control Center setup, startup, upgrades, and `WorkerDock.CentralImport` never execute these scripts. Do not apply them to a new database. Use them only when recovering an old release before its one-time import; see [Control Center](../control-center.md).
-
 ## Test-only SQL objects
 
 These SQL files exist only to support disposable integration fixtures and are not migrations or deployment scripts:
@@ -40,6 +36,6 @@ These SQL files exist only to support disposable integration fixtures and are no
 
 `SqlDatabaseFixture` chooses a generated `WorkerDock_Test_<32 hex digits>` database, sets compatibility level 160, and drops that database at disposal. Target fixture scripts and Quartz probe scripts run only inside that generated database. Do not copy these scripts into a tenant installation.
 
-`database/upstream/quartz-4.5.1/sql-server.sql` is attributed upstream source retained for reference. It is neither a deployment migration nor a test fixture; do not run it in addition to `0002_quartz`.
+`database/upstream/quartz-4.5.1/sql-server.sql` is attributed upstream source retained for provenance. It is neither a deployment migration nor a test fixture; do not run it in addition to `0002_quartz`.
 
 For exact provisioning, least-privilege identity setup, test prerequisites, and rollback commands, see [Set up SQL Server](../how-to/setup-sql-server.md).

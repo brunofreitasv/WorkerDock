@@ -2,10 +2,9 @@
 
 Use [Set up SQL Server](how-to/setup-sql-server.md) for current tenant database
 provisioning, migration, runtime identity, rollback, and SQL integration test
-procedures. A fresh Control Center uses protected files and has no central
-database, migration, or runtime SQL identity. `database/central` is archived
-source for recovery of a pre-file-center installation; it is never applied by
-current setup, startup, upgrade, or the legacy importer. See [Control Center](control-center.md).
+procedures. The Control Center uses protected files and has no SQL database,
+migration, or runtime SQL identity. There is no Control Center SQL migration
+or import command. See [Control Center](control-center.md).
 The [database object reference](reference/database-objects.md) lists current
 tenant migration objects and test-only SQL fixtures.
 

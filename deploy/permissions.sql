@@ -11,8 +11,8 @@ WorkerDockRuntime role. Versioned tenant migrations own all table and routine
 grants, including Quartz DML, business data, audit access, and the narrow
 [workerdock] purge routines. This script creates or changes no roles, schemas,
 tables, procedures, or Quartz data. The current Control Center has no SQL
-runtime principal. Archived central SQL scripts are not used by this command,
-current setup, or the legacy importer.
+runtime principal. Control Center state is stored in protected files and is not
+managed by this tenant SQL command.
 */
 SET NOCOUNT ON;
 SET XACT_ABORT ON;

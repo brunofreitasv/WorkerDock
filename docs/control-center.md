@@ -26,18 +26,13 @@ The development environment vault is disabled unless `WORKERDOCK_DEVELOPMENT_VAU
 
 The Control Center uses its own Entra app registration, cookie prefix, data-protection discriminator, and key directory. Configure its `Access:Authority`, `Access:ClientId`, and protected `Access:ClientSecretReference` as described in [authentication](authentication.md). Any authenticated user accepted by that audience may read the directory and refresh health. If `Access:RequiredManagementRole` is configured, only its configured role claim may register, edit, or remove links; if omitted, any authenticated user may manage. With no authentication configuration, access is anonymous, including management. Restrict anonymous deployments at the network boundary. The same policies protect the management API, not just the React controls.
 
-## Import a legacy SQL-backed center
+## Moving from an older Control Center
 
-This procedure is only for an existing center that used the legacy central SQL schema. Back up and verify the old database, stop the old center, and use a read-only SQL identity for import. Set `WORKERDOCK_LEGACY_CENTRAL_SQL` to the legacy central database connection and `WORKERDOCK_INSTANCE_ID` to its stable center GUID. From the repository root, run:
-
-```powershell
-dotnet run --project src/WorkerDock.CentralImport -- import --data-directory '<absolute-path>' --instance-id $env:WORKERDOCK_INSTANCE_ID
-```
-
-The target directory must be empty and protected. The importer reads legacy center records and writes a journal for the same instance. It preserves registration identifiers, nonsecret fields, timestamps, safe audit history, and latest health observations; journal ETags are new, so clients must refetch them. Review the import receipt without exposing credential references or secret values. Deploy the file-backed center side by side, verify tenant links and health, then move the HTTPS binding. Keep the old database and package for a deliberate rollback; file-side changes after cutover do not flow back to SQL.
-
-## Archived legacy SQL schema
-
-[`database/central`](../database/central) is an archive of the schema used by older SQL-backed centers. It is not a current migration chain, is never run by a fresh installation, and is not used by the importer. The importer reads a pre-existing legacy database and writes the protected file journal. Do not create a database from these scripts for a new Control Center. Retain them only if you must recover an old release before its one-time import. See [database objects](reference/database-objects.md) for the legacy object inventory. Tenant SQL migrations and the tenant's two Quartz stores remain required and unchanged.
+The current Control Center uses a protected file journal. The repository no
+longer includes the historical SQL schema or an automatic importer. Preserve
+any old database and release backup according to your recovery policy; create
+and configure a current file-backed center separately, then register tenant
+links through its management panel. Tenant SQL migrations and the tenant's two
+Quartz stores remain required and unchanged.
 
 There is no dedicated central Windows service. Host the Control Center web application separately (for example, as its own IIS application); tenant schedulers and worker services continue to run independently if the Control Center is unavailable.
