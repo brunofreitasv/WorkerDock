@@ -73,6 +73,39 @@ test("dashboard contextual help opens its registered guide", async () => {
   expect(window.location.hash).toBe("#/help:dashboard");
 });
 
+test("execution contextual help opens the monitoring guide", async () => {
+  window.history.replaceState(null, "", "#/execution:run-1");
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    const data = url === "/api/session"
+      ? { authenticated: true, canRead: true, canManage: false, mode: "RoleProtected", language: "en", timeZone: "UTC" }
+      : { executionId: "run-1", jobId: "job-1", jobName: "Job", templateId: "template", state: "Succeeded", certainty: "Certain", triggerKind: "Manual", createdAtUtc: "2026-01-01T00:00:00Z", availableAtUtc: "2026-01-01T00:00:00Z", scheduledForUtc: null, correlationId: "corr-1", stopRequested: false, forceStop: false, attempts: [], timeline: [] };
+    return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+  render(<SessionProvider><App /></SessionProvider>);
+  await userEvent.click(await screen.findByRole("button", { name: "Help for this page" }));
+  expect(screen.getAllByRole("heading", { name: "Monitor jobs and executions" }).length).toBeGreaterThan(0);
+  expect(window.location.hash).toBe("#/help:monitoring");
+});
+
+test("Profiles-tab contextual help opens the SQL profiles guide", async () => {
+  window.history.replaceState(null, "", "#/settings");
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    const data = url === "/api/session"
+      ? { authenticated: true, canRead: true, canManage: true, mode: "RoleProtected", language: "en", timeZone: "UTC" }
+      : url === "/api/settings"
+        ? { displayName: "Team", displayTimeZone: "UTC", version: "v1" }
+        : url === "/api/connection-profiles/"
+          ? { items: [] }
+          : {};
+    return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+  render(<SessionProvider><App /></SessionProvider>);
+  await userEvent.click(await screen.findByRole("button", { name: "SQL profiles" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Help for this page" }));
+  expect(screen.getAllByRole("heading", { name: "Manage SQL Server profiles" }).length).toBeGreaterThan(0);
+  expect(window.location.hash).toBe("#/help:sql-profiles");
+});
+
 test.each(["#/help:unknown", "#/help:", "#/help:bad%ZZslug"])("recovers from malformed help route %s", async hash => {
   localStorage.setItem("workerdock.language", "en");
   window.history.replaceState(null, "", hash);
