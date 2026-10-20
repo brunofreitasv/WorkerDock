@@ -9,6 +9,8 @@ public static class ExecutionPayloadLimits
     public const int MaximumMessageBytes = 64 * 1024;
     public const int EnvelopeReserveBytes = 1024;
     public const int PinnedSettingsReserveBytes = 8 * 1024;
+    // IntegrationSettingsValidation bounds the serialized settings to this size.
+    public const int MaximumMutableIntegrationBytes = 3800;
     private static readonly JsonSerializerOptions DescriptorOptions = new() { MaxDepth = 30 };
     public static bool FitsPreparedDescriptor(ExecutionDescriptor descriptor)
     {
@@ -18,7 +20,10 @@ public static class ExecutionPayloadLimits
                 return false;
             var envelope = new { version = 2, attemptId = Guid.Empty, generation = long.MaxValue,
                 metadataDigest = new string('F', 64), execution = descriptor };
-            return JsonSerializer.SerializeToUtf8Bytes(envelope, DescriptorOptions).Length + EnvelopeReserveBytes + PinnedSettingsReserveBytes <= MaximumMessageBytes;
+            var integrationBytes = JsonSerializer.SerializeToUtf8Bytes(descriptor.IntegrationConfiguration, DescriptorOptions).Length;
+            var settingsGrowthReserve = Math.Max(0, MaximumMutableIntegrationBytes - integrationBytes);
+            return JsonSerializer.SerializeToUtf8Bytes(envelope, DescriptorOptions).Length +
+                EnvelopeReserveBytes + PinnedSettingsReserveBytes + settingsGrowthReserve <= MaximumMessageBytes;
         }
         catch (Exception error) when (error is JsonException or NotSupportedException or ArgumentException) { return false; }
     }

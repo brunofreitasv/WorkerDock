@@ -64,7 +64,8 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
                 data.Prepare(values);
                 return (snapshotOrdinal == lease.Ordinal, data.GetDescriptor(lease, clock.GetUtcNow()));
             }, ct);
-            if (cached.Item1 || integrationSnapshot is null || cached.Item2.ValueResolutionError is not null) return Bound(cached.Item2);
+            if (cached.Item1 || integrationSnapshot is null || cached.Item2.ValueResolutionError is not null)
+                return await Run(() => Bound(data.GetDescriptor(lease, clock.GetUtcNow())), ct);
             var snapshot = (await integrationSnapshot(ct)).Clone();
             return await Run(() =>
             {
@@ -78,10 +79,14 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
         }
         finally { descriptorRefresh.Release(); }
     }
-    private ExecutionDescriptor Bound(ExecutionDescriptor descriptor) =>
-        descriptor.ValueSnapshot is not null && !ExecutionPayloadLimits.FitsPreparedDescriptor(descriptor)
-            ? descriptor with { ValueSnapshot = null, ValueResolutionError = "DynamicSnapshotTooLarge", Configuration = data.OriginalConfiguration }
-            : descriptor;
+    private ExecutionDescriptor Bound(ExecutionDescriptor descriptor)
+    {
+        if (descriptor.ValueSnapshot is null || ExecutionPayloadLimits.FitsPreparedDescriptor(descriptor)) return descriptor;
+        data.Descriptor = data.Descriptor with { ValueSnapshot = null, ValueResolutionError = "DynamicSnapshotTooLarge",
+            Configuration = data.OriginalConfiguration };
+        return descriptor with { ValueSnapshot = null, ValueResolutionError = "DynamicSnapshotTooLarge",
+            Configuration = data.OriginalConfiguration };
+    }
     public ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct) => Run(() => data.Renew(lease, clock.GetUtcNow()), ct);
     public async ValueTask CompleteAsync(AttemptLease lease, AttemptCompletion completion, CancellationToken ct) =>
         await Run(() => { data.Complete(lease, completion, clock.GetUtcNow()); return true; }, ct);

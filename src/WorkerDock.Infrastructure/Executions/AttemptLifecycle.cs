@@ -100,11 +100,7 @@ internal sealed class AttemptLifecycle
         {
             try
             {
-                if (saved.Values is null || saved.Values.Count != plan.Bindings.Count ||
-                    plan.Bindings.Any(binding => !saved.Values.ContainsKey(binding.Target)))
-                    throw new ValueResolutionException("DynamicSnapshotInvalid", "");
-                if (!string.Equals(saved.InputDigest, values.ComputeInputDigest(original, plan), StringComparison.Ordinal))
-                    throw new ValueResolutionException("DynamicSnapshotInvalid", "");
+                values.VerifySnapshot(original, plan, saved);
                 var configuration = values.Reapply(OriginalConfiguration, saved);
                 Descriptor = Descriptor with { Configuration = configuration };
             }

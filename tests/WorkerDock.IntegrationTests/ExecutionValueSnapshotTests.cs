@@ -97,6 +97,52 @@ public sealed class ExecutionValueSnapshotTests
     }
 
     [Fact]
+    public async Task Changed_saved_scalar_with_original_digest_is_rejected()
+    {
+        var clock = new AttemptLifecycleTests.Clock();
+        var original = Descriptor(new(1, "UTC", "Manual", null, clock.Now, null, null));
+        var firstStore = new InMemoryAttemptStore(clock, original, AttemptLifecycleTests.Policy(), dynamicValues: Plan);
+        var firstLease = (await firstStore.BeginAsync(firstStore.Intent, "boot", default)).Lease!;
+        var resolved = await firstStore.GetDescriptorAsync(firstLease, default);
+        var saved = resolved.ValueSnapshot!;
+        var changedValues = saved.Values.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+        changedValues["/parameters/0/value"] = JsonSerializer.SerializeToElement("2099-01-01");
+        var tampered = original with { ValueContext = resolved.ValueContext,
+            ValueSnapshot = saved with { Values = changedValues } };
+        var restarted = new InMemoryAttemptStore(clock, tampered, AttemptLifecycleTests.Policy(), dynamicValues: Plan);
+        var retryLease = (await restarted.BeginAsync(restarted.Intent, "other", default)).Lease!;
+        var descriptor = await restarted.GetDescriptorAsync(retryLease, default);
+        Assert.Equal("DynamicSnapshotInvalid", descriptor.ValueResolutionError);
+        Assert.Null(descriptor.ValueSnapshot);
+    }
+
+    [Fact]
+    public async Task Oversized_final_envelope_persists_failure_across_settings_change()
+    {
+        var clock = new AttemptLifecycleTests.Clock();
+        var original = Descriptor(new(1, "UTC", "Manual", null, clock.Now, null, null)) with
+        {
+            Configuration = JsonSerializer.SerializeToElement(new { parameters = new[] { new { value = "old" }, new { value = "old" } }, filler = new string('x', 40_000) }),
+            ProfileConfiguration = JsonSerializer.SerializeToElement(new { filler = new string('y', 12_000) })
+        };
+        var settingVersion = 0;
+        var store = new InMemoryAttemptStore(clock, original, AttemptLifecycleTests.Policy(),
+            integrationSnapshot: _ => ValueTask.FromResult(JsonSerializer.SerializeToElement(new { filler = ++settingVersion == 1 ? new string('z', 8_000) : "small" })),
+            dynamicValues: Plan);
+        var firstLease = (await store.BeginAsync(store.Intent, "boot", default)).Lease!;
+        var first = await store.GetDescriptorAsync(firstLease, default);
+        Assert.Equal("DynamicSnapshotTooLarge", first.ValueResolutionError);
+        Assert.Equal("DynamicSnapshotTooLarge", store.AcceptedDescriptor.ValueResolutionError);
+        await store.CompleteAsync(firstLease, new(new("TransientFailure", "Busy", false, JsonSerializer.SerializeToElement(new { }), null), "Completed", true, false), default);
+        var retry = Assert.Single(store.Retries);
+        clock.Now = retry.DueUtc;
+        var nextLease = (await store.BeginAsync(retry, "boot", default)).Lease!;
+        var second = await store.GetDescriptorAsync(nextLease, default);
+        Assert.Equal("DynamicSnapshotTooLarge", second.ValueResolutionError);
+        Assert.Null(second.ValueSnapshot);
+    }
+
+    [Fact]
     public async Task Rejected_start_does_not_assign_first_start()
     {
         var clock = new AttemptLifecycleTests.Clock();

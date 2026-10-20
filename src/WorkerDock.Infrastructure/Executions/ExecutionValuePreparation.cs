@@ -49,6 +49,26 @@ public sealed class ExecutionValuePreparation(DynamicValueResolver resolver)
         return Convert.ToHexString(SHA256.HashData(stream.ToArray()));
     }
 
+    public void VerifySnapshot(ExecutionDescriptor originalDescriptor, DynamicValuePlan plan, DynamicValueSnapshot saved)
+    {
+        try
+        {
+            var digest = ComputeInputDigest(originalDescriptor, plan);
+            if (!string.Equals(saved.InputDigest, digest, StringComparison.Ordinal) ||
+                saved.Values is null || saved.Values.Count != plan.Bindings.Count)
+                throw new ValueResolutionException("DynamicSnapshotInvalid", "");
+            var expected = resolver.Resolve(plan,
+                originalDescriptor.ValueContext ?? throw new ValueResolutionException("DynamicSnapshotInvalid", ""),
+                originalDescriptor.ExecutionId, originalDescriptor.IdempotencyKey, digest);
+            if (saved.ResolverVersion != expected.ResolverVersion ||
+                expected.Values.Any(entry => !saved.Values.TryGetValue(entry.Key, out var actual) ||
+                    !string.Equals(entry.Value.GetRawText(), actual.GetRawText(), StringComparison.Ordinal)))
+                throw new ValueResolutionException("DynamicSnapshotInvalid", "");
+        }
+        catch (Exception error) when (error is ValueResolutionException or JsonException or ArgumentException or InvalidOperationException)
+        { throw new ValueResolutionException("DynamicSnapshotInvalid", ""); }
+    }
+
     public JsonElement Reapply(JsonElement originalConfiguration, DynamicValueSnapshot snapshot)
     {
         if (snapshot.ResolverVersion != 1 || snapshot.InputDigest is null || snapshot.Values is null || snapshot.InputDigest.Length != 64 ||
