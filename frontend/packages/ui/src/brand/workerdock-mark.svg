@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <title>WorkerDock</title>
-  <path d="M22 12h12l18 18v2" stroke="#123246" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M52 40v1L41 52h-4" stroke="#3157C8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M29 52h-5L12 40v-8" stroke="#18A98F" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M12 24l12-12h4" stroke="#54D3B6" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M32 23 35.2 29.1 42 32l-6.8 2.9L32 42l-3.2-7.1L22 32l6.8-2.9L32 23Z" fill="#76E4CE"/>
-</svg>

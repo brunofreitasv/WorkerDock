@@ -1,6 +1,6 @@
 # WorkerDock
 
-<img src="frontend/packages/ui/src/brand/workerdock-mark.svg" alt="WorkerDock logo" width="72" height="72">
+<img src="frontend/packages/ui/src/brand/workerdock-mark.png" alt="WorkerDock logo" width="72" height="72">
 
 WorkerDock is a self-hosted platform for creating, scheduling, running, monitoring, and auditing jobs. It includes a React operator dashboard, .NET services, SQL Server and Quartz.NET for deployed scheduling, and trusted SQL Server and HTTP worker templates. Each tenant has its own database and runtime services; the optional Control Center links to independently deployed tenants. No external message broker is required.
 

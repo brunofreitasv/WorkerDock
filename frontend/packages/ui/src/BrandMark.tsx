@@ -1,4 +1,4 @@
-import markUrl from "./brand/workerdock-mark.svg";
+import markUrl from "./brand/workerdock-mark.png";
 
 export function BrandMark({ size = 36 }: { size?: number }) {
   return (
