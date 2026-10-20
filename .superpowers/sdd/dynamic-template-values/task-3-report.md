@@ -23,3 +23,9 @@
 ## Commit
 
 `feat: validate declared dynamic targets and authoring inputs` (committed on `codex/workerdock-final`; final commit ID is in the task handoff).
+
+## Review follow-up
+
+- Reproduced nullable scalar target failure with `type:["string","null"]`: the focused suite returned `DynamicTargetInvalid` for a compatible string binding.
+- Updated eligibility to accept the scalar type-array subset (including nullable scalar schemas) consistently with descriptor and output compatibility checks.
+- Regression and focused verification: `dotnet test tests/WorkerDock.IntegrationTests --filter 'FullyQualifiedName~DynamicValueValidationTests|FullyQualifiedName~TemplateCatalogTests'` passed (48 tests).

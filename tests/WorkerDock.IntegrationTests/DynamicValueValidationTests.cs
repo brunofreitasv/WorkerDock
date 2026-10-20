@@ -27,6 +27,15 @@ public sealed class DynamicValueValidationTests
     }
 
     [Fact]
+    public void nullable_scalar_dynamic_targets_accept_compatible_string_bindings()
+    {
+        var descriptor = Descriptor("""{"type":"object","properties":{"value":{"type":["string","null"],"x-workerDock-dynamicValue":true}}}""");
+        var config = JsonDocument.Parse("""{"value":null}""").RootElement;
+        var issues = DynamicValueValidation.Validate(descriptor, config, new(1,"UTC",[Bind("/value")]), "Scheduled");
+        Assert.Empty(issues);
+    }
+
+    [Fact]
     public void missing_bound_leaf_does_not_disable_sibling_validation()
     {
         var descriptor = Descriptor("""{"type":"object","properties":{"parameters":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string","x-workerDock-dynamicValue":true}},"required":["name","value"]}}}}""");

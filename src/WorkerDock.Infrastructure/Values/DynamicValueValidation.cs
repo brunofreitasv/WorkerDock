@@ -51,9 +51,14 @@ public static class DynamicValueValidation
 
     private static bool IsEligible(JsonElement schema) => schema.ValueKind == JsonValueKind.Object &&
         schema.TryGetProperty("x-workerDock-dynamicValue", out var flag) && flag.ValueKind == JsonValueKind.True &&
-        schema.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() is "string" or "integer" or "number" or "boolean" &&
+        schema.TryGetProperty("type", out var type) && IsScalarType(type) &&
         !(schema.TryGetProperty("x-workerDock-sensitive", out var sensitive) && sensitive.ValueKind == JsonValueKind.True) &&
         !(schema.TryGetProperty("x-workerDock-secretReference", out var secret) && secret.ValueKind == JsonValueKind.True);
+
+    private static bool IsScalarType(JsonElement type) => type.ValueKind == JsonValueKind.String
+        ? type.GetString() is "string" or "integer" or "number" or "boolean"
+        : type.ValueKind == JsonValueKind.Array && type.GetArrayLength() > 0 &&
+          type.EnumerateArray().All(x => x.ValueKind == JsonValueKind.String && x.GetString() is "string" or "integer" or "number" or "boolean" or "null");
 
     private static bool TryResolve(JsonElement rootSchema, JsonElement config, string pointer, out JsonElement finalSchema, out bool missingLeaf, out bool sensitive)
     {
