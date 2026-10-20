@@ -33,6 +33,7 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
         data = new() { Descriptor = descriptor, Policy = policy, Intent = Intent, JobId = Guid.NewGuid() };
     }
     public DispatchIntent Intent { get; }
+    public ExecutionDescriptor AcceptedDescriptor => data.Descriptor;
     public AttemptSnapshot Snapshot { get { lock (gate) return new(data.State, data.Ordinal, data.PermitRetained, data.StopRequested, data.AttemptState, data.Uncertain); } }
     public IReadOnlyList<DispatchIntent> Retries { get { lock (gate) return retries.ToArray(); } }
     public IReadOnlyList<MemoryExecutionAudit> Audits { get { lock (gate) return audits.ToArray(); } }

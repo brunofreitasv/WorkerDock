@@ -15,6 +15,7 @@ public sealed record DynamicValuePlan(int ResolverVersion, string TimeZoneId,
 
 public static class DynamicValueJson
 {
+    public static DynamicValuePlan EmptyPlan { get; } = new(1, "UTC", Array.Empty<DynamicValueBinding>());
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
         Converters =

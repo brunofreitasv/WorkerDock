@@ -10,6 +10,7 @@ public interface IJobCommands
     ValueTask<CommandReceipt> SaveAsync(JobRevision proposed, byte[]? expectedVersion, ActorContext actor, CancellationToken ct);
     ValueTask<CommandReceipt> EnableManualAsync(Guid jobId, byte[] expectedVersion, ActorContext actor, CancellationToken ct);
     ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct);
+    ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ManualRunOptions options, ActorContext actor, CancellationToken ct);
     ValueTask<CommandReceipt> GetCommandAsync(Guid commandId, CancellationToken ct);
     ValueTask<JobEditorDto> GetEditableAsync(Guid jobId, CancellationToken ct);
 }

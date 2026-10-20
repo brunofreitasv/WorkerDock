@@ -5,7 +5,7 @@ using WorkerDock.Infrastructure.Authentication;
 
 namespace WorkerDock.Web.Endpoints;
 
-public sealed record RunNowRequest(string RequestKey);
+public sealed record RunNowRequest(string RequestKey, DateOnly? ReferenceDateOverride = null);
 
 public static class JobCommandsEndpoints
 {
@@ -67,7 +67,7 @@ public static class JobCommandsEndpoints
         {
             try
             {
-                var receipt = await commands.RunNowAsync(id, input.RequestKey, SessionEndpoints.Actor(context), ct);
+                var receipt = await commands.RunNowAsync(id, input.RequestKey, new ManualRunOptions(input.ReferenceDateOverride), SessionEndpoints.Actor(context), ct);
                 return Results.Accepted($"/api/commands/{receipt.CommandId}", receipt);
             }
             catch (WorkerDockException error) { return Error(error); }

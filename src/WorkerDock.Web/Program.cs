@@ -303,6 +303,8 @@ internal sealed class UnavailableJobCommands : IJobCommands
         => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
     public ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct)
         => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ManualRunOptions options, ActorContext actor, CancellationToken ct)
+        => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
     public ValueTask<CommandReceipt> GetCommandAsync(Guid commandId, CancellationToken ct)
         => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
     public ValueTask<JobEditorDto> GetEditableAsync(Guid jobId, CancellationToken ct)

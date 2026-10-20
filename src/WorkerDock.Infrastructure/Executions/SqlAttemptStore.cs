@@ -122,7 +122,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
                     AND w.LiveLimit>(SELECT COUNT(*) FROM [workerdock].Attempts active WHERE active.WorkerBootId=w.BootId AND active.State=N'Running')
                     AND w.LastHeartbeatUtc>DATEADD(second,-60,SYSUTCDATETIME())
                     AND wc.TemplateId=r.TemplateId AND wc.TemplateVersion=r.TemplateVersion)
-                    AND EXISTS(SELECT 1 FROM [workerdock].JobPermits permit WHERE permit.ExecutionId=e.ExecutionId) THEN 1 ELSE 0 END,COALESCE(p.EffectiveRevision,-1),e.TriggerKind
+                    AND EXISTS(SELECT 1 FROM [workerdock].JobPermits permit WHERE permit.ExecutionId=e.ExecutionId) THEN 1 ELSE 0 END,COALESCE(p.EffectiveRevision,-1),e.TriggerKind,e.ValueContextJson
             FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
                 JOIN [workerdock].Jobs j ON j.JobId=e.JobId
                 LEFT JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
@@ -138,7 +138,8 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
         var policy = JsonSerializer.Deserialize<ExecutionPolicy>(reader.GetString(12)) ?? throw new WorkerDockException("PinnedDescriptorUnavailable");
         var descriptor = new ExecutionDescriptor(id, 1, reader.GetString(9), reader.GetString(10), reader.GetString(2),
             JsonDocument.Parse(reader.GetString(11)).RootElement.Clone(), reader.IsDBNull(6) ? null : reader.GetGuid(6), null,
-            JsonSerializer.SerializeToElement(new { sqlProfileDiagnostic=reader.GetString(22)=="Diagnostic" }), null);
+            JsonSerializer.SerializeToElement(new { sqlProfileDiagnostic=reader.GetString(22)=="Diagnostic" }), null,
+            reader.IsDBNull(23) ? null : JsonSerializer.Deserialize<WorkerDock.Contracts.Values.ExecutionValueContext>(reader.GetString(23)));
         using var payload = JsonDocument.Parse(reader.GetString(18));
         var ordinal = payload.RootElement.TryGetProperty("attemptOrdinal", out var number) ? number.GetInt32() : 1;
         var capacityRevision = payload.RootElement.TryGetProperty("capacityRevision", out var epoch) ? epoch.GetInt64() : 0;

@@ -134,9 +134,13 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
         catch(SqlException){throw new WorkerDockException("PersistenceUnavailable");}
     }
 
-    public async ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct)
+    public ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct) =>
+        RunNowAsync(jobId, requestKey, new ManualRunOptions(), actor, ct);
+
+    public async ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ManualRunOptions options, ActorContext actor, CancellationToken ct)
     {
         JobCommandValidation.ValidateRequestKey(jobId, requestKey, actor);
+        if (options is null) throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
         try
         {
             return await new BusinessTransaction(options).RunAsync<CommandReceipt>(async (connection, transaction, token) =>
@@ -146,7 +150,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 var now = (DateTime)(await time.ExecuteScalarAsync(token))!;
                 var scopeHash = Hash(actor.AuthenticationMode + "|" + actor.Subject);
                 var keyHash = Hash(requestKey);
-                var requestHash = Hash("RunNow|" + jobId.ToString("N"));
+                var requestHash = options.ReferenceDateOverride is null ? Hash("RunNow|" + jobId.ToString("N")) : Hash("RunNow|" + jobId.ToString("N") + "|" + options.ReferenceDateOverride.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
                 await using var dedup = Command(connection, transaction,
                     "SELECT ActorMode,ActorSubject,RequestKey,RequestHash,ExecutionId,CommandId,ResponseState,ExpiresAtUtc FROM [workerdock].ManualRequestDedup WITH (UPDLOCK,HOLDLOCK) WHERE JobId=@job AND ActorScopeHash=@scope AND RequestKeyHash=@key");
                 Add(dedup, "@job", SqlDbType.UniqueIdentifier, jobId);
@@ -210,6 +214,12 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 await using var pinned = await configuration.ExecuteReaderAsync(token); await pinned.ReadAsync(token);
                 using var json = JsonDocument.Parse(pinned.GetString(2));
                 using var dynamicJson = pinned.IsDBNull(3) ? null : JsonDocument.Parse(pinned.GetString(3));
+                var dynamicPlan = dynamicJson is null ? WorkerDock.Contracts.Values.DynamicValueJson.EmptyPlan : WorkerDock.Contracts.Values.DynamicValueJson.Read(dynamicJson.RootElement);
+                var descriptor = templateCatalog is null ? null : await templateCatalog.GetAsync(pinned.GetString(0), pinned.GetString(1), token);
+                var capable = descriptor is not null && ContainsDynamicAnnotation(descriptor.ConfigurationSchema);
+                if (options.ReferenceDateOverride is not null && (!capable || pinned.GetString(1) == "1.0.0")) throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
+                if (dynamicPlan.Bindings.Any(binding => binding.Source == WorkerDock.Contracts.Values.DynamicValueSource.ScheduledTimestamp)) throw new WorkerDockException("ValidationFailed", "configuration.dynamicValues");
+                var valueContext = capable ? WorkerDock.Infrastructure.Values.ExecutionValueContextFactory.Manual(dynamicPlan, new DateTimeOffset(DateTime.SpecifyKind(now, DateTimeKind.Utc)), options.ReferenceDateOverride) : null;
                 if (!WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(pinned.GetString(0), pinned.GetString(1), json.RootElement, dynamicJson?.RootElement))
                     throw new WorkerDockException("ValidationFailed", "configuration");
                 await TemplateJobValidation.ValidateAsync(templateCatalog,pinned.GetString(0),pinned.GetString(1),json.RootElement,token,authoring, dynamicJson is null ? null : WorkerDock.Contracts.Values.DynamicValueJson.Read(dynamicJson.RootElement), "Manual");
@@ -218,7 +228,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 var executionId = Guid.NewGuid();
                 var receipt = new CommandReceipt(Guid.NewGuid(), executionId, "Pending");
                 await using var execution = Command(connection, transaction,
-                    "INSERT INTO [workerdock].Executions(ExecutionId,JobId,JobRevision,ProfileRevisionId,TriggerKind,RequestKey,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc) VALUES (@execution,@job,@rev,@profileRevision,N'Manual',@key,@idempotency,N'Queued',N'Known',@now,@correlation,@now)");
+                    "INSERT INTO [workerdock].Executions(ExecutionId,JobId,JobRevision,ProfileRevisionId,TriggerKind,RequestKey,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc,ValueContextJson) VALUES (@execution,@job,@rev,@profileRevision,N'Manual',@key,@idempotency,N'Queued',N'Known',@now,@correlation,@now,@context)");
                 Add(execution, "@execution", SqlDbType.UniqueIdentifier, executionId);
                 Add(execution,"@profileRevision",SqlDbType.UniqueIdentifier,profileRevisionId ?? (object)DBNull.Value);
                 Add(execution, "@job", SqlDbType.UniqueIdentifier, jobId);
@@ -227,6 +237,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 Add(execution, "@idempotency", SqlDbType.NVarChar, executionId.ToString("N"), 100);
                 Add(execution, "@now", SqlDbType.DateTime2, now);
                 Add(execution, "@correlation", SqlDbType.UniqueIdentifier, actor.CorrelationId);
+                Add(execution, "@context", SqlDbType.NVarChar, valueContext is null ? DBNull.Value : JsonSerializer.Serialize(valueContext), -1);
                 await execution.ExecuteNonQueryAsync(token);
                 await InsertCommandAsync(connection, transaction, receipt, "ManualRun", token);
                 await using var saveKey = Command(connection, transaction,
@@ -345,4 +356,11 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
     }
 
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static bool ContainsDynamicAnnotation(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Object => value.EnumerateObject().Any(property => property.NameEquals("x-workerDock-dynamicValue") && property.Value.ValueKind == JsonValueKind.True || ContainsDynamicAnnotation(property.Value)),
+        JsonValueKind.Array => value.EnumerateArray().Any(ContainsDynamicAnnotation),
+        _ => false
+    };
 }

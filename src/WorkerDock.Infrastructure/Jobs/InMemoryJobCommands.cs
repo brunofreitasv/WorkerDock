@@ -14,7 +14,7 @@ using WorkerDock.Application.Templates;
 namespace WorkerDock.Infrastructure.Jobs;
 
 public sealed record MemoryExecution(Guid ExecutionId, Guid JobId, long JobRevision, Guid? ProfileId,
-    string State, string IdempotencyKey);
+    string State, string IdempotencyKey, WorkerDock.Contracts.Values.ExecutionValueContext? ValueContext = null);
 
 public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IProjectionStore
 {
@@ -61,6 +61,8 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             ? execution with { State = attempts.Snapshot.State } : execution;
     }
     public InMemoryAttemptStore? GetAttemptStore(Guid id) => attemptStores.GetValueOrDefault(id);
+    public WorkerDock.Contracts.Values.ExecutionValueContext? GetAcceptedValueContext(Guid id) =>
+        attemptStores.TryGetValue(id, out var store) ? store.AcceptedDescriptor.ValueContext : null;
     public JobRevision? GetRevision(Guid jobId, long revision) => Volatile.Read(ref state).Revisions.GetValueOrDefault((jobId, revision));
 
     public async ValueTask<CommandReceipt> SaveAsync(JobRevision proposed, byte[]? expectedVersion, ActorContext actor, CancellationToken ct)
@@ -134,29 +136,46 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
         finally { gate.Release(); }
     }
 
-    public async ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct)
+    public ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct) =>
+        RunNowAsync(jobId, requestKey, new ManualRunOptions(), actor, ct);
+
+    public async ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ManualRunOptions options, ActorContext actor, CancellationToken ct)
     {
         JobCommandValidation.ValidateRequestKey(jobId, requestKey, actor);
+        if (options is null) throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
         await gate.WaitAsync(ct);
         try
         {
             var before = state;
             var now = clock.GetUtcNow();
             var scope = (jobId, actor.AuthenticationMode, actor.Subject, requestKey);
+            var identity = ManualRequestIdentity(jobId, options.ReferenceDateOverride);
             if (before.Dedup.TryGetValue(scope, out var old) && now < old.ExpiresUtc)
+            {
+                if (old.RequestHash != identity) throw new WorkerDockException("RequestKeyConflict");
                 return before.Commands.GetValueOrDefault(old.Receipt.CommandId, old.Receipt);
+            }
             if (!before.Jobs.TryGetValue(jobId, out var editor)) throw new WorkerDockException("JobNotFound");
             if (editor.Archived) throw new WorkerDockException("JobArchived");
             if (!editor.Enabled) throw new WorkerDockException("JobDisabled");
+            var plan = editor.Revision.DynamicValues is { } dynamicJson
+                ? WorkerDock.Contracts.Values.DynamicValueJson.Read(dynamicJson)
+                : WorkerDock.Contracts.Values.DynamicValueJson.EmptyPlan;
+            var capable = await HasDynamicCapabilityAsync(editor.Revision, ct);
+            if (options.ReferenceDateOverride is not null && (!capable || editor.Revision.TemplateVersion == "1.0.0"))
+                throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
             await TemplateJobValidation.ValidateAsync(templateCatalog,editor.Revision,ct,authoring,"Manual");
+            if (plan.Bindings.Any(binding => binding.Source == WorkerDock.Contracts.Values.DynamicValueSource.ScheduledTimestamp))
+                throw new WorkerDockException("ValidationFailed", "configuration.dynamicValues");
             WorkerDock.Contracts.Connections.ConnectionProfileRevision? pinnedProfile=null;
             if(editor.Revision.ProfileId is {} profileId)
                 pinnedProfile=profiles is not null ? (await profiles.GetCurrentAsync(profileId,ct)).Current : throw new WorkerDockException("ProfileUnavailable");
             var integration = JsonSerializer.SerializeToElement(new { version = 1, vaultRevision = 1, providerId = "workerdock.environment", publicOptions = new { }, policies = Array.Empty<object>() });
             var executionId = Guid.NewGuid();
+            var valueContext = capable ? ExecutionValueContextFactory.Manual(plan, now, options.ReferenceDateOverride) : null;
             var receipt = new CommandReceipt(Guid.NewGuid(), executionId, "Pending");
             var execution = new MemoryExecution(executionId, jobId, editor.Revision.Revision,
-                editor.Revision.ProfileId, "Queued", executionId.ToString("N"));
+                editor.Revision.ProfileId, "Queued", executionId.ToString("N"), valueContext);
             await CheckPhaseAsync("Audit", ct);
             await CheckPhaseAsync("Outbox", ct);
             var digest = ProjectionEnvelope.ExecutionDigest(executionId, editor.Revision.Revision);
@@ -165,7 +184,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
                 Executions = before.Executions.Add(executionId, execution),
                 Commands = current.Commands.Add(receipt.CommandId, receipt),
                 CommandKinds = current.CommandKinds.Add(receipt.CommandId, "ManualRun"),
-                Dedup = before.Dedup.SetItem(scope, new(receipt, now.AddHours(24))),
+                Dedup = before.Dedup.SetItem(scope, new(receipt, now.AddHours(24), identity)),
                 Audits = current.Audits.Add(new(Guid.NewGuid(), "ManualRunAccepted", executionId,
                     editor.Revision.Revision, editor.Revision.Revision, "Accepted", actor.Subject,
                     actor.AuthenticationMode, actor.CorrelationId, now)),
@@ -174,13 +193,32 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             });
             attemptStores[executionId] = new InMemoryAttemptStore(clock,
                 new ExecutionDescriptor(executionId, 1, editor.Revision.TemplateId, editor.Revision.TemplateVersion,
-                    execution.IdempotencyKey, editor.Revision.Configuration, pinnedProfile?.ProfileRevisionId, pinnedProfile is null ? null : JsonSerializer.SerializeToElement(pinnedProfile), integration, null), editor.Revision.Policy,
+                    execution.IdempotencyKey, editor.Revision.Configuration, pinnedProfile?.ProfileRevisionId, pinnedProfile is null ? null : JsonSerializer.SerializeToElement(pinnedProfile), integration, null, valueContext), editor.Revision.Policy,
                 committed: snapshot => SettleCommands(executionId, snapshot),
                 integrationSnapshot: integrationSettings is null ? null : async token => IntegrationConfigurationJson.Serialize(await integrationSettings.GetSnapshotAsync(token)));
             return receipt;
         }
         finally { gate.Release(); }
     }
+
+    private async ValueTask<bool> HasDynamicCapabilityAsync(JobRevision revision, CancellationToken ct)
+    {
+        if (templateCatalog is null) return false;
+        var descriptor = await templateCatalog.GetAsync(revision.TemplateId, revision.TemplateVersion, ct);
+        if (descriptor is null) return false;
+        return ContainsDynamicAnnotation(descriptor.ConfigurationSchema);
+    }
+
+    private static bool ContainsDynamicAnnotation(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Object => value.EnumerateObject().Any(property => property.NameEquals("x-workerDock-dynamicValue") && property.Value.ValueKind == JsonValueKind.True || ContainsDynamicAnnotation(property.Value)),
+        JsonValueKind.Array => value.EnumerateArray().Any(ContainsDynamicAnnotation),
+        _ => false
+    };
+
+    private static string ManualRequestIdentity(Guid jobId, DateOnly? date) => date is null
+        ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("RunNow|" + jobId.ToString("N"))))
+        : Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("RunNow|" + jobId.ToString("N") + "|" + date.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))));
 
     private void SettleCommands(Guid executionId, AttemptSnapshot snapshot) =>
         ImmutableInterlocked.Update(ref state, before => Settle(before, executionId, snapshot));
@@ -308,7 +346,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
     {
         public ImmutableDictionary<Guid, string> CommandKinds { get; init; } = ImmutableDictionary<Guid, string>.Empty;
     }
-    private sealed record DedupRecord(CommandReceipt Receipt, DateTimeOffset ExpiresUtc);
+    private sealed record DedupRecord(CommandReceipt Receipt, DateTimeOffset ExpiresUtc, string RequestHash);
     private sealed record MemoryJobOutbox(Guid EventId, string Kind, Guid EntityId, long Revision,
         string PayloadDigest, DateTimeOffset AvailableUtc, string State = "Pending", DateTimeOffset? RetryAtUtc = null);
 }
