@@ -46,19 +46,26 @@ builder.Services.AddRateLimiter(options => options.AddPolicy("central-health-ref
 builder.Services.AddSingleton<ICentralRegistry>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
+    var environment = provider.GetRequiredService<IHostEnvironment>();
     if (!Guid.TryParse(config["Central:InstanceId"], out var instanceId) || instanceId == Guid.Empty)
         throw new InvalidOperationException("CentralInstanceIdInvalid");
-    if (config["Central:Adapter"] == "Memory")
-        return provider.GetRequiredService<IHostEnvironment>().IsDevelopment()
+    var adapter = config["Central:Adapter"];
+    if (string.Equals(adapter, "Memory", StringComparison.OrdinalIgnoreCase))
+        return environment.IsDevelopment()
             ? new InMemoryCentralRegistry(provider.GetRequiredService<TimeProvider>())
-            : throw new InvalidOperationException("CentralDatabaseRequired");
-    var connection = config["Central:ConnectionString"];
-    return !string.IsNullOrWhiteSpace(connection)
-        ? new SqlCentralRegistry(connection, instanceId)
-        : throw new InvalidOperationException("CentralDatabaseRequired");
+            : throw new InvalidOperationException("CentralMemoryAdapterDevelopmentOnly");
+    if (!string.IsNullOrWhiteSpace(adapter) && !string.Equals(adapter, "File", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("CentralStorageAdapterUnsupported");
+    if (!string.IsNullOrWhiteSpace(config["Central:ConnectionString"]))
+        throw new InvalidOperationException("CentralSqlConfigurationUnsupported");
+    var dataDirectory = CentralStorageOptions.ValidateDataDirectory(config["Central:Storage:DataDirectory"], environment.ContentRootPath);
+    return FileCentralRegistry.Open(dataDirectory, instanceId, provider.GetRequiredService<TimeProvider>());
 });
 
 var app = builder.Build();
+// Open and validate persistent state before serving requests so configuration and journal failures
+// prevent a misleading healthy process from starting.
+_ = app.Services.GetRequiredService<ICentralRegistry>();
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseWorkerDockSessions();

@@ -1,5 +1,7 @@
 # WorkerDock Foundation Implementation Plan
 
+> **Historical architecture note:** This plan predates the approved [database-free Control Center design](../specs/2026-10-19-database-free-control-center-design.md). Any central SQL database, schema, or migration statements are superseded; tenant SQL and Quartz requirements remain.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Produce an audited tenant API/React shell and prove the selected Quartz persistence and calendar integration on real SQL Server.

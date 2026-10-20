@@ -6,7 +6,7 @@ All WorkerDock-owned tables, triggers, keys, indexes and explicit SQL references
 
 Date: 2026-10-17 (America/Sao_Paulo)
 
-Status: Revised to use Quartz.NET with SQL Server for scheduling and dispatch and approved by the user on 2026-10-17. Implementation planning is authorized; implementation remains gated on plan review and execution-method selection.
+Status: Revised to use Quartz.NET with SQL Server for tenant scheduling and dispatch and approved by the user on 2026-10-17. Implementation is tracked in the historical 2026-10-17 plans; the Control Center storage change was implemented under the approved 2026-10-19 plan. Disposable SQL import and Windows/IIS release gates remain.
 
 ## 1. Purpose and agreed scope
 

@@ -7,11 +7,9 @@ namespace WorkerDock.IntegrationTests;
 
 public sealed class CentralLegacyImportSqlTests
 {
-    [Fact]
+    [RequiresSqlServerFact]
     public async Task Reads_legacy_sql_rows_and_imports_them_into_a_reopenable_file_registry()
     {
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SQL"))) return;
-
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot: false);
         var migrator = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
@@ -47,7 +45,7 @@ public sealed class CentralLegacyImportSqlTests
         }
         using var journal = CentralJournalStore.Open(target.Path, database.InstanceId);
         Assert.Equal(2, journal.Records.Count);
-        Assert.Single(journal.Records.Where(record => record.Mutation.Action == "LegacyAudit"));
+        Assert.Single(journal.Records, record => record.Mutation.Action == "LegacyAudit");
         Assert.DoesNotContain("HEALTH_REF", journal.Records[1].Mutation.SafeDetailsJson, StringComparison.Ordinal);
     }
 
@@ -79,5 +77,14 @@ public sealed class CentralLegacyImportSqlTests
         public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "workerdock-legacy-import-" + Guid.NewGuid().ToString("N"));
         public TestDirectory() => Directory.CreateDirectory(Path);
         public void Dispose() => Directory.Delete(Path, true);
+    }
+}
+
+public sealed class RequiresSqlServerFactAttribute : FactAttribute
+{
+    public RequiresSqlServerFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SQL")))
+            Skip = "Requires WORKERDOCK_TEST_SQL configured for a disposable SQL Server 2022+ instance.";
     }
 }

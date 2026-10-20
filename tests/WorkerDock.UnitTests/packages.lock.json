@@ -383,6 +383,13 @@
           "WorkerDock.Domain": "[1.0.0, )"
         }
       },
+      "workerdock.centralimport": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Data.SqlClient": "[7.1.1, )",
+          "WorkerDock.ControlCenter": "[1.0.0, )"
+        }
+      },
       "workerdock.contracts": {
         "type": "Project"
       },

@@ -33,7 +33,7 @@ Create tenant databases at compatibility level 160, then apply the tenant migrat
 
 ```powershell
 sqlcmd -S '<SQL_SERVER>' -d '<TENANT_DATABASE>' -E -b `
-  -v TenantRuntimePrincipal="<TENANT_DB_USER>" CentralRuntimePrincipal="" `
+  -v TenantRuntimePrincipal="<TENANT_DB_USER>" `
   -i .\deploy\permissions.sql
 ```
 

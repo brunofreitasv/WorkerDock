@@ -7,9 +7,10 @@ for migration and runtime-role commands. This page summarizes deployment boundar
 and operational checks.
 
 A tenant consists of an IIS application, a Quartz scheduler Windows service, and
-one or more generic worker Windows services. The Control Center is a separate
-application with its own database; it stores tenant URLs and health credential
-references, and does not provision tenant databases or copy tenant job data.
+one or more generic worker Windows services. The optional Control Center is a
+separate application with protected file state and no SQL database; it stores
+tenant URLs and health credential references, and does not provision tenant
+databases or copy tenant job data.
 Creating jobs or changing template concurrency does not install a Windows service.
 Add a worker service only to add another process or host-capacity boundary.
 
@@ -24,12 +25,13 @@ vault integration is installed and verified. Complete the
 infrastructure before live use.
 
 The deployment scripts require elevated PowerShell 7 for IIS and service setup.
-Use SQL Server 2022 or newer with a separate database per tenant and a separate
-database for the Control Center. Apply migrations before starting applications,
-then map each runtime identity to `WorkerDockRuntime` in its tenant database or
-`WorkerDockCentralRuntime` in the central database. Runtime identities must not
-have schema-change rights. Keep configuration, credentials, and Data Protection
-keys outside release packages, protected by the relevant application identities.
+Use SQL Server 2022 or newer with a separate database per tenant. Apply tenant
+migrations before starting applications, then map each tenant runtime identity
+to `WorkerDockRuntime` in its tenant database. The current Control Center uses
+its IIS application-pool identity for protected file state and its vault adapter;
+it has no SQL principal. Runtime identities must not have schema-change rights.
+Keep configuration, credentials, and Data Protection keys outside release
+packages, protected by the relevant application identities.
 
 Installers validate package manifest file sizes and hashes, preserve protected
 configuration and Data Protection keys on reruns, and leave IIS and services
@@ -40,8 +42,8 @@ before retrying an installer.
 
 Before opening the application to users, start the configured services and site,
 check `/health/ready`, Windows service states and event logs, and verify worker
-heartbeats. Readiness depends on SQL and reports degraded or unavailable
-components; it is not proof that a workload, identity-provider integration,
+heartbeats. Tenant readiness depends on SQL; Control Center readiness depends on
+its persistent state journal. Readiness is not proof that a workload, identity-provider integration,
 external secret provider, or restore path has been validated. The portable
 `tests/DeploymentSmoke.ps1` checks PowerShell syntax, JSON config shape, and
 package-manifest hash handling only; it does not provision IIS or verify live
@@ -50,4 +52,5 @@ SQL Server, Entra, or workload behavior.
 For upgrades and restores, follow [upgrade and restore](upgrades.md). The upgrade
 script leaves IIS and services stopped after staging; operators must start them
 manually and verify readiness and execution state. SQL Server is required for
-deployed instances; memory mode is for development and tests only.
+each deployed tenant; the Control Center can run without SQL. Memory mode is for
+Development and tests only.

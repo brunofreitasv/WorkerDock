@@ -59,7 +59,7 @@ server and database principal placeholders:
 
 ```powershell
 sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
-  -v TenantRuntimePrincipal="<TENANT_DB_USER>" CentralRuntimePrincipal="" `
+  -v TenantRuntimePrincipal="<TENANT_DB_USER>" `
   -i .\deploy\permissions.sql
 ```
 
@@ -67,7 +67,7 @@ sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
 
 ```powershell
 sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
-  -v TenantRuntimePrincipal="<TENANT_DB_USER>" CentralRuntimePrincipal="" `
+  -v TenantRuntimePrincipal="<TENANT_DB_USER>" `
   -i .\deploy\permissions.rollback.sql
 ```
 

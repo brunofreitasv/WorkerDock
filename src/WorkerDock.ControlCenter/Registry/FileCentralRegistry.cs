@@ -56,6 +56,7 @@ public sealed class FileCentralRegistry : ICentralRegistry, IDisposable
         try
         {
             ThrowIfDisposed();
+            if (!_journal.IsWritable) throw new WorkerDockException("PersistenceUnavailable");
             var query = _registrations.Values.AsEnumerable();
             if (!string.IsNullOrWhiteSpace(search)) query = query.Where(x => x.Snapshot.DisplayName.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase));
             if (TenantDirectoryCursor.Decode(page.Cursor) is { } cursor)

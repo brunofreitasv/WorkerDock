@@ -2,7 +2,7 @@
 
 WorkerDock's current runtime SQL schema is the tenant schema in `database/tenant`. The historical central schema in `database/central` is retained only for legacy restore/import. Tenant migrations have `.up.sql` and `.down.sql` files listed in a checksummed manifest. Apply current tenant migrations with `WorkerDock.DatabaseMigrator`; do not execute an individual runtime script by hand or edit a migration after it has been applied. New schema changes use a new migration pair.
 
-All tenant-owned objects are under `[workerdock]`. Tenant application connections use the restricted runtime role created by tenant migrations. Current Control Center state is held in protected files, not SQL objects. `deploy/permissions.sql` only adds existing database users or groups to roles; it does not create roles, schemas, tables, procedures, or grants.
+All tenant-owned objects are under `[workerdock]`. Tenant application connections use the restricted runtime role created by tenant migrations. Current Control Center state is held in protected files, not SQL objects, and it has no SQL runtime principal. `deploy/permissions.sql` only adds an existing tenant database user or group to `WorkerDockRuntime`; it does not create roles, schemas, tables, procedures, or grants.
 
 ## Runtime tenant schema
 

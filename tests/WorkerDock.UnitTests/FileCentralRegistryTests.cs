@@ -166,7 +166,9 @@ public sealed class FileCentralRegistryTests
             stream => new FailingWriter(stream));
         await Assert.ThrowsAsync<IOException>(async () =>
             await registry.SaveAsync(null, Input("Alpha"), null, Actor, default));
-        Assert.Empty((await registry.ListAsync(null, new PageRequest(null, 10), default)).Items);
+        var unavailable = await Assert.ThrowsAsync<WorkerDockException>(async () =>
+            await registry.ListAsync(null, new PageRequest(null, 10), default));
+        Assert.Equal("PersistenceUnavailable", unavailable.Code);
     }
 
     private static async Task RecordHealthOrMissingAsync(FileCentralRegistry registry, Guid id)
