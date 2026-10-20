@@ -10,7 +10,7 @@ public static class TemplateSchemaValidator
     public const int MaximumDocumentBytes = 49152;
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
-        "$schema","$defs","$ref","type","properties","required","additionalProperties","items","minItems","maxItems","uniqueItems",
+        "$schema","$defs","$ref","type","properties","required","additionalProperties","items","minItems","maxItems","maxProperties","uniqueItems",
         "enum","const","minimum","maximum","exclusiveMinimum","exclusiveMaximum","multipleOf","minLength","maxLength","pattern","format","oneOf",
         "title","description","default","x-workerDock-secretReference","x-workerDock-sensitive","x-workerDock-labelKey","x-workerDock-descriptionKey"
     };
@@ -101,8 +101,9 @@ public static class TemplateSchemaValidator
                     foreach(var alternative in value.EnumerateArray()) Inspect(root,alternative,path+".oneOf",issues,depth+1,references,budget);
                     if(!Discriminated(value)) Add("InvalidSchema");
                     break;
-                case "minItems": case "maxItems": case "minLength": case "maxLength":
-                    if(value.ValueKind!=JsonValueKind.Number || !value.TryGetInt32(out var bound) || bound is <0 or >16384) Add("InvalidSchema"); break;
+                case "minItems": case "maxItems": case "maxProperties": case "minLength": case "maxLength":
+                    var maximumBound=p.Name is "minLength" or "maxLength" ? 65536 : 16384;
+                    if(value.ValueKind!=JsonValueKind.Number || !value.TryGetInt32(out var bound) || bound is <0 || bound>maximumBound) Add("InvalidSchema"); break;
                 case "minimum": case "maximum": case "exclusiveMinimum": case "exclusiveMaximum": case "multipleOf":
                     if(!TryExactDecimal(value,out var n) || p.Name=="multipleOf" && n<=0) Add("InvalidSchema"); break;
                 case "pattern": if(value.ValueKind!=JsonValueKind.String || !PortablePattern(value.GetString()!)) Add("InvalidSchema"); break;
@@ -190,6 +191,7 @@ public static class TemplateSchemaValidator
         {
             case JsonValueKind.Object:
                 var propertyNames=new HashSet<string>(StringComparer.Ordinal);
+                if(schema.TryGetProperty("maxProperties",out var maxProperties) && value.EnumerateObject().Count()>maxProperties.GetInt32()) Add("MaxProperties");
                 if(schema.TryGetProperty("required",out var required)) foreach(var name in required.EnumerateArray()) if(!value.TryGetProperty(name.GetString()!,out _)) Add("Required");
                 foreach(var property in value.EnumerateObject())
                 {

@@ -2,10 +2,25 @@ using System.Text.Json;
 using WorkerDock.Application.Common;
 using WorkerDock.Contracts.Templates;
 using WorkerDock.Infrastructure.Templates;
+using WorkerDock.Templates.Http;
 namespace WorkerDock.IntegrationTests;
 public sealed partial class TemplateCatalogTests
 {
     internal static TemplateDescriptor Descriptor(string schema = """{"type":"object","properties":{"name":{"type":"string","maxLength":40}},"required":["name"],"additionalProperties":false}""", string hints="{}") => TemplateMetadata.WithDigest(new("test.template","1.0.0","Test","Test template",JsonSerializer.Deserialize<JsonElement>(schema),JsonSerializer.Deserialize<JsonElement>(hints),""));
+    [Fact]
+    public async Task Http_descriptor_registers_in_memory_catalog()
+    {
+        var descriptor=new HttpTemplate(new HttpClient()).Descriptor;
+        var catalog=new TemplateCatalog([descriptor]);
+        await catalog.RegisterAsync([descriptor],default);
+    }
+    [Fact]
+    public void Max_properties_rejects_over_limit_objects()
+    {
+        var descriptor=Descriptor("""{"type":"object","maxProperties":1,"additionalProperties":{"type":"string"}}""");
+        Assert.Empty(TemplateSchemaValidator.Validate(descriptor,JsonSerializer.Deserialize<JsonElement>("""{"a":"x"}""")));
+        Assert.Contains(TemplateSchemaValidator.Validate(descriptor,JsonSerializer.Deserialize<JsonElement>("""{"a":"x","b":"y"}""")),x=>x.Code=="MaxProperties");
+    }
     [Fact]
     public async Task Digest_cannot_change_under_same_id_and_version()
     {
