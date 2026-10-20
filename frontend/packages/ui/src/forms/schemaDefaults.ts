@@ -4,6 +4,21 @@ export function createSchemaDefault(schema: unknown, root: Record<string, unknow
   return materialize(schema, root, new Set<string>());
 }
 
+export function isSecretReferenceSchema(schema: unknown, root: Record<string, unknown>): boolean {
+  return secretReference(schema, root, new Set<string>());
+}
+
+function secretReference(schema: unknown, root: Record<string, unknown>, references: Set<string>): boolean {
+  if (!schema || typeof schema !== "object") return false;
+  const node = schema as Record<string, any>;
+  if (node["x-workerDock-secretReference"] === true) return true;
+  if (typeof node.$ref !== "string" || !node.$ref.startsWith("#/$defs/")) return false;
+  const key = node.$ref.slice(8);
+  if (references.has(key)) return false;
+  const target = (root as any).$defs?.[key];
+  return target ? secretReference(target, root, new Set([...references, key])) : false;
+}
+
 function materialize(schema: Schema | unknown, root: Record<string, unknown>, references: Set<string>): unknown {
   if (!schema || schema === true || schema === false || typeof schema !== "object") return undefined;
   const node = schema as Record<string, any>;

@@ -45,6 +45,15 @@ it("new_parameter_row_submits_visible_boolean_defaults", async () => {
   expect(row).not.toHaveProperty("secret");
 });
 
+it("does not add empty secret-reference array or map values", () => {
+  let value: Record<string, unknown> = { headers: {}, tokens: [] };
+  const descriptor = { id: "test", version: "1", displayName: "Test", description: "Test", configurationSchema: { $defs: { secret: { type: "string", "x-workerDock-secretReference": true } }, type: "object", properties: { headers: { type: "object", additionalProperties: { $ref: "#/$defs/secret" } }, tokens: { type: "array", items: { $ref: "#/$defs/secret" } } } } };
+  const { rerender } = render(<TemplateForm descriptor={descriptor} value={value} onChange={next => { value = next; rerender(<TemplateForm descriptor={descriptor} value={value} onChange={n => { value = n; }} errors={{}} />); }} errors={{}} />);
+  expect(screen.getByRole("button", { name: "Add entry" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Add item" })).toBeDisabled();
+  expect(value).toEqual({ headers: {}, tokens: [] });
+});
+
 it("creates defaults for refs and selected oneOf branches without nullable optional objects", () => {
   const schema = { $defs: { flag: { type: "boolean" } }, type: "object", properties: { optional: { type: ["object", "null"], properties: { token: { type: "string", "x-workerDock-secretReference": true } } }, choice: { oneOf: [{ properties: { kind: { const: "a" }, enabled: { $ref: "#/$defs/flag" } }, required: ["kind", "enabled"] }, { properties: { kind: { const: "b" }, count: { type: "integer" } }, required: ["kind", "count"] }] } }, required: ["choice"] };
   expect(createSchemaDefault(schema, schema)).toEqual({ choice: { kind: "a", enabled: false } });

@@ -1,7 +1,7 @@
 import { Box, Button, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { Fragment } from "react";
 import { SecretReferenceField } from "./SecretReferenceField";
-import { createSchemaDefault } from "./schemaDefaults";
+import { createSchemaDefault, isSecretReferenceSchema } from "./schemaDefaults";
 
 export interface TemplateDescriptorDto {
   id: string; version: string; displayName: string; description: string;
@@ -53,7 +53,7 @@ function Node({ schema, value, path, onChange, errors, descriptor }: { schema: a
         <Node schema={schema.additionalProperties} value={entry} path={path} onChange={(next) => onChange({ ...object, [key]: next })} errors={errors} descriptor={descriptor} />
         <Button onClick={() => { const next = { ...object }; delete next[key]; onChange(next); }}>Remove</Button>
       </Stack>)}
-      {!schema.properties && schema.additionalProperties && <Button onClick={() => onChange({ ...object, [`value${Object.keys(object).length + 1}`]: createSchemaDefault(schema.additionalProperties, descriptor.configurationSchema) ?? "" })}>Add entry</Button>}
+      {!schema.properties && schema.additionalProperties && <Button disabled={isSecretReferenceSchema(schema.additionalProperties, descriptor.configurationSchema)} onClick={() => onChange({ ...object, [`value${Object.keys(object).length + 1}`]: createSchemaDefault(schema.additionalProperties, descriptor.configurationSchema) ?? "" })}>Add entry</Button>}
     </Stack>;
   }
   if (schema.type === "array" || Array.isArray(value)) {
@@ -64,7 +64,7 @@ function Node({ schema, value, path, onChange, errors, descriptor }: { schema: a
         <Node schema={schema.items ?? { type: "string" }} value={item} path={`${path}[${index}]`} onChange={(next) => onChange(items.map((entry, i) => i === index ? next : entry))} errors={errors} descriptor={descriptor} />
         <Button onClick={() => onChange(items.filter((_, i) => i !== index))}>Remove</Button>
       </Stack>)}
-      <Button onClick={() => onChange([...items, createSchemaDefault(schema.items ?? { type: "string" }, descriptor.configurationSchema) ?? ""])}>Add item</Button>
+      <Button disabled={isSecretReferenceSchema(schema.items ?? { type: "string" }, descriptor.configurationSchema)} onClick={() => onChange([...items, createSchemaDefault(schema.items ?? { type: "string" }, descriptor.configurationSchema) ?? ""])}>Add item</Button>
       {path !== "configuration" && errors[path] && <Typography color="error" role="alert">{errors[path]}</Typography>}
     </Stack>;
   }
