@@ -49,6 +49,7 @@ public sealed class SqlTemplateAuthoringTests
         var rowIssues = service.Validate(new(descriptor, primitiveRow, null, null, "Manual"));
         Assert.NotEmpty(rootIssues);
         Assert.Contains(rowIssues, issue => issue.Path == "configuration.parameters[0]");
+        Assert.Contains(rowIssues, issue => issue.Code == "SqlCommandKindInvalid" && issue.Path == "configuration.commandKind");
     }
 
     [Fact]

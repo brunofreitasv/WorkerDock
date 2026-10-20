@@ -17,7 +17,9 @@ public sealed class SqlConfigurationValidator(string version) : ITemplateAuthori
         if (context.Configuration.ValueKind != JsonValueKind.Object)
             return [new("configuration", "SqlConfigurationInvalid")];
 
-        if (context.Configuration.TryGetProperty("commandKind", out var kind) && kind.ValueKind == JsonValueKind.String && kind.GetString() == "Procedure")
+        if (!context.Configuration.TryGetProperty("commandKind", out var kind) || kind.ValueKind != JsonValueKind.String || kind.GetString() is not ("Query" or "Procedure"))
+            issues.Add(new("configuration.commandKind", "SqlCommandKindInvalid"));
+        else if (kind.GetString() == "Procedure")
         {
             if (context.Configuration.TryGetProperty("commandText", out var text) && text.ValueKind == JsonValueKind.String &&
                 (text.GetString()!.Length > 257 || !Regex.IsMatch(text.GetString()!, @"^(\[[A-Za-z_][A-Za-z0-9_]*\]|[A-Za-z_][A-Za-z0-9_]*)(\.(\[[A-Za-z_][A-Za-z0-9_]*\]|[A-Za-z_][A-Za-z0-9_]*))?$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))))

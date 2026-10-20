@@ -30,3 +30,4 @@
 - Added regressions for array roots, primitive parameter rows, ReferenceDate-to-DateTime2, and an overlong procedure identifier.
 - RED: the three new focused regressions failed before the fixes for malformed JSON, reference-date compatibility, and length.
 - GREEN: non-fixture SQL authoring/catalog/template regression command passed (49 tests). The broader filter had six SQL target fixture tests fail because `WORKERDOCK_TEST_SQL` is unset; all remaining 54 passed.
+- Follow-up review: malformed/missing/non-enum `commandKind` now returns `SqlCommandKindInvalid` at `configuration.commandKind`; focused authoring tests passed (9 tests).
