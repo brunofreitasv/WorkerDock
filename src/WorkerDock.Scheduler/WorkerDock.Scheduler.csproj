@@ -4,5 +4,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" VersionOverride="10.0.13" />
     <ProjectReference Include="../WorkerDock.Quartz/WorkerDock.Quartz.csproj" />
+    <ProjectReference Include="../WorkerDock.Templates.Http/WorkerDock.Templates.Http.csproj" />
+    <ProjectReference Include="../WorkerDock.Templates.SqlServer/WorkerDock.Templates.SqlServer.csproj" />
   </ItemGroup>
 </Project>

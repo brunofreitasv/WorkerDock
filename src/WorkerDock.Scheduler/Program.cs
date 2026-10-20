@@ -23,6 +23,11 @@ using WorkerDock.Quartz.Alerts;
 using WorkerDock.Application.Retention;
 using WorkerDock.Infrastructure.Retention;
 using WorkerDock.Quartz.Retention;
+using WorkerDock.Application.Templates;
+using WorkerDock.Contracts.Templates;
+using WorkerDock.Infrastructure.Templates;
+using WorkerDock.Templates.Http;
+using WorkerDock.Templates.SqlServer;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddWindowsService();
@@ -42,6 +47,8 @@ internal sealed class SchedulerService(IConfiguration configuration) : Backgroun
         var handle = await topology.CreateExecutionPublisherAsync(node, stoppingToken);
         var store = new SqlProjectionStore(new(connection, instanceId));
         var options = new TenantDatabaseOptions(connection, instanceId);
+        var trustedTemplates = new TemplateDescriptor[] { new SqlTemplate().Descriptor, HttpTemplateDescriptors.Get("1.0.0"), HttpTemplateDescriptors.Get("1.1.0") };
+        ITemplateCatalog templateCatalog = new SqlTemplateCatalog(options, trustedTemplates);
         var alertDeliveries = new SqlAlertDeliveryStore(options);
         var alertVault = SecretVaultRegistration.CreateDevelopment();
         var alertSinks = new IAlertSink[] { new WebhookAlertSink(new SqlIntegrationSettings(options)) };
@@ -50,7 +57,7 @@ internal sealed class SchedulerService(IConfiguration configuration) : Backgroun
         var retention = new SqlRetentionService(options, configuration["Retention:ArchiveRoot"]);
         var evaluator = new QuartzScheduleEvaluator();
         var scheduleStore = new SqlScheduleCommands(options, evaluator, TimeProvider.System);
-        var occurrenceWriter = new OccurrenceWriter(options, evaluator);
+        var occurrenceWriter = new OccurrenceWriter(options, evaluator, templateCatalog);
         DispatchReconciler? reconciler = null;
         var attempts = new SqlAttemptStore(options);
         var control = await topology.CreateScheduleAsync(node, new MaintenanceFactory(() => reconciler, attempts, occurrenceWriter, TimeProvider.System,

@@ -137,10 +137,10 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
     public ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ActorContext actor, CancellationToken ct) =>
         RunNowAsync(jobId, requestKey, new ManualRunOptions(), actor, ct);
 
-    public async ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ManualRunOptions options, ActorContext actor, CancellationToken ct)
+    public async ValueTask<CommandReceipt> RunNowAsync(Guid jobId, string requestKey, ManualRunOptions runOptions, ActorContext actor, CancellationToken ct)
     {
         JobCommandValidation.ValidateRequestKey(jobId, requestKey, actor);
-        if (options is null) throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
+        if (runOptions is null) throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
         try
         {
             return await new BusinessTransaction(options).RunAsync<CommandReceipt>(async (connection, transaction, token) =>
@@ -150,7 +150,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 var now = (DateTime)(await time.ExecuteScalarAsync(token))!;
                 var scopeHash = Hash(actor.AuthenticationMode + "|" + actor.Subject);
                 var keyHash = Hash(requestKey);
-                var requestHash = options.ReferenceDateOverride is null ? Hash("RunNow|" + jobId.ToString("N")) : Hash("RunNow|" + jobId.ToString("N") + "|" + options.ReferenceDateOverride.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+                var requestHash = runOptions.ReferenceDateOverride is null ? Hash("RunNow|" + jobId.ToString("N")) : Hash("RunNow|" + jobId.ToString("N") + "|" + runOptions.ReferenceDateOverride.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
                 await using var dedup = Command(connection, transaction,
                     "SELECT ActorMode,ActorSubject,RequestKey,RequestHash,ExecutionId,CommandId,ResponseState,ExpiresAtUtc FROM [workerdock].ManualRequestDedup WITH (UPDLOCK,HOLDLOCK) WHERE JobId=@job AND ActorScopeHash=@scope AND RequestKeyHash=@key");
                 Add(dedup, "@job", SqlDbType.UniqueIdentifier, jobId);
@@ -217,9 +217,9 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 var dynamicPlan = dynamicJson is null ? WorkerDock.Contracts.Values.DynamicValueJson.EmptyPlan : WorkerDock.Contracts.Values.DynamicValueJson.Read(dynamicJson.RootElement);
                 var descriptor = templateCatalog is null ? null : await templateCatalog.GetAsync(pinned.GetString(0), pinned.GetString(1), token);
                 var capable = descriptor is not null && ContainsDynamicAnnotation(descriptor.ConfigurationSchema);
-                if (options.ReferenceDateOverride is not null && (!capable || pinned.GetString(1) == "1.0.0")) throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
+                if (runOptions.ReferenceDateOverride is not null && (!capable || pinned.GetString(1) == "1.0.0")) throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
                 if (dynamicPlan.Bindings.Any(binding => binding.Source == WorkerDock.Contracts.Values.DynamicValueSource.ScheduledTimestamp)) throw new WorkerDockException("ValidationFailed", "configuration.dynamicValues");
-                var valueContext = capable ? WorkerDock.Infrastructure.Values.ExecutionValueContextFactory.Manual(dynamicPlan, new DateTimeOffset(DateTime.SpecifyKind(now, DateTimeKind.Utc)), options.ReferenceDateOverride) : null;
+                var valueContext = capable ? WorkerDock.Infrastructure.Values.ExecutionValueContextFactory.Manual(dynamicPlan, new DateTimeOffset(DateTime.SpecifyKind(now, DateTimeKind.Utc)), runOptions.ReferenceDateOverride) : null;
                 if (!WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(pinned.GetString(0), pinned.GetString(1), json.RootElement, dynamicJson?.RootElement))
                     throw new WorkerDockException("ValidationFailed", "configuration");
                 await TemplateJobValidation.ValidateAsync(templateCatalog,pinned.GetString(0),pinned.GetString(1),json.RootElement,token,authoring, dynamicJson is null ? null : WorkerDock.Contracts.Values.DynamicValueJson.Read(dynamicJson.RootElement), "Manual");

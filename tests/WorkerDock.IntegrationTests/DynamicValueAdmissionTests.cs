@@ -35,7 +35,7 @@ public sealed class DynamicValueAdmissionTests
         var commands = new InMemoryJobCommands(clock, [job], templateCatalog: catalog);
         var first = await commands.RunNowAsync(job.JobId, "same-key", new(new DateOnly(2026, 10, 19)), Actor, default);
         Assert.Equal(new DateOnly(2026, 10, 19), commands.GetAcceptedValueContext(first.TargetId)!.ReferenceDateOverride);
-        clock.Advance(TimeSpan.FromDays(1));
+        clock.Advance(TimeSpan.FromHours(23) + TimeSpan.FromMinutes(59));
         var repeated = await commands.RunNowAsync(job.JobId, "same-key", new(new DateOnly(2026, 10, 19)), Actor, default);
         Assert.Equal(first.TargetId, repeated.TargetId);
         var conflict = await Assert.ThrowsAsync<WorkerDockException>(async () => await commands.RunNowAsync(job.JobId, "same-key", new(new DateOnly(2026, 10, 20)), Actor, default));
