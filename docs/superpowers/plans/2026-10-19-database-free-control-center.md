@@ -22,7 +22,7 @@
 - Existing `/api/tenants` routes, eight-byte ETags, Entra/role authorization, CSRF, health URL validation, and vault/outbound policy remain.
 - Acknowledged registration mutations and their audit events survive restart; a failed/uncertain write is never reported as success.
 - Center install/upgrade/restore never migrates a tenant database; tenant deployment and SQL migration behavior remain unchanged.
-- Legacy `database/central` scripts remain available for old installs and are not part of fresh center setup.
+- `database/central` is archived schema source for old-release recovery. It is not part of fresh center setup and the importer does not execute it.
 
 ## Review Focus
 
@@ -141,7 +141,7 @@
 
 - [x] **Step 1: Write failing import tests.** Synthetic unit cases preserve IDs/timestamps/safe audit counts/latest health observations, assign new ETags, and reject identity mismatch, duplicate IDs, unsafe URL/secret-bearing URL, invalid credential reference, and nonempty target without partial output. SQL-gated integration creates a disposable legacy center DB, imports it, reopens the file registry, and compares safe records without printing secret references.
 - [x] **Step 2: Run red.** `dotnet test tests/WorkerDock.UnitTests --filter FullyQualifiedName~CentralJournalBootstrapTests`; expect missing import types.
-- [x] **Step 3: Implement importer and docs.** Read only legacy center tables; validate every row through current registration validation before writing an isolated temporary journal, then atomically move the verified journal into an empty target. Keep old SQL migrations for restore/import only. Document offline backup/import, side-by-side cutover, rollback limits, fresh center setup with no SQL, file ACLs, backup/restore, local memory mode, and tenant-only SQL setup. Mark older central SQL statements as superseded.
+- [x] **Step 3: Implement importer and docs.** Read only legacy center tables; validate every row through current registration validation before writing an isolated temporary journal, then atomically move the verified journal into an empty target. Retain old SQL scripts only as archived old-release recovery source; the importer does not execute them. Document offline backup/import, side-by-side cutover, rollback limits, fresh center setup with no SQL, file ACLs, backup/restore, local memory mode, and tenant-only SQL setup. Mark older central SQL statements as superseded.
 - [x] **Step 4: Run green and review.** Run the focused unit test and `dotnet test tests/WorkerDock.IntegrationTests --filter FullyQualifiedName~CentralLegacyImportSqlTests` when `WORKERDOCK_TEST_SQL` is available; otherwise record it as not run. Run `dotnet build WorkerDock.slnx`, the center integration tests from Task 3, and a documentation search for active instructions that still require a central database. Expect all available checks to pass and only explicitly labeled legacy references to remain.
 - [x] **Step 5: Commit.** Stage Task 5 files and commit `feat: import legacy centers and document database-free setup`.
 

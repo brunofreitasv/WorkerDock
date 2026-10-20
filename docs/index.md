@@ -14,7 +14,7 @@ the [job flow](scheduling.md#job-flow), and the
 
 ## How-to guides: complete a specific task
 
-- [Set up SQL Server](how-to/setup-sql-server.md): create runtime databases and apply migrations; provision disposable test databases separately.
+- [Set up SQL Server](how-to/setup-sql-server.md): create tenant runtime databases and apply migrations; provision disposable test databases separately. The Control Center has no SQL setup.
 - [Deploy to production](how-to/deploy-production.md): build packages and install the tenant, scheduler, workers, and Control Center on Windows/IIS.
 - [Configure tenants](how-to/configure-tenants.md): find tenant settings, service configuration, secret references, and Control Center registration.
 - [Upgrade or restore](upgrades.md).
@@ -24,7 +24,7 @@ the [job flow](scheduling.md#job-flow), and the
 ## Reference: look up exact behavior and settings
 
 - [Configuration keys and locations](reference/configuration.md).
-- [Database objects and script ownership](reference/database-objects.md).
+- [Database objects and script ownership](reference/database-objects.md): current tenant migrations, archived legacy-center scripts, and test fixtures.
 - [Database migration and SQL test details](database.md).
 - [Authentication and role policy](authentication.md).
 - [SQL Server template](sql-template.md) and [HTTP template](http-template.md).

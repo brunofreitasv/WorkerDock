@@ -1,6 +1,6 @@
 # WorkerDock Foundation Implementation Plan
 
-> **Historical architecture note:** This plan predates the approved [database-free Control Center design](../specs/2026-10-19-database-free-control-center-design.md). Any central SQL database, schema, or migration statements are superseded; tenant SQL and Quartz requirements remain.
+> **Historical architecture note:** This plan is archived planning history, not an operational procedure. It predates the approved [database-free Control Center design](../specs/2026-10-19-database-free-control-center-design.md). Any central SQL database, schema, or migration statements are superseded; tenant SQL and Quartz requirements remain. Do not apply `database/central` for current setup or import.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

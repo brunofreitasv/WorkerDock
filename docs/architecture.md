@@ -33,8 +33,8 @@ identity.
 - **Scheduler Windows service:** owns schedule/control Quartz work, projects durable WorkerDock intents into Quartz, and runs bounded operational maintenance.
 - **Worker Windows service:** joins the execution Quartz cluster, supervises attempts, and launches isolated child processes. A job or concurrency edit does not install a service.
 - **Execution child:** performs one attempt or diagnostic run, resolves configured secrets, and invokes a built-in or installed trusted template.
-- **Control Center:** maintains its own file-backed registry and probes an allowlisted tenant health endpoint using a minimal health credential. Fresh setup requires no central SQL schema, connection, or migrator.
-- **Database migrator:** applies versioned tenant SQL scripts using a migration identity. Runtime startup does not create schema. Historical central SQL migrations are retained for legacy restore/import only.
+- **Control Center:** maintains its own file-backed registry and probes an allowlisted tenant health endpoint using a minimal health credential. Fresh setup requires no central SQL schema, connection, identity, or migrator.
+- **Database migrator:** applies versioned tenant SQL scripts using a migration identity. Runtime startup does not create schema. `database/central` is archived pre-file-center schema source, never a current migration input; the legacy importer reads an already-existing old database directly.
 
 Each tenant database contains WorkerDock-owned objects in `[workerdock]` and two Quartz table sets: `WDS_QRTZ_` for schedule/control and `WDE_QRTZ_` for execution. Quartz APIs own Quartz persistence lifecycle. WorkerDock application tables contain job configuration, execution history, audit, projection intents, and policies. The web app writes WorkerDock commands and audit records; scheduler and worker services interact with Quartz stores.
 

@@ -1,6 +1,6 @@
 # Database objects
 
-WorkerDock's current runtime SQL schema is the tenant schema in `database/tenant`. The historical central schema in `database/central` is retained only for legacy restore/import. Tenant migrations have `.up.sql` and `.down.sql` files listed in a checksummed manifest. Apply current tenant migrations with `WorkerDock.DatabaseMigrator`; do not execute an individual runtime script by hand or edit a migration after it has been applied. New schema changes use a new migration pair.
+WorkerDock's only current runtime SQL schema is the tenant schema in `database/tenant`. Tenant migrations have `.up.sql` and `.down.sql` files listed in a checksummed manifest. Apply current tenant migrations with `WorkerDock.DatabaseMigrator`; do not execute an individual runtime script by hand or edit a migration after it has been applied. New schema changes use a new migration pair. `database/central` is an archived pre-file-center schema reference, not a supported migration source.
 
 All tenant-owned objects are under `[workerdock]`. Tenant application connections use the restricted runtime role created by tenant migrations. Current Control Center state is held in protected files, not SQL objects, and it has no SQL runtime principal. `deploy/permissions.sql` only adds an existing tenant database user or group to `WorkerDockRuntime`; it does not create roles, schemas, tables, procedures, or grants.
 
@@ -25,9 +25,9 @@ All tenant-owned objects are under `[workerdock]`. Tenant application connection
 
 Quartz schema is included in tenant migration `0002_quartz`; the source SQL Server script is preserved with its license and notices in `database/upstream/quartz-4.5.1/`. WorkerDock changes its table prefixes and schema to `[workerdock]`, and creates separate stores for scheduling and execution publishing. Do not install the upstream script independently. The paired down migration refuses to drop populated stores.
 
-## Legacy central schema (restore/import only)
+## Archived pre-file-center schema reference
 
-`database/central/0001_registry.up.sql` is historical and is not applied by fresh Control Center setup or center startup. It created `SchemaHistory`, `CentralSettings`, `TenantRegistrations`, `TenantHealthObservations`, append-only `AuditEvents`, supporting indexes, and `WorkerDockCentralRuntime` for older SQL-backed centers. Keep the scripts for legacy restore/import only; see [Control Center](../control-center.md).
+`database/central/0001_registry.up.sql` describes the schema used by older SQL-backed centers. It created `SchemaHistory`, `CentralSettings`, `TenantRegistrations`, `TenantHealthObservations`, append-only `AuditEvents`, supporting indexes, and `WorkerDockCentralRuntime`. Current Control Center setup, startup, upgrades, and `WorkerDock.CentralImport` never execute these scripts. Do not apply them to a new database. Use them only when recovering an old release before its one-time import; see [Control Center](../control-center.md).
 
 ## Test-only SQL objects
 

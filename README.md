@@ -16,9 +16,9 @@ The [documentation index](docs/index.md) groups tutorials, how-to guides, refere
 
 For a quick visual tour, see the [tenant and process map](docs/architecture.md#deployment-map), [job flow](docs/scheduling.md#job-flow), and [runtime versus test database map](docs/how-to/setup-sql-server.md#runtime-and-test-databases).
 
-## Database scripts
+## SQL assets
 
-Tenant runtime migrations and their rollbacks are in [`database/tenant`](database/tenant) and are applied from a checksummed manifest. A fresh optional Control Center stores its state in protected files and needs no central SQL database or migration; historical scripts under [`database/central`](database/central) are retained for legacy restore/import only. SQL fixtures under [`tests/sql`](tests/sql) and [`tests/WorkerDock.IntegrationTests/Sql`](tests/WorkerDock.IntegrationTests/Sql) are for disposable integration-test databases only; they are not part of production setup. See [database object reference](docs/reference/database-objects.md) and the [SQL setup guide](docs/how-to/setup-sql-server.md) for exact tenant commands and permissions.
+Only [`database/tenant`](database/tenant) is current production SQL. Its checksummed manifest contains the tenant runtime migrations and paired rollbacks; run them with `WorkerDock.DatabaseMigrator` for every tenant database. The Control Center has no production SQL assets: it stores its state in protected files and rejects a central connection string. [`database/central`](database/central) is an archive of the schema used by pre-file-center releases. Do not apply it to a new installation or use it during import; the legacy importer reads an already-existing old database. SQL fixtures under [`tests/sql`](tests/sql) and [`tests/WorkerDock.IntegrationTests/Sql`](tests/WorkerDock.IntegrationTests/Sql) are disposable integration-test assets only. See [database object reference](docs/reference/database-objects.md) and the [SQL setup guide](docs/how-to/setup-sql-server.md) for supported commands and permissions.
 
 ## Project status
 

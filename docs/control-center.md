@@ -4,7 +4,7 @@ The Control Center is an optional ASP.NET Core application with its own React en
 
 ## Current setup
 
-A fresh Control Center needs no central SQL Server database, SQL schema, SQL connection string, or database migrator. Configure a stable, nonempty `Central:InstanceId` and an absolute `Central:Storage:DataDirectory` outside the release and web directories. For example, use a persistent path such as `C:\ProgramData\WorkerDock\ControlCenter\state`; keep it across releases. The center writes its registry journal and advisory health snapshot there. Give Modify access only to the center IIS application-pool identity and administrators, and prevent the web server from serving the directory. Use one active center process per directory.
+A fresh Control Center needs no SQL Server database, SQL schema, SQL identity, SQL connection string, or database migrator. A nonempty `Central:ConnectionString` is rejected at startup. Configure a stable, nonempty `Central:InstanceId` and an absolute `Central:Storage:DataDirectory` outside the release and web directories. For example, use a persistent path such as `C:\ProgramData\WorkerDock\ControlCenter\state`; keep it across releases. The center writes its registry journal and advisory health snapshot there. Give Modify access only to the center IIS application-pool identity and administrators, and prevent the web server from serving the directory. Use one active center process per directory.
 
 The production file adapter is the default. In disposable Development runs, the in-memory adapter can be selected explicitly:
 
@@ -36,8 +36,8 @@ dotnet run --project src/WorkerDock.CentralImport -- import --data-directory '<a
 
 The target directory must be empty and protected. The importer reads legacy center records and writes a journal for the same instance. It preserves registration identifiers, nonsecret fields, timestamps, safe audit history, and latest health observations; journal ETags are new, so clients must refetch them. Review the import receipt without exposing credential references or secret values. Deploy the file-backed center side by side, verify tenant links and health, then move the HTTPS binding. Keep the old database and package for a deliberate rollback; file-side changes after cutover do not flow back to SQL.
 
-## Legacy database objects and rollback
+## Archived legacy SQL schema
 
-The historical central SQL migrations under [`database/central`](../database/central) remain for legacy restore and import only. They are not part of fresh Control Center setup and must not be run for a new center. See [database objects](reference/database-objects.md) for the legacy object inventory. Tenant SQL migrations and the tenant's two Quartz stores remain required and unchanged.
+[`database/central`](../database/central) is an archive of the schema used by older SQL-backed centers. It is not a current migration chain, is never run by a fresh installation, and is not used by the importer. The importer reads a pre-existing legacy database and writes the protected file journal. Do not create a database from these scripts for a new Control Center. Retain them only if you must recover an old release before its one-time import. See [database objects](reference/database-objects.md) for the legacy object inventory. Tenant SQL migrations and the tenant's two Quartz stores remain required and unchanged.
 
 There is no dedicated central Windows service. Host the Control Center web application separately (for example, as its own IIS application); tenant schedulers and worker services continue to run independently if the Control Center is unavailable.

@@ -1,6 +1,6 @@
 # WorkerDock Implementation Plan
 
-> **Historical architecture note:** This plan predates the approved [database-free Control Center design](../specs/2026-10-19-database-free-control-center-design.md). Its central database architecture and related migration tasks are superseded; tenant SQL and Quartz requirements remain.
+> **Historical architecture note:** This plan is archived planning history, not an operational procedure. It predates the approved [database-free Control Center design](../specs/2026-10-19-database-free-control-center-design.md). Its central database architecture and related migration tasks are superseded; tenant SQL and Quartz requirements remain. Do not apply `database/central` for current setup or import.
 
 All WorkerDock-owned tables, triggers, keys, indexes and explicit SQL references belong to `[workerdock]` in each database. Each independent tenant database and the separate central registry database owns its own schema; this is not a shared multitenant database or browser-supplied tenant selector. Quartz uses `[workerdock].WDS_QRTZ_` and `[workerdock].WDE_QRTZ_`. System `sys.*` objects and database principals retain their SQL Server names. New objects require paired migrations, checksums and explicit least-privilege grants; runtime startup never creates schema.
 

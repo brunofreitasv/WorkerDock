@@ -15,7 +15,7 @@ infrastructure before using this procedure for a live workload.
 
 ## Requirements and identities
 
-Use Windows Server with IIS and the WebAdministration PowerShell module, PowerShell 7, the .NET 10 Hosting Bundle and a trusted HTTPS certificate in `LocalMachine\My`. Tenant databases require SQL Server 2022 or later with compatibility level 160. Create a dedicated database for every tenant. A fresh Control Center install has no SQL Server, central database, schema, SQL principal or migrator requirement. Run installers from an elevated PowerShell 7 session.
+Use Windows Server with IIS and the WebAdministration PowerShell module, PowerShell 7, the .NET 10 Hosting Bundle and a trusted HTTPS certificate in `LocalMachine\My`. Tenant databases require SQL Server 2022 or later with compatibility level 160. Create a dedicated database for every tenant. A fresh Control Center install has no SQL Server, central database, schema, SQL principal, connection string, or migrator requirement. Run installers from an elevated PowerShell 7 session.
 
 Use a deployment-only SQL identity for migrations and database backup operations. Runtime IIS and service identities use integrated authentication when possible and must not have DDL rights. Keep configuration, database credentials and Data Protection keys outside release packages. Install scripts restrict config and key directories to the configured identities and administrators. Preserve tenant and central instance GUIDs across restarts and upgrades.
 
@@ -87,7 +87,7 @@ pwsh -File .\deploy\Install-Center.ps1 `
   -CertificateThumbprint '<CERTIFICATE_THUMBPRINT>'
 ```
 
-The center needs no central SQL connection. The center health vault must be implemented for production and bound to a center-only identity; the application deliberately fails production startup without an `ISecretVault` adapter. Resolve only approved tenant health credential references. Do not grant that identity access to tenant databases or credentials. Details for tenant registration URL and credential reference are in [configure tenants](configure-tenants.md) and [Control Center](../control-center.md).
+The center needs no central SQL connection; a nonempty `Central:ConnectionString` is rejected. The center health vault must be implemented for production and bound to a center-only identity; the application deliberately fails production startup without an `ISecretVault` adapter. Resolve only approved tenant health credential references. Do not grant that identity access to tenant databases or credentials. Details for tenant registration URL and credential reference are in [configure tenants](configure-tenants.md) and [Control Center](../control-center.md).
 
 ## Start and check
 
