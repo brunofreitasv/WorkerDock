@@ -6,9 +6,35 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Hosting;
 using WorkerDock.Application.Templates;
 using WorkerDock.Infrastructure.Templates;
+using WorkerDock.Templates.SqlServer;
 namespace WorkerDock.IntegrationTests;
 public sealed partial class TemplateCatalogTests
 {
+    [Fact]
+    public async Task Template_validation_uses_sql_semantic_authoring_rules()
+    {
+        var descriptor = new SqlTemplate("1.1.0").Descriptor;
+        var catalog = new TemplateCatalog([descriptor]);
+        await catalog.RegisterAsync([descriptor], default);
+        using var issuer = new LocalOidcIssuer("Manager");
+        await using var baseHost = new AccessHost(issuer, "Manager");
+        await using var host = baseHost.WithWebHostBuilder(builder => builder.ConfigureServices(services => services.AddSingleton<ITemplateCatalog>(catalog)));
+        using var client = host.CreateClient(new() { BaseAddress = new("https://localhost"), AllowAutoRedirect = false });
+        await issuer.SignIn(client);
+        var token = await client.GetFromJsonAsync<JsonElement>("/api/antiforgery");
+        client.DefaultRequestHeaders.Add("X-WorkerDock-CSRF", token.GetProperty("requestToken").GetString());
+        client.DefaultRequestHeaders.Add("Origin", "https://localhost");
+        var configuration = new { profileId = Guid.NewGuid(), catalog = "jobs", commandKind = "Procedure", commandText = "EXEC dbo.Job @Dt_Ref = @Dt_Ref", parameters = Array.Empty<object>(), commandTimeoutSeconds = (int?)null, useTransaction = false };
+
+        using var procedure = await client.PostAsJsonAsync("/api/template-validation", new { templateId = descriptor.Id, templateVersion = descriptor.Version, configuration });
+        var procedureIssues = await procedure.Content.ReadAsStringAsync();
+        Assert.Contains("SqlProcedureNameRequired", procedureIssues);
+        Assert.DoesNotContain("dbo.Job", procedureIssues);
+
+        using var timeout = await client.PostAsJsonAsync("/api/template-validation", new { templateId = descriptor.Id, templateVersion = descriptor.Version, configuration = new { configuration.profileId, configuration.catalog, commandKind = "Query", commandText = "SELECT 1", parameters = Array.Empty<object>(), commandTimeoutSeconds = 0, useTransaction = false }, jobTimeout = "00:00:30" });
+        Assert.Contains("CommandTimeoutInvalid", await timeout.Content.ReadAsStringAsync());
+    }
+
     [Fact]
     public async Task Catalog_is_readable_by_viewers_but_validation_requires_manage_and_never_echoes_configuration()
     {

@@ -32,6 +32,7 @@ using WorkerDock.Application.Alerts;
 using WorkerDock.Infrastructure.Alerts;
 using WorkerDock.Application.Retention;
 using WorkerDock.Infrastructure.Retention;
+using WorkerDock.Infrastructure.Values;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWorkerDockAccess();
@@ -46,6 +47,8 @@ var trustedTemplates = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
     HttpTemplateDescriptors.Get("1.1.0")
 };
 builder.Services.TryAddSingleton<ITemplateAuthoringService>(_ => BuiltInAuthoringValidators.Create());
+builder.Services.TryAddSingleton<DynamicValueResolver>();
+builder.Services.TryAddSingleton<ExecutionValuePreparation>();
 builder.Services.TryAddSingleton<IJobCommands>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
@@ -205,6 +208,7 @@ app.MapJobCommands();
 app.MapExecutionControls();
 app.MapCapacity();
 app.MapTemplateCatalog();
+app.MapDynamicValuePreview();
 app.MapConnectionProfiles();
 app.MapIntegrationSettings();
 app.MapSchedules();
