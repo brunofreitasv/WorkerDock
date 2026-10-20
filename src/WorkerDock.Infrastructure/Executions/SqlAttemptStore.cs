@@ -7,14 +7,17 @@ using WorkerDock.Application.Dispatch;
 using WorkerDock.Application.Executions;
 using WorkerDock.Application.Settings;
 using WorkerDock.Contracts.Execution;
+using WorkerDock.Contracts.Values;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Persistence;
 using WorkerDock.Infrastructure.Settings;
+using WorkerDock.Infrastructure.Values;
 
 namespace WorkerDock.Infrastructure.Executions;
 
-public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptStore, IAttemptSignals
+public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValuePreparation? values = null) : IAttemptStore, IAttemptSignals
 {
+    private readonly ExecutionValuePreparation preparation = values ?? new ExecutionValuePreparation(new DynamicValueResolver());
     public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) =>
         TransactAsync(intent.ExecutionId, workerBootId, (data, now) => data.Begin(intent, workerBootId, now), ct);
     public async ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct)
@@ -27,10 +30,19 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
                 var data = await LoadAsync(connection, transaction, lease.ExecutionId, lease.WorkerBootId, token);
                 var previous = data.Lease; var previousState = data.AttemptState;
                 var now = await NowAsync(connection, transaction, token);
-                var descriptor = data.GetDescriptor(lease, now);
-                await SaveAsync(connection, transaction, data, previous, previousState, previousState == "Running" && previous!.ExpiresUtc <= now, token);
+                data.GetDescriptor(lease, now);
+                data.Prepare(preparation);
                 var snapshot = await SqlIntegrationSettings.ReadSnapshotAsync(connection, transaction, token);
-                return descriptor with { IntegrationConfiguration = IntegrationConfigurationJson.Serialize(snapshot) };
+                data.Descriptor = data.Descriptor with { IntegrationConfiguration = IntegrationConfigurationJson.Serialize(snapshot) };
+                var descriptor = data.GetDescriptor(lease, await NowAsync(connection, transaction, token));
+                if (descriptor.ValueSnapshot is not null && !ExecutionPayloadLimits.FitsPreparedDescriptor(descriptor))
+                {
+                    data.Descriptor = data.Descriptor with { ValueSnapshot = null, ValueResolutionError = "DynamicSnapshotTooLarge",
+                        Configuration = data.OriginalConfiguration };
+                    descriptor = data.GetDescriptor(lease, await NowAsync(connection, transaction, token));
+                }
+                await SaveAsync(connection, transaction, data, previous, previousState, previousState == "Running" && previous!.ExpiresUtc <= now, token);
+                return descriptor;
             }, ct);
         }
         catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
@@ -122,7 +134,8 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
                     AND w.LiveLimit>(SELECT COUNT(*) FROM [workerdock].Attempts active WHERE active.WorkerBootId=w.BootId AND active.State=N'Running')
                     AND w.LastHeartbeatUtc>DATEADD(second,-60,SYSUTCDATETIME())
                     AND wc.TemplateId=r.TemplateId AND wc.TemplateVersion=r.TemplateVersion)
-                    AND EXISTS(SELECT 1 FROM [workerdock].JobPermits permit WHERE permit.ExecutionId=e.ExecutionId) THEN 1 ELSE 0 END,COALESCE(p.EffectiveRevision,-1),e.TriggerKind,e.ValueContextJson
+                    AND EXISTS(SELECT 1 FROM [workerdock].JobPermits permit WHERE permit.ExecutionId=e.ExecutionId) THEN 1 ELSE 0 END,COALESCE(p.EffectiveRevision,-1),e.TriggerKind,e.ValueContextJson,
+                e.FirstStartedAtUtc,e.ValueSnapshotJson,e.ValueResolutionError,r.DynamicValuesJson
             FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
                 JOIN [workerdock].Jobs j ON j.JobId=e.JobId
                 LEFT JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
@@ -136,10 +149,39 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
         if (!await reader.ReadAsync(ct)) throw new WorkerDockException("ExecutionNotFound");
         if (reader.IsDBNull(17)) throw new WorkerDockException("DispatchIntegrityError");
         var policy = JsonSerializer.Deserialize<ExecutionPolicy>(reader.GetString(12)) ?? throw new WorkerDockException("PinnedDescriptorUnavailable");
+        ExecutionValueContext? context = null;
+        var contextInvalid = false;
+        if (!reader.IsDBNull(23))
+        {
+            try { context = JsonSerializer.Deserialize<ExecutionValueContext>(reader.GetString(23)); }
+            catch (JsonException) { contextInvalid = true; }
+            if (context is null) contextInvalid = true;
+        }
+        if (context is not null) context = context with { FirstStartedAtUtc = reader.IsDBNull(24) ? null : Utc(reader.GetDateTime(24)) };
+        DynamicValueSnapshot? valueSnapshot = null;
+        var snapshotInvalid = false;
+        if (!reader.IsDBNull(25))
+        {
+            try { valueSnapshot = JsonSerializer.Deserialize<DynamicValueSnapshot>(reader.GetString(25)); }
+            catch (JsonException) { snapshotInvalid = true; }
+            if (valueSnapshot is null) snapshotInvalid = true;
+        }
+        DynamicValuePlan? dynamicPlan = null;
+        string? planError = null;
+        if (!reader.IsDBNull(27))
+        {
+            try { using var planJson = JsonDocument.Parse(reader.GetString(27)); dynamicPlan = DynamicValueJson.Read(planJson.RootElement); }
+            catch (Exception error) when (error is JsonException or ValueResolutionException) { planError = "DynamicBindingInvalid"; }
+        }
+        var resolutionError = reader.IsDBNull(26) ? null : reader.GetString(26);
+        if (snapshotInvalid || contextInvalid) resolutionError = "DynamicSnapshotInvalid";
+        if (contextInvalid) valueSnapshot = null;
+        if (context is null && dynamicPlan?.Bindings.Count > 0 && resolutionError is null)
+            resolutionError = "DynamicSourceUnavailable";
         var descriptor = new ExecutionDescriptor(id, 1, reader.GetString(9), reader.GetString(10), reader.GetString(2),
             JsonDocument.Parse(reader.GetString(11)).RootElement.Clone(), reader.IsDBNull(6) ? null : reader.GetGuid(6), null,
             JsonSerializer.SerializeToElement(new { sqlProfileDiagnostic=reader.GetString(22)=="Diagnostic" }), null,
-            reader.IsDBNull(23) ? null : JsonSerializer.Deserialize<WorkerDock.Contracts.Values.ExecutionValueContext>(reader.GetString(23)));
+            context, valueSnapshot, resolutionError);
         using var payload = JsonDocument.Parse(reader.GetString(18));
         var ordinal = payload.RootElement.TryGetProperty("attemptOrdinal", out var number) ? number.GetInt32() : 1;
         var capacityRevision = payload.RootElement.TryGetProperty("capacityRevision", out var epoch) ? epoch.GetInt64() : 0;
@@ -150,6 +192,9 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
         var uncertain=reader.GetString(4)=="Unknown";var stop=reader.GetBoolean(7);var force=reader.GetBoolean(8);
         var gateOpen=reader.GetBoolean(13) && !reader.GetBoolean(14) && !reader.GetBoolean(16) && reader.GetInt32(20)==1;
         var capacity=reader.GetInt64(21);var available=!reader.IsDBNull(15) && reader.GetBoolean(15);
+        var storedFirstStart = reader.IsDBNull(24) ? (DateTimeOffset?)null : Utc(reader.GetDateTime(24));
+        var storedSnapshotPresent = !reader.IsDBNull(25);
+        var storedResolutionError = reader.IsDBNull(26) ? null : reader.GetString(26);
         await reader.CloseAsync();
         if(descriptor.ProfileRevisionId is {} profileRevision)
         {
@@ -161,7 +206,11 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
         }
         var data = new AttemptLifecycle
         {
-            EffectiveCapacityRevision=capacity,Descriptor=descriptor,Policy=policy,JobId=jobId,
+            EffectiveCapacityRevision=capacity,Descriptor=descriptor,OriginalConfiguration=descriptor.Configuration.Clone(),
+            DynamicValues=dynamicPlan,DynamicPlanError=planError,
+            StoredFirstStartedAtUtc=storedFirstStart,
+            StoredSnapshot=valueSnapshot,StoredSnapshotPresent=storedSnapshotPresent,StoredResolutionError=storedResolutionError,
+            Policy=policy,JobId=jobId,
             Intent=intent with { PayloadDigest=intent.ComputeDigest() },State=state,Uncertain=uncertain,
             StopRequested=stop,Force=force,GateOpen=gateOpen,DescriptorAvailable=available
         };
@@ -201,6 +250,27 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options) : IAttemptSto
             Add(command, "@previousState", SqlDbType.NVarChar, previousState, 30); Add(command, "@expired", SqlDbType.Bit, expired);
             Add(command, "@code", SqlDbType.NVarChar, data.SafeCode, 100);
             if (await command.ExecuteNonQueryAsync(ct) != 1) throw new WorkerDockException("AttemptOwnershipLost");
+        }
+        var firstStart = data.Descriptor.ValueContext?.FirstStartedAtUtc;
+        var newStart = data.StoredFirstStartedAtUtc is null && firstStart is not null;
+        var newSnapshot = !data.StoredSnapshotPresent && data.Descriptor.ValueSnapshot is not null;
+        var newError = data.StoredResolutionError is null && !data.StoredSnapshotPresent && data.Descriptor.ValueResolutionError is not null;
+        if (newStart || newSnapshot || newError)
+        {
+            await using var values = Command(c, t, """
+                UPDATE [workerdock].Executions
+                SET FirstStartedAtUtc=COALESCE(FirstStartedAtUtc,@first),
+                    ValueSnapshotJson=COALESCE(ValueSnapshotJson,@snapshot),
+                    ValueResolutionError=COALESCE(ValueResolutionError,@error)
+                WHERE ExecutionId=@id AND (@first IS NULL OR FirstStartedAtUtc IS NULL OR FirstStartedAtUtc=@first)
+                    AND (@snapshot IS NULL OR (ValueSnapshotJson IS NULL AND ValueResolutionError IS NULL))
+                    AND (@error IS NULL OR (ValueSnapshotJson IS NULL AND ValueResolutionError IS NULL))
+                """);
+            Add(values, "@id", SqlDbType.UniqueIdentifier, data.Descriptor.ExecutionId);
+            Add(values, "@first", SqlDbType.DateTime2, newStart ? firstStart!.Value.UtcDateTime : null);
+            Add(values, "@snapshot", SqlDbType.NVarChar, newSnapshot ? JsonSerializer.Serialize(data.Descriptor.ValueSnapshot) : null, -1);
+            Add(values, "@error", SqlDbType.NVarChar, newError ? data.Descriptor.ValueResolutionError : null, 80);
+            if (await values.ExecuteNonQueryAsync(ct) != 1) throw new WorkerDockException("AttemptOwnershipLost");
         }
         if (data.Events.Count == 0)
         {

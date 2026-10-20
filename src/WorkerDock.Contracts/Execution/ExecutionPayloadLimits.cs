@@ -10,6 +10,18 @@ public static class ExecutionPayloadLimits
     public const int EnvelopeReserveBytes = 1024;
     public const int PinnedSettingsReserveBytes = 8 * 1024;
     private static readonly JsonSerializerOptions DescriptorOptions = new() { MaxDepth = 30 };
+    public static bool FitsPreparedDescriptor(ExecutionDescriptor descriptor)
+    {
+        try
+        {
+            if (descriptor.ValueSnapshot is { } snapshot && JsonSerializer.SerializeToUtf8Bytes(snapshot, DescriptorOptions).Length > 16_384)
+                return false;
+            var envelope = new { version = 2, attemptId = Guid.Empty, generation = long.MaxValue,
+                metadataDigest = new string('F', 64), execution = descriptor };
+            return JsonSerializer.SerializeToUtf8Bytes(envelope, DescriptorOptions).Length + EnvelopeReserveBytes + PinnedSettingsReserveBytes <= MaximumMessageBytes;
+        }
+        catch (Exception error) when (error is JsonException or NotSupportedException or ArgumentException) { return false; }
+    }
     public static bool FitsJobConfiguration(string templateId, string version, JsonElement configuration)
         => FitsJobConfiguration(templateId, version, configuration, null);
 

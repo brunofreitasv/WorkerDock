@@ -6,6 +6,7 @@ using WorkerDock.Application.Dispatch;
 using WorkerDock.Application.Executions;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Infrastructure.Executions;
+using WorkerDock.Infrastructure.Values;
 using System.Text.Json;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Application.Settings;
@@ -195,7 +196,8 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
                 new ExecutionDescriptor(executionId, 1, editor.Revision.TemplateId, editor.Revision.TemplateVersion,
                     execution.IdempotencyKey, editor.Revision.Configuration, pinnedProfile?.ProfileRevisionId, pinnedProfile is null ? null : JsonSerializer.SerializeToElement(pinnedProfile), integration, null, valueContext), editor.Revision.Policy,
                 committed: snapshot => SettleCommands(executionId, snapshot),
-                integrationSnapshot: integrationSettings is null ? null : async token => IntegrationConfigurationJson.Serialize(await integrationSettings.GetSnapshotAsync(token)));
+                integrationSnapshot: integrationSettings is null ? null : async token => IntegrationConfigurationJson.Serialize(await integrationSettings.GetSnapshotAsync(token)),
+                dynamicValues: plan);
             return receipt;
         }
         finally { gate.Release(); }

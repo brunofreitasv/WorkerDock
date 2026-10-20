@@ -1,5 +1,6 @@
 using System.Text.Json;
 using WorkerDock.Application.Common;
+using WorkerDock.Application.Jobs;
 using WorkerDock.Contracts.Values;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Jobs;

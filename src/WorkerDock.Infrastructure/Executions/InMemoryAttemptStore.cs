@@ -4,7 +4,9 @@ using WorkerDock.Application.Executions;
 using WorkerDock.Application.Jobs;
 using WorkerDock.Application.Workers;
 using WorkerDock.Contracts.Execution;
+using WorkerDock.Contracts.Values;
 using WorkerDock.Domain.Jobs;
+using WorkerDock.Infrastructure.Values;
 using System.Text.Json;
 
 namespace WorkerDock.Infrastructure.Executions;
@@ -18,6 +20,7 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
     private readonly ICapacityStore? capacity;
     private readonly Action<AttemptSnapshot>? committed;
     private readonly Func<CancellationToken, ValueTask<JsonElement>>? integrationSnapshot;
+    private readonly ExecutionValuePreparation values;
     private readonly SemaphoreSlim descriptorRefresh = new(1, 1);
     private int snapshotOrdinal;
     private readonly object gate = new();
@@ -25,12 +28,14 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
     private readonly List<DispatchIntent> retries = [];
     private readonly List<MemoryExecutionAudit> audits = [];
     public InMemoryAttemptStore(TimeProvider clock, ExecutionDescriptor descriptor, ExecutionPolicy policy, ICapacityStore? capacity = null, Action<AttemptSnapshot>? committed = null,
-        Func<CancellationToken, ValueTask<JsonElement>>? integrationSnapshot = null)
+        Func<CancellationToken, ValueTask<JsonElement>>? integrationSnapshot = null,
+        ExecutionValuePreparation? values = null, DynamicValuePlan? dynamicValues = null)
     {
         this.clock = clock; this.capacity = capacity; this.committed = committed; this.integrationSnapshot = integrationSnapshot;
+        this.values = values ?? new ExecutionValuePreparation(new DynamicValueResolver());
         Intent = new(Guid.NewGuid(), descriptor.ExecutionId, 1, descriptor.TemplateId, clock.GetUtcNow(), policy.Priority, 1, "");
         Intent = Intent with { PayloadDigest = Intent.ComputeDigest() };
-        data = new() { Descriptor = descriptor, Policy = policy, Intent = Intent, JobId = Guid.NewGuid() };
+        data = new() { Descriptor = descriptor, OriginalConfiguration = descriptor.Configuration.Clone(), DynamicValues = dynamicValues is null ? null : DynamicValueJson.Freeze(dynamicValues), Policy = policy, Intent = Intent, JobId = Guid.NewGuid() };
     }
     public DispatchIntent Intent { get; }
     public ExecutionDescriptor AcceptedDescriptor => data.Descriptor;
@@ -53,8 +58,13 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
         await descriptorRefresh.WaitAsync(ct);
         try
         {
-            var cached = await Run(() => (snapshotOrdinal == lease.Ordinal, data.GetDescriptor(lease, clock.GetUtcNow())), ct);
-            if (cached.Item1 || integrationSnapshot is null) return cached.Item2;
+            var cached = await Run(() =>
+            {
+                data.GetDescriptor(lease, clock.GetUtcNow());
+                data.Prepare(values);
+                return (snapshotOrdinal == lease.Ordinal, data.GetDescriptor(lease, clock.GetUtcNow()));
+            }, ct);
+            if (cached.Item1 || integrationSnapshot is null || cached.Item2.ValueResolutionError is not null) return Bound(cached.Item2);
             var snapshot = (await integrationSnapshot(ct)).Clone();
             return await Run(() =>
             {
@@ -63,11 +73,15 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
                     data.Descriptor = data.Descriptor with { IntegrationConfiguration = snapshot };
                     snapshotOrdinal = lease.Ordinal;
                 }
-                return data.GetDescriptor(lease, clock.GetUtcNow());
+                return Bound(data.GetDescriptor(lease, clock.GetUtcNow()));
             }, ct);
         }
         finally { descriptorRefresh.Release(); }
     }
+    private ExecutionDescriptor Bound(ExecutionDescriptor descriptor) =>
+        descriptor.ValueSnapshot is not null && !ExecutionPayloadLimits.FitsPreparedDescriptor(descriptor)
+            ? descriptor with { ValueSnapshot = null, ValueResolutionError = "DynamicSnapshotTooLarge", Configuration = data.OriginalConfiguration }
+            : descriptor;
     public ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct) => Run(() => data.Renew(lease, clock.GetUtcNow()), ct);
     public async ValueTask CompleteAsync(AttemptLease lease, AttemptCompletion completion, CancellationToken ct) =>
         await Run(() => { data.Complete(lease, completion, clock.GetUtcNow()); return true; }, ct);

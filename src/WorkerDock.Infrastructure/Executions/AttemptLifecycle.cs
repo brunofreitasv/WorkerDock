@@ -1,7 +1,9 @@
+using System.Text.Json;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Dispatch;
 using WorkerDock.Application.Executions;
 using WorkerDock.Contracts.Execution;
+using WorkerDock.Contracts.Values;
 using WorkerDock.Domain.Executions;
 using WorkerDock.Domain.Jobs;
 
@@ -11,6 +13,13 @@ namespace WorkerDock.Infrastructure.Executions;
 internal sealed class AttemptLifecycle
 {
     public required ExecutionDescriptor Descriptor { get; set; }
+    public required JsonElement OriginalConfiguration { get; init; }
+    public DynamicValuePlan? DynamicValues { get; init; }
+    public string? DynamicPlanError { get; init; }
+    public DateTimeOffset? StoredFirstStartedAtUtc { get; init; }
+    public DynamicValueSnapshot? StoredSnapshot { get; init; }
+    public bool StoredSnapshotPresent { get; init; }
+    public string? StoredResolutionError { get; init; }
     public required ExecutionPolicy Policy { get; init; }
     public required DispatchIntent Intent { get; set; }
     public required Guid JobId { get; init; }
@@ -51,6 +60,8 @@ internal sealed class AttemptLifecycle
         Lease = new(Guid.NewGuid(), intent.ExecutionId, intent.AttemptOrdinal, (Lease?.Generation ?? 0) + 1,
             boot, now + OwnershipDefaults.LeaseDuration, Policy.Timeout is { } timeout ? now + timeout : null);
         State = "Running"; AttemptState = "Running"; LocalExitConfirmed = false; SafeCode = null;
+        if (Descriptor.ValueContext is { FirstStartedAtUtc: null } context)
+            Descriptor = Descriptor with { ValueContext = context with { FirstStartedAtUtc = now } };
         Events.Add("Running");
         return new("Started", Lease);
     }
@@ -65,6 +76,46 @@ internal sealed class AttemptLifecycle
         if (!DescriptorAvailable) throw new WorkerDockException("PinnedDescriptorUnavailable");
         if (StopRequested) throw new WorkerDockException("AttemptStartHeld");
         return Descriptor with { AttemptOrdinal = lease.Ordinal, DeadlineUtc = Lease!.DeadlineUtc };
+    }
+
+    public void Prepare(ExecutionValuePreparation values)
+    {
+        if (Descriptor.ValueContext is null)
+        {
+            if (DynamicPlanError is not null || DynamicValues?.Bindings.Count > 0)
+                Descriptor = Descriptor with { ValueSnapshot = null,
+                    ValueResolutionError = DynamicPlanError ?? "DynamicSourceUnavailable" };
+            return;
+        }
+        if (DynamicPlanError is not null)
+        {
+            Descriptor = Descriptor.ValueSnapshot is null
+                ? Descriptor with { ValueResolutionError = Descriptor.ValueResolutionError ?? DynamicPlanError }
+                : Descriptor with { ValueSnapshot = null, ValueResolutionError = "DynamicSnapshotInvalid" };
+            return;
+        }
+        var plan = DynamicValues ?? new DynamicValuePlan(1, Descriptor.ValueContext.TimeZoneId, []);
+        var original = Descriptor with { Configuration = OriginalConfiguration, ValueSnapshot = null, ValueResolutionError = null };
+        if (Descriptor.ValueSnapshot is { } saved)
+        {
+            try
+            {
+                if (saved.Values is null || saved.Values.Count != plan.Bindings.Count ||
+                    plan.Bindings.Any(binding => !saved.Values.ContainsKey(binding.Target)))
+                    throw new ValueResolutionException("DynamicSnapshotInvalid", "");
+                if (!string.Equals(saved.InputDigest, values.ComputeInputDigest(original, plan), StringComparison.Ordinal))
+                    throw new ValueResolutionException("DynamicSnapshotInvalid", "");
+                var configuration = values.Reapply(OriginalConfiguration, saved);
+                Descriptor = Descriptor with { Configuration = configuration };
+            }
+            catch (Exception error) when (error is ValueResolutionException or JsonException or ArgumentException)
+            { Descriptor = Descriptor with { ValueSnapshot = null, ValueResolutionError = "DynamicSnapshotInvalid" }; }
+            return;
+        }
+        if (Descriptor.ValueResolutionError is not null) return;
+        var result = values.Prepare(original, plan);
+        Descriptor = Descriptor with { Configuration = result.Configuration ?? OriginalConfiguration,
+            ValueSnapshot = result.Snapshot, ValueResolutionError = result.ErrorCode };
     }
     public AttemptLease? Renew(AttemptLease lease, DateTimeOffset now)
     {
