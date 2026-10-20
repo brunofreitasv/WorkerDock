@@ -1,6 +1,6 @@
 ## Pré-requisitos
 
-Você precisa de acesso de gerenciamento e de pelo menos um modelo instalado selecionável. A página **Tarefas** abre o editor de tarefas.
+Você precisa de acesso de gerenciamento e de pelo menos um modelo instalado selecionável. A página **Tarefas** abre um editor com seis etapas: **Modelo**, **Configuração**, **Agendamento**, **Política**, **Revisão** e **Ativação**.
 
 ## Função
 

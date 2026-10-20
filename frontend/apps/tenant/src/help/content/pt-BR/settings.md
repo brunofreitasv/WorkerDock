@@ -12,7 +12,7 @@ Leitores podem consultar este guia. Salvar configurações do tenant, alterar a 
 2. Em **Provedor de segredos**, confira o provedor configurado e suas opções públicas. Esta página não revela nem aceita valores secretos; configure credenciais pelo provedor de segredos da implantação.
 3. Em **Política de saída**, selecione **tenant-jobs** ou **tenant-alerts** e revise hosts permitidos, portas, CIDRs privados e a permissão de HTTP. Salve somente os destinos necessários aos seus fluxos de trabalho. Destinos de loopback, metadados e link-local continuam bloqueados.
 4. Em **Perfis SQL**, crie ou atualize um perfil nomeado, selecione catálogos permitidos e opções de autenticação e use o diagnóstico quando necessário. As credenciais do perfil usam referências lógicas de segredo.
-5. Em **Retenção e arquivo**, defina por quantos dias manter logs de execução, histórico de execuções e histórico de auditoria. Você pode ativar o arquivamento antes da exclusão e definir a retenção dos arquivos. O local de armazenamento é configurado pelo administrador e não está disponível nesta página.
+5. Em **Retention**, defina por quantos dias manter logs de execução, histórico de execuções e histórico de auditoria. Você pode ativar o arquivamento antes da exclusão e definir a retenção dos arquivos. O local de armazenamento é configurado pelo administrador e não está disponível nesta página.
 6. Salve as alterações na área correspondente. Se a página indicar uma versão desatualizada, recarregue e confira os valores atuais antes de editar novamente.
 
 ## Resultado
