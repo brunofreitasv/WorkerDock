@@ -32,6 +32,8 @@ import { ExecutionDetails } from "./features/monitoring/ExecutionDetails";
 import { AuditPage } from "./features/monitoring/AuditPage";
 import { AlertRulesPage } from "./features/alerts/AlertRulesPage";
 import RetentionPage from "./features/settings/RetentionPage";
+import { HelpPage } from "./help/HelpPage";
+import { helpTopics } from "./help/topics";
 const theme = createTheme({
   palette: {
     primary: { main: "#0b6c61", dark: "#064f47", light: "#dff2ed" },
@@ -45,6 +47,11 @@ const theme = createTheme({
   },
   shape: { borderRadius: 10 },
 });
+function routeFromHash(hash: string): string {
+  if (!hash.startsWith("#/")) return "dashboard";
+  return hash.slice(2) || "dashboard";
+}
+
 interface Settings {
   displayName: string;
   displayTimeZone: string;
@@ -173,24 +180,25 @@ export default function App() {
   const preferences = usePreferences(session?.timeZone);
   const { t } = preferences;
   const [active, setActive] = useState(
-    () => window.location.hash.slice(2) || "dashboard",
+    () => routeFromHash(window.location.hash),
   );
   const [settingsTab, setSettingsTab] = useState("general");
   const [catalogItem, setCatalogItem] = useState<CatalogItem>();
   const [actionError, setActionError] = useState(false);
   useEffect(() => {
-    const change = () =>
-      setActive(window.location.hash.slice(2) || "dashboard");
+    const change = () => setActive(routeFromHash(window.location.hash));
     window.addEventListener("hashchange", change);
     return () => window.removeEventListener("hashchange", change);
   }, []);
   const navigate = (id: string) => {
-    setActive(id);
-    window.history.replaceState(null, "", "#/" + id);
+    const route = id.startsWith("#/") ? id.slice(2) : id;
+    setActive(route);
+    window.history.replaceState(null, "", "#/" + route);
   };
   const navigation = session?.canRead
     ? [
         { id: "dashboard", label: t.dashboard },
+        { id: "help", label: t.help },
         { id: "monitoring", label: t.monitoring },
         { id: "workers", label: preferences.language === "pt-BR" ? "Workers" : "Workers" },
         { id: "audit", label: t.audit },
@@ -200,9 +208,22 @@ export default function App() {
         ...(session.canManage ? [{ id: "settings", label: t.settings }] : []),
       ]
     : [];
-  const title =
-    navigation.find((item) => item.id === active)?.label ??
-    (active === "settings" ? t.settings : active.startsWith("execution:") ? "Execution details" : t.dashboard);
+  const activePage = active.startsWith("help:") ? "help" : active;
+  const helpSlug = active.startsWith("help:") ? active.slice("help:".length) : undefined;
+  const title = activePage === "help"
+    ? helpTopics.find(topic => topic.slug === helpSlug)?.title[preferences.language] ?? t.help
+    : navigation.find((item) => item.id === activePage)?.label ??
+      (active === "settings" ? t.settings : active.startsWith("execution:") ? "Execution details" : t.dashboard);
+  const contextualHelp = active === "dashboard" ? "dashboard"
+    : active === "monitoring" || active.startsWith("execution:") ? "monitoring"
+    : active === "workers" || active === "audit" ? "workers-audit"
+    : active === "alerts" ? "alerts"
+    : active === "templates" ? "templates"
+    : active === "jobs" ? "jobs"
+    : active === "settings" && settingsTab === "profiles" ? "sql-profiles"
+    : active === "settings" ? "settings"
+    : undefined;
+  const contextualTopic = helpTopics.find(topic => topic.slug === contextualHelp);
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -227,7 +248,7 @@ export default function App() {
         <AppShell
           t={t}
           navigation={navigation}
-          active={active}
+          active={activePage}
           onNavigate={navigate}
           mode={session.mode}
           canManage={session.canManage}
@@ -241,12 +262,13 @@ export default function App() {
               {t.requestError}
             </Alert>
           )}
-          <Typography component="h1" variant="h4" sx={{ mb: 1 }}>
+          {activePage !== "help" && <Typography component="h1" variant="h4" sx={{ mb: 1 }}>
             {title}
-          </Typography>
+          </Typography>}
+          {activePage !== "help" && contextualTopic && <Button onClick={() => navigate(`help:${contextualTopic.slug}`)} sx={{ mb: 2 }}>{t.helpContextual}</Button>}
           {session.canRead ? (
             <>
-              {active === "settings" ? (
+              {activePage === "help" ? <HelpPage language={preferences.language} slug={helpSlug} canManage={session.canManage} onNavigate={navigate} /> : active === "settings" ? (
                 session.canManage ? (
                   <>
                     <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 3 }}>

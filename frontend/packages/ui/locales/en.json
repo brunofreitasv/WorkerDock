@@ -1,5 +1,11 @@
 {
   "dashboard": "Dashboard",
+  "help": "Help",
+  "helpSearch": "Search help",
+  "helpNotFound": "Unknown help topic",
+  "helpBack": "All help topics",
+  "helpRequiredRole": "Required role",
+  "helpContextual": "Help for this page",
   "monitoring": "Monitoring",
   "audit": "Audit",
   "alerts": "Alerts",

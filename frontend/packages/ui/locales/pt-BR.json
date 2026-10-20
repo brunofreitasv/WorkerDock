@@ -1,5 +1,11 @@
 {
   "dashboard": "Painel",
+  "help": "Ajuda",
+  "helpSearch": "Pesquisar ajuda",
+  "helpNotFound": "Tópico de ajuda não encontrado",
+  "helpBack": "Todos os tópicos",
+  "helpRequiredRole": "Função necessária",
+  "helpContextual": "Ajuda sobre esta página",
   "monitoring": "Monitoramento",
   "audit": "Auditoria",
   "alerts": "Alertas",

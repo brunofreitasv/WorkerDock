@@ -21,6 +21,22 @@ describe("tenant help guides", () => {
     }
   });
 
+  it.each([
+    ["en", "Unknown help topic", "All help topics"],
+    ["pt-BR", "Tópico de ajuda não encontrado", "Todos os tópicos"],
+  ] as const)("shows localized recovery for an invalid topic in %s", (language, missing, index) => {
+    render(<HelpPage language={language} slug="bad:slug" canManage={false} onNavigate={navigate} />);
+    expect(screen.getByText(missing)).toBeTruthy();
+    expect(screen.getByRole("button", { name: index })).toBeTruthy();
+  });
+
+  it("shows manager guidance to readers while blocking manager destinations", () => {
+    render(<HelpPage language="en" slug="getting-started" canManage={false} onNavigate={navigate} />);
+    expect(screen.getAllByText(/Manage/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: /jobs/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /settings/i })).toBeNull();
+  });
+
   it("searches titles and article bodies without case or accent sensitivity", () => {
     expect(searchHelpTopics("en", "DASHBOARD").map(topic => topic.slug)).toContain("dashboard");
     expect(searchHelpTopics("en", "capacity").map(topic => topic.slug)).toContain("dashboard");

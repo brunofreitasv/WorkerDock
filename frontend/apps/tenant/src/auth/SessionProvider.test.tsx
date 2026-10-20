@@ -5,7 +5,11 @@ import { afterEach, expect, test, vi } from "vitest";
 import App from "../App";
 import { SessionProvider } from "./SessionProvider";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.history.replaceState(null, "", "#/dashboard");
+  localStorage.removeItem("workerdock.language");
+});
 const session = (
   canManage = false,
   mode = "RoleProtected",
@@ -38,6 +42,7 @@ test("viewer can navigate dashboard monitoring and audit while management is hid
   session();
   expect(await screen.findByRole("link", { name: "Dashboard" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Monitoring" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Help" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Audit" })).toBeVisible();
   expect(
     screen.queryByRole("link", { name: "Settings" }),
@@ -48,6 +53,32 @@ test("viewer can navigate dashboard monitoring and audit while management is hid
   ).toBeVisible();
   await userEvent.click(screen.getByRole("link", { name: "Audit" }));
   expect(await screen.findByRole("heading", { name: "Audit" })).toBeVisible();
+});
+
+test("viewer opens a deep-linked help topic with Help selected and contextual dashboard help", async () => {
+  window.history.replaceState(null, "", "#/help:dashboard");
+  session();
+  expect(await screen.findByRole("heading", { name: "Understand the dashboard" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Help" })).toHaveAttribute("aria-current", "page");
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Language" }), "pt-BR");
+  expect(await screen.findByRole("heading", { name: "Entenda o painel" })).toBeVisible();
+  expect(window.location.hash).toBe("#/help:dashboard");
+});
+
+test("dashboard contextual help opens its registered guide", async () => {
+  window.history.replaceState(null, "", "#/dashboard");
+  session();
+  await userEvent.click(await screen.findByRole("button", { name: "Help for this page" }));
+  expect(await screen.findByRole("heading", { name: "Understand the dashboard" })).toBeVisible();
+  expect(window.location.hash).toBe("#/help:dashboard");
+});
+
+test.each(["#/help:unknown", "#/help:", "#/help:bad%ZZslug"])("recovers from malformed help route %s", async hash => {
+  localStorage.setItem("workerdock.language", "en");
+  window.history.replaceState(null, "", hash);
+  session();
+  expect(await screen.findByText("Unknown help topic")).toBeVisible();
+  expect(screen.getByRole("link", { name: "Help" })).toHaveAttribute("aria-current", "page");
 });
 test("anonymous mode shows management and a translated public-access status", async () => {
   session(true, "Anonymous", false);
