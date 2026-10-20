@@ -16,7 +16,7 @@ public sealed record ExecutionAdapters(ISecretVault Secrets, ISafeExecutionLog L
 /// <summary>Installed composition root only; factories are invoked after containment permission.</summary>
 public static class ExecutorHost
 {
-    public static async Task<int> RunAsync(Func<ExecutionDescriptor, IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters)
+    public static async Task<int> RunAsync(Func<ExecutionDescriptor, IReadOnlyList<TemplateDescriptor>> descriptors, Func<ExecutionDescriptor, IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters)
     {
         try
         {
@@ -39,7 +39,7 @@ public static class ExecutorHost
             using var cancellation = new CancellationTokenSource();
             using var controls = new CancellationTokenSource();
             var listener = ListenAsync(pipe, cancellation, controls.Token);
-            var result = await ExecuteAsync(request, templates, composedAdapters, diagnostics, cancellation.Token);
+            var result = await ExecuteAsync(request, descriptors, templates, composedAdapters, diagnostics, cancellation.Token);
             await diagnostics.FlushAsync();
             using var finish = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await writer.WaitAsync(finish.Token);
@@ -64,7 +64,7 @@ public static class ExecutorHost
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch { cancellation.Cancel(); }
     }
-    private static async Task<TemplateResult> ExecuteAsync(ExecuteRequest request, Func<ExecutionDescriptor, IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters, IpcDiagnosticRelay diagnostics, CancellationToken ct)
+    private static async Task<TemplateResult> ExecuteAsync(ExecuteRequest request, Func<ExecutionDescriptor, IReadOnlyList<TemplateDescriptor>> descriptors, Func<ExecutionDescriptor, IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters, IpcDiagnosticRelay diagnostics, CancellationToken ct)
     {
         using var secrets = new RedactingSecrets();
         try
@@ -79,21 +79,36 @@ public static class ExecutorHost
             if (request.Execution.ValueContext is null && request.Execution.ValueSnapshot is not null ||
                 request.Execution.ValueContext is not null && request.Execution.ValueSnapshot is null)
                 return Failure("DynamicSnapshotInvalid", false);
-            var installed = templates(request.Execution);
-            if (installed.GroupBy(x => (x.Descriptor.Id, x.Descriptor.Version)).Any(x => x.Count() > 1)) return Failure("TemplateRegistrationConflict", false);
-            var template = installed.SingleOrDefault(x => x.Descriptor.Id == request.Execution.TemplateId && x.Descriptor.Version == request.Execution.TemplateVersion);
-            if (template is null) return Failure("TemplateVersionUnavailable", false);
-            if (string.IsNullOrEmpty(request.MetadataDigest) || template.Descriptor.MetadataDigest != request.MetadataDigest) return Failure("TemplateMetadataMismatch", false);
-            if (request.Execution.ValueSnapshot is not null && !DynamicValueValidation.ValidateResolvedSnapshot(template.Descriptor, request.Execution))
+            IReadOnlyList<TemplateDescriptor> installedDescriptors;
+            try { installedDescriptors = descriptors(request.Execution); }
+            catch { return Failure("TemplateExecutionFailed", false); }
+            if (installedDescriptors.GroupBy(x => (x.Id, x.Version)).Any(x => x.Count() > 1)) return Failure("TemplateRegistrationConflict", false);
+            var descriptor = installedDescriptors.SingleOrDefault(x => x.Id == request.Execution.TemplateId && x.Version == request.Execution.TemplateVersion);
+            if (descriptor is null) return Failure("TemplateVersionUnavailable", false);
+            if (string.IsNullOrEmpty(request.MetadataDigest) || descriptor.MetadataDigest != request.MetadataDigest) return Failure("TemplateMetadataMismatch", false);
+            if (request.Execution.ValueSnapshot is not null && !DynamicValueValidation.ValidateResolvedSnapshot(descriptor, request.Execution))
                 return Failure("DynamicSnapshotInvalid", false);
             try
             {
-                if (TemplateSchemaValidator.Validate(template.Descriptor,request.Execution.Configuration).Count != 0 ||
-                    template.Validate(request.Execution.Configuration).Count != 0) return Failure("TemplateConfigurationInvalid", false);
+                if (TemplateSchemaValidator.Validate(descriptor, request.Execution.Configuration).Count != 0)
+                    return Failure("TemplateConfigurationInvalid", false);
+            }
+            catch { return Failure("TemplateConfigurationInvalid", false); }
+            IReadOnlyList<IWorkerTemplate> installed;
+            try { installed = templates(request.Execution); }
+            catch { return Failure("TemplateExecutionFailed", false); }
+            if (installed.GroupBy(x => (x.Descriptor.Id, x.Descriptor.Version)).Any(x => x.Count() > 1)) return Failure("TemplateRegistrationConflict", false);
+            var template = installed.SingleOrDefault(x => x.Descriptor.Id == descriptor.Id && x.Descriptor.Version == descriptor.Version);
+            if (template is null || template.Descriptor.MetadataDigest != descriptor.MetadataDigest) return Failure("TemplateMetadataMismatch", false);
+            try
+            {
+                if (template.Validate(request.Execution.Configuration).Count != 0) return Failure("TemplateConfigurationInvalid", false);
             }
             catch { return Failure("TemplateConfigurationInvalid", false); }
             ct.ThrowIfCancellationRequested();
-            var composed = adapters(request.Execution);
+            ExecutionAdapters composed;
+            try { composed = adapters(request.Execution); }
+            catch { return Failure("TemplateExecutionFailed", false); }
             secrets.Provider = composed.Secrets;
             diagnostics.SetTarget(composed.Log);
             var context = new TemplateExecutionContext(request.Execution, secrets, new RedactingLog(secrets, diagnostics));

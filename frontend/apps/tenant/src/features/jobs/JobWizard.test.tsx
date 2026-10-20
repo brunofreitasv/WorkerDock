@@ -3,10 +3,15 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { translations, type Language } from "@workerdock/ui";
-import { JobWizard } from "./JobWizard";
+import { JobWizard, selectDefaultTemplate } from "./JobWizard";
 import { confirmsScheduleWrite, sameScheduleInput } from "./scheduleInput";
 
 afterEach(() => vi.unstubAllGlobals());
+
+test("new jobs default to the newest selectable version of the first template", () => {
+  const item = (version: string, selectable: boolean) => ({ selectable, descriptor: { id: "workerdock.sql-server", version, displayName: "SQL Server", description: "SQL Server", configurationSchema: { type: "object", properties: {} } } });
+  expect(selectDefaultTemplate([item("1.0.0", true), item("1.1.0", true), item("2.0.0", false)])?.descriptor.version).toBe("1.1.0");
+});
 
 test.each([
   ["-05:00", "-05:00:00"],

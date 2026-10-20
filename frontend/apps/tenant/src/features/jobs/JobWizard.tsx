@@ -14,6 +14,24 @@ type Revision = { jobId: string; revision: number; name: string; templateId: str
 type EditorDto = { revision: Revision; version: number[]; enabled: boolean; archived: boolean; concurrencyLimit: number };
 type PersistedScheduleState = "none" | "present" | "unknown" | "dirty";
 type DraftSnapshot = { selected?: CatalogItem; name: string; configuration: Record<string, unknown>; policy: typeof blankPolicy; scheduleEnabled: boolean; schedule: ScheduleEditorInputDto; missedMode: string };
+export function selectDefaultTemplate(items: CatalogItem[]): CatalogItem | undefined {
+  const first = items.find(item => item.selectable);
+  if (!first) return undefined;
+  const candidates = items.filter(item => item.selectable && item.descriptor.id === first.descriptor.id);
+  return candidates.reduce((best, item) => compareVersions(item.descriptor.version, best.descriptor.version) > 0 ? item : best, first);
+}
+function compareVersions(left: string, right: string): number {
+  const a = left.split(".").map(part => Number(part));
+  const b = right.split(".").map(part => Number(part));
+  if (a.every(Number.isSafeInteger) && b.every(Number.isSafeInteger)) {
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      const difference = (a[i] ?? 0) - (b[i] ?? 0);
+      if (difference) return difference;
+    }
+    return 0;
+  }
+  return left.localeCompare(right, undefined, { numeric: true });
+}
 const blankPolicy = { timeout: null as string | null, maxAttempts: 1, retryBaseDelay: "00:00:01", retryMaxDelay: "00:00:30", jitterRatio: 0, retryableCodes: [], retryUncertain: false, overlap: "Queue", backlogLimit: 100, priority: 50 };
 const blankSchedule: ScheduleEditorInputDto = { kind: "Cron", cron: "0 9 * * 1-5", zoneId: "UTC", localOnce: null, selectedOffset: null };
 
@@ -42,7 +60,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
   const summary = useRef<HTMLDivElement>(null);
   const localIssues = useMemo(() => selected ? validateSchema(selected.descriptor.configurationSchema, configuration) : [], [selected, configuration]);
   const labels = [t.stageTemplate, t.stageConfiguration, t.stageSchedule, t.stagePolicy, t.stageReview, t.stageActivation];
-  useEffect(() => { let current = true; void read<{ items: CatalogItem[] }>("/api/templates").then(result => { if (current) { const initial = result.data.items.find(item => item.selectable); setCatalog(result.data.items); setSelected(initial); setConfiguration(initial ? createSchemaDefault(initial.descriptor.configurationSchema, initial.descriptor.configurationSchema) as Record<string, unknown> : {}); } }).catch(() => { if (current) setMessage(t.requestError); }).finally(() => { if (current) setLoading(false); }); return () => { current = false; }; }, []);
+  useEffect(() => { let current = true; void read<{ items: CatalogItem[] }>("/api/templates").then(result => { if (current) { const initial = selectDefaultTemplate(result.data.items); setCatalog(result.data.items); setSelected(initial); setConfiguration(initial ? createSchemaDefault(initial.descriptor.configurationSchema, initial.descriptor.configurationSchema) as Record<string, unknown> : {}); } }).catch(() => { if (current) setMessage(t.requestError); }).finally(() => { if (current) setLoading(false); }); return () => { current = false; }; }, []);
   useEffect(() => { if (message) summary.current?.focus(); }, [message]);
   const saveDraft = async () => {
     if (staleConflict || !reviewAcknowledged) return false;

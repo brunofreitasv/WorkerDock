@@ -43,6 +43,25 @@ public sealed class DynamicExecutionTests
         finally { Directory.Delete(path, true); }
     }
 
+    [Fact]
+    public async Task Invalid_resolved_snapshot_is_rejected_before_template_factory_runs()
+    {
+        var path = Directory.CreateTempSubdirectory("WorkerDockFactory_").FullName;
+        try
+        {
+            var descriptor = DynamicDescriptor(path) with { ValueContext = DynamicDescriptor(path).ValueContext! with { ResolverVersion = 99 } };
+            var supervisor = new ExecutionSupervisor(FixtureProgram.Options("template-factory-tracking"));
+            await using var child = await supervisor.StartAsync(Guid.NewGuid(), 1, descriptor, default);
+            var result = await child.WaitAsync(default);
+            Assert.Equal("PermanentFailure", result.Outcome);
+            Assert.False(result.EffectsMayHaveOccurred);
+            Assert.Equal("DynamicSnapshotInvalid", result.SafeCode);
+            Assert.False(File.Exists(Path.Combine(path, "entries")));
+            Assert.False(File.Exists(Path.Combine(path, "template-factory")));
+        }
+        finally { Directory.Delete(path, true); }
+    }
+
     [Theory]
     [InlineData("missing")]
     [InlineData("mismatch")]

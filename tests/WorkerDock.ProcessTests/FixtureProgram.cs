@@ -73,7 +73,12 @@ public static class FixtureProgram
             await ExecutionProtocol.WriteAsync(pipe, new Handshake(args[0] == "bad-version" ? 1 : ExecutionProtocol.CurrentVersion, attempt, generation, nonce, pid), default);
             await Task.Delay(Timeout.InfiniteTimeSpan); return 0;
         }
-        return await ExecutorHost.RunAsync(_ => [new BlockingTemplate(), new SpawningTemplate(() => Process.Start(StartInfo("grandchild"))!), new SecretTemplate(), new DiagnosticTemplate(), new DiagnosticStressTemplate(), new ResolvedValueTemplate("1.0.0"), new ResolvedValueTemplate()], execution => new(new TestVault(args[0]=="provider-failure", execution.Configuration.GetProperty("path").GetString()!), new TestLog(execution.Configuration.GetProperty("path").GetString()!)));
+        var installed = new IWorkerTemplate[] { new BlockingTemplate(), new SpawningTemplate(() => Process.Start(StartInfo("grandchild"))!), new SecretTemplate(), new DiagnosticTemplate(), new DiagnosticStressTemplate(), new ResolvedValueTemplate("1.0.0"), new ResolvedValueTemplate() };
+        return await ExecutorHost.RunAsync(_ => installed.Select(x => x.Descriptor).ToArray(), execution =>
+        {
+            if (args[0] == "template-factory-tracking") File.WriteAllText(Path.Combine(execution.Configuration.GetProperty("path").GetString()!, "template-factory"), "called");
+            return installed;
+        }, execution => new(new TestVault(args[0]=="provider-failure", execution.Configuration.GetProperty("path").GetString()!), new TestLog(execution.Configuration.GetProperty("path").GetString()!)));
     }
     public static ProcessStartInfo StartInfo(params string[] args)
     {
