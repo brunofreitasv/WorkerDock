@@ -1,0 +1,41 @@
+# Database-free Control Center design
+
+Date: 2026-10-19 (America/Sao_Paulo)
+Status: Proposed for review. If approved, this document supersedes only the Control Center storage and deployment statements in [the original architecture](2026-10-17-workerdock-design.md). Tenant SQL Server, Quartz, and tenant isolation remain unchanged.
+
+## Intent and decision
+
+The optional Control Center should start, serve its directory, and let authorized managers register existing tenant links without a central SQL Server database or any central database migration. The platform baseline remains .NET 10 LTS on Windows Server 2022 or newer, with PowerShell 7 for deployment; tenant databases still require SQL Server 2022 or newer. A tenant still has its own SQL Server database, scheduler, workers, vault identity, and dashboard. The center continues to hold only tenant display names, HTTPS dashboard URLs, expected instance IDs, and logical references to health-only credentials. Its Entra/role policy, CSRF protection, URL validation, outbound allowlist, vault use, and direct tenant links stay in place.
+
+Three workable approaches were considered:
+
+| Approach | Benefit | Cost |
+| --- | --- | --- |
+| Static JSON configuration | Fewest moving parts; simple backup | Register/edit/remove cannot work from the management panel without deployment edits and reloads |
+| Embedded SQLite | Durable transactions and easy queries without a SQL Server service | Still creates database tables and schema versions, which does not meet the requested database-object-free center |
+| Protected local file journal (chosen) | No database objects; keeps the current management API and an atomic registration/audit record | One active center process and careful filesystem backup/ACL handling |
+
+This is a deliberately single-host Control Center. Tenants remain independently reachable when it is stopped. Running multiple center processes against the same state directory is unsupported; adding clustered center availability would be a separate design decision.
+
+## Storage and behavior
+
+`Central:InstanceId` remains a stable, nonempty GUID. New `Central:Storage:DataDirectory` is an absolute path outside the versioned release and web root, for example `C:\ProgramData\WorkerDock\ControlCenter\state`. The center owns two files there:
+
+- `registry.journal` is the authoritative append-only sequence of registration changes. Each bounded frame contains the center instance ID, sequence/revision, previous-frame hash, operation, registration ID and nonsecret registration state, UTC time, actor, authentication mode, correlation ID, and sanitized before/after metadata. A length and SHA-256 digest detect torn or changed frames. The journal event commits the registration mutation and its audit event together. It never contains a resolved credential, password, access token, or secret-bearing connection string. Logical health credential references remain in registration state but are omitted from audit projections and API responses.
+- `health.json` is a small, replace-atomically written cache of the most recent health observation per registration. It stores state, safe code, last attempt, and last success. It is advisory and excluded from registration ETags. A corrupt health cache is discarded with a safe operational warning; affected entries show Unknown until refreshed. Orphan entries are ignored after a registration is removed.
+
+Startup takes an exclusive writer handle on the journal for the process lifetime, validates its center instance ID, replays it into memory, and refuses readiness if the file cannot be opened, a complete frame fails integrity checks, or an unsupported format is found. A single incomplete trailing frame from a crash is recoverable: under the exclusive handle the center truncates only that incomplete suffix, logs a safe recovery event, and resumes. It does not skip a corrupt complete frame. The first file creation also writes the center identity. Mutations are serialized, appended, and flushed to disk before the API acknowledges them or changes the in-memory projection. If an append/flush outcome is uncertain, management writes stop and readiness becomes unhealthy until an operator restarts/reconciles from the journal. A registration update or delete still requires the existing eight-byte ETag; stale ETags return 412. Journal sequence numbers provide the new ETags. Reads paginate and filter as before.
+
+The existing `ICentralRegistry` and `/api/tenants` contract remain. The current in-memory adapter stays for disposable development/tests; the file adapter becomes the production default. `/health/ready` verifies the journal is open and writable rather than checking SQL. Health refresh continues to use the registered URL, fixed health path, bounded response/time, center vault reference, allowlist, and read authorization. A center restart reloads the latest observations; a success older than two minutes displays Stale. A missing cache displays Unknown.
+
+Journal files and backups contain tenant directory metadata and actor identifiers. Give Modify access only to the center IIS app-pool identity and administrators, deny web serving, and keep the directory outside the release tree. Existing configured Entra audience and management-role rules still govern the API. The central vault identity can resolve only health credentials. The journal is append-only to the application, with checksums for corruption detection; a host administrator can still alter files, so it is not a tamper-proof audit system. Send audit copies to an external security log if that stronger property is required. Do not automatically prune the journal in this change; document its size and backup monitoring.
+
+## Deployment, backup, and transition
+
+A fresh center install needs no central database, `database/central` scripts, SQL principal, SQL connection string, or central migrator. The center package contains the web app and a state-format compatibility range. `Install-Center.ps1` creates and protects the persistent data directory before the IIS app starts. `Upgrade-Instance.ps1` has separate tenant and center branches: tenant upgrades retain SQL backup/migration behavior; center upgrades stop IIS, verify and archive the journal, health cache, configuration, and release, check state-format compatibility, switch the release, and leave IIS stopped for operator review. A center backup uses a checked archive path rather than a SQL `.bak` path. Uninstall does not silently delete the persistent state. Restore uses the same instance GUID and protected data directory; stale health is advisory.
+
+For an already deployed SQL-backed center, provide a one-time offline importer. Stop the old IIS site, make and verify a SQL backup, then read the old central tables with a read-only migration identity and write a new journal into an empty protected directory. Preserve registration IDs, nonsecret fields, created/updated timestamps, and safe audit history; assign new journal ETags and require clients to refetch them. Reject mismatched center identity, malformed/secret-bearing data, duplicate IDs, or a nonempty target. Produce counts and checksums without printing credential references or secret values. Deploy the new center side by side, verify directory and health links, then move the HTTPS binding. Keep the old database and package for a deliberate rollback; new file-side changes do not flow back to SQL. Historical central SQL scripts and migrator support remain only for legacy restore/import and are labeled as such.
+
+## Acceptance criteria
+
+A fresh center install and startup succeeds with no SQL Server or central schema. Registration CRUD, optimistic concurrency, audit metadata, health refresh, access policy, and CSRF behavior remain intact. Restart preserves tenant links, audit history, and last health observations. Crash-tail recovery does not lose an acknowledged change; corruption, wrong center identity, unavailable/locked state directory, and write failure fail closed without returning a false success. Center package install/upgrade/restore never invokes tenant or central database migrations; tenant behavior is unchanged. Documentation shows separate fresh-install, legacy-import, and backup/restore procedures.
