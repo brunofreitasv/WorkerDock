@@ -70,10 +70,7 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
       setSinkDraft(clean); setSinkEtag(etag ?? undefined); setSinks(items => items.some(item => item.id === clean.id) ? items.map(item => item.id === clean.id ? clean : item) : [clean, ...items]); setCreatingSink(false); setCreatedSink(creatingSink); setSaved(true); setInvalid(false);
     }
     catch (cause) {
-      if (creatingSink && cause instanceof ApiError && cause.status === 412) {
-        try { const { data, etag } = await read<AlertSink>(`/api/alert-sinks/${sinkDraft.id}`); const clean = safeSink(data); setSinkDraft(clean); setSinkEtag(etag ?? undefined); setSinks(items => items.some(item => item.id === clean.id) ? items.map(item => item.id === clean.id ? clean : item) : [clean, ...items]); setCreatingSink(false); setError(t.stale); }
-        catch { setError(t.alertSinkCreateError); }
-      } else setError(creatingSink ? t.alertSinkCreateError : cause instanceof ApiError && cause.status === 412 ? t.stale : t.requestError);
+      setError(creatingSink ? t.alertSinkCreateError : cause instanceof ApiError && cause.status === 412 ? t.stale : t.requestError);
     } finally { setBusy(false); }
   };
   const updateRule = (patch: Partial<AlertRule>) => setRuleDraft(current => current ? { ...current, ...patch } : current);

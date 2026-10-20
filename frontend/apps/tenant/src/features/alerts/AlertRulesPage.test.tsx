@@ -106,6 +106,48 @@ test("invalid webhook fields keep a new sink draft without sending it", async ()
   expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes(`/api/alert-sinks/${id}`) && init?.method === "PUT")).toBe(false);
 });
 
+test("a stale sink creation keeps its draft and UUID in creation mode", async () => {
+  const id = "33333333-3333-4333-8333-333333333333";
+  const calls: Array<{ path: string; init?: RequestInit }> = [];
+  vi.stubGlobal("crypto", { randomUUID: () => id });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost"); calls.push({ path: url.pathname, init });
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response("[]");
+    if (url.pathname === "/api/alert-sinks") return new Response("[]");
+    if (url.pathname === `/api/alert-sinks/${id}` && init?.method === "PUT") return new Response("{}", { status: 412 });
+    if (url.pathname === `/api/alert-sinks/${id}`) return new Response(JSON.stringify({ ...sink, id, name: "Server sink" }), { headers: { ETag: '"server-etag"' } });
+    if (url.pathname === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
+    return new Response("{}", { status: 404 });
+  }));
+  const user = userEvent.setup();
+  render(<AlertRulesPage t={translations.en} canManage />);
+  await user.click(await screen.findByRole("button", { name: "New webhook sink" }));
+  await user.type(screen.getByRole("textbox", { name: "Sink name" }), "Local draft");
+  await user.type(screen.getByRole("textbox", { name: "Webhook URL" }), "https://example.test/hook");
+  const save = () => screen.getAllByRole("button", { name: "Save" }).at(-1)!;
+  await user.click(save());
+  expect(await screen.findByRole("alert")).toBeVisible();
+  expect(screen.getByRole("textbox", { name: "Sink name" })).toHaveValue("Local draft");
+  await user.click(save());
+  await waitFor(() => expect(calls.filter(call => call.path === `/api/alert-sinks/${id}` && call.init?.method === "PUT")).toHaveLength(2));
+  expect(calls.filter(call => call.path === `/api/alert-sinks/${id}` && call.init?.method === "PUT").every(call => !new Headers(call.init?.headers).has("If-Match"))).toBe(true);
+  expect(screen.getByRole("textbox", { name: "Sink name" })).toHaveValue("Local draft");
+});
+
+test("non-managers cannot create sinks or request management resources", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname === "/api/alerts/incidents" || url.pathname === "/api/alerts/deliveries") return new Response("[]");
+    return new Response("{}", { status: 403 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<AlertRulesPage t={translations.en} canManage={false} />);
+  expect(await screen.findByText(translations.en.alertNoIncidents)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "New webhook sink" })).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.map(([input]) => String(input)).join(" ")).not.toMatch(/alert-rules|alert-sinks/);
+});
+
 test("shows stale-version errors for concurrent rule edits", async () => {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
