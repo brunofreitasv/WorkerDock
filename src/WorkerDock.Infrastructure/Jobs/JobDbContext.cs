@@ -21,6 +21,7 @@ internal sealed class JobDbContext(string connectionString) : DbContext
         {
             entity.ToTable("JobRevisions", "workerdock");
             entity.HasKey(x => new { x.JobId, x.Revision });
+            entity.Property(x => x.DynamicValuesJson).HasColumnType("nvarchar(max)");
         });
         builder.Entity<CommandRow>(entity =>
         {
@@ -50,6 +51,7 @@ internal sealed class JobRevisionRow
     public string ConfigurationJson { get; set; } = "";
     public Guid? ProfileId { get; set; }
     public string PolicyJson { get; set; } = "";
+    public string? DynamicValuesJson { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }
 

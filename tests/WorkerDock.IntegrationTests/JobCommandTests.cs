@@ -17,6 +17,29 @@ public sealed class JobCommandTests
     private static readonly ActorContext Actor = new("issuer:subject", "Entra", Guid.NewGuid());
 
     [Fact]
+    public void Freeze_clones_dynamic_value_plan()
+    {
+        using var plan = JsonDocument.Parse("{\"resolverVersion\":1,\"timeZoneId\":\"UTC\",\"bindings\":[]}");
+        var revision = JobCommandValidation.Freeze(Job("dynamic") with { DynamicValues = plan.RootElement });
+        Assert.True(JsonElement.DeepEquals(plan.RootElement, revision.DynamicValues!.Value));
+    }
+
+    [Fact]
+    public void Dynamic_payload_reserves_snapshot_space()
+    {
+        var configuration = JsonDocument.Parse("{}").RootElement;
+        var bindings = Enumerable.Range(0, 128).Select(index => new
+        {
+            target = "/" + new string((char)('a' + index % 26), 230) + index,
+            source = "ExecutionId", timeZoneId = (string?)null, months = 0, days = 0,
+            boundary = "None", format = "String"
+        }).ToArray();
+        var plan = JsonDocument.Parse(JsonSerializer.Serialize(new { resolverVersion = 1, timeZoneId = "UTC", bindings })).RootElement;
+        Assert.False(WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration("workerdock.http", "1.1.0", configuration, plan));
+        Assert.True(WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration("workerdock.http", "1.0.0", configuration));
+    }
+
+    [Fact]
     public async Task Trusted_registered_template_is_validated_before_save_enable_and_run()
     {
         var descriptor=TemplateCatalogTests.Descriptor("""{"type":"object","properties":{"count":{"type":"integer","minimum":1}},"additionalProperties":false}""") with { Id="custom.trusted" };

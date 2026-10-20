@@ -18,7 +18,7 @@ public sealed class CapacityPolicySqlTests
     public async Task Sql_epoch_fences_acquired_delivery_and_preserves_exclusive_order(bool snapshot)
     {
         await using var fixture=new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant","0003d_dispatch",default);
+        await fixture.Runner.ApplyAsync("tenant","0009_dynamic_values",default);
         var options=new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString,fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options,"capacity-worker");
         var jobs=new SqlJobCommands(options,JobCommandTestCatalog.Create()); var actor=new ActorContext("manager","Anonymous",Guid.NewGuid());

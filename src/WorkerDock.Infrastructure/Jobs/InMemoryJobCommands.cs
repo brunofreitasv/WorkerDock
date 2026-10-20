@@ -22,6 +22,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
     private readonly IConnectionProfiles? profiles;
     private readonly IIntegrationSettings? integrationSettings;
     private readonly ITemplateCatalog? templateCatalog;
+    private readonly ITemplateAuthoringService? authoring;
     private readonly Func<string, CancellationToken, ValueTask>? beforeCommit;
     private readonly SemaphoreSlim gate = new(1, 1);
     private State state = new([], [], [], [], [], [], []);
@@ -29,9 +30,9 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
 
     public InMemoryJobCommands(TimeProvider clock, IEnumerable<JobRevision>? enabledSeeds = null,
         Func<string, CancellationToken, ValueTask>? beforeCommit = null,
-        IEnumerable<JobRevision>? archivedSeeds = null, IConnectionProfiles? profiles = null, IIntegrationSettings? integrationSettings = null, ITemplateCatalog? templateCatalog = null)
+        IEnumerable<JobRevision>? archivedSeeds = null, IConnectionProfiles? profiles = null, IIntegrationSettings? integrationSettings = null, ITemplateCatalog? templateCatalog = null, ITemplateAuthoringService? authoring = null)
     {
-        this.clock = clock; this.profiles=profiles; this.integrationSettings=integrationSettings; this.templateCatalog=templateCatalog;
+        this.clock = clock; this.profiles=profiles; this.integrationSettings=integrationSettings; this.templateCatalog=templateCatalog; this.authoring=authoring;
         this.beforeCommit = beforeCommit;
         foreach (var seed in enabledSeeds ?? []) Seed(seed, false);
         foreach (var seed in archivedSeeds ?? []) Seed(seed, true);
@@ -67,6 +68,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
         JobCommandValidation.ValidateActor(actor);
         JobCommandValidation.ValidateRevision(proposed);
         await TemplateJobValidation.RequireRegisteredAsync(templateCatalog,proposed.TemplateId,proposed.TemplateVersion,ct);
+        await TemplateJobValidation.ValidateBindingsAsync(templateCatalog,proposed,ct);
         if (expectedVersion is not null && expectedVersion.Length != 8)
             throw new WorkerDockException("ValidationFailed", "version");
         await gate.WaitAsync(ct);
@@ -110,7 +112,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             if(!before.Jobs.TryGetValue(jobId,out var editor)) throw new WorkerDockException("JobNotFound");
             if(!editor.Version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
             if(editor.Archived) throw new WorkerDockException("JobArchived");
-            await TemplateJobValidation.ValidateAsync(templateCatalog,editor.Revision,ct);
+            await TemplateJobValidation.ValidateAsync(templateCatalog,editor.Revision,ct,authoring,"Manual");
             if(editor.Revision.ProfileId is { } profileId)
             {
                 var profile=profiles is null ? throw new WorkerDockException("ProfileUnavailable") : await profiles.GetCurrentAsync(profileId,ct);
@@ -146,7 +148,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             if (!before.Jobs.TryGetValue(jobId, out var editor)) throw new WorkerDockException("JobNotFound");
             if (editor.Archived) throw new WorkerDockException("JobArchived");
             if (!editor.Enabled) throw new WorkerDockException("JobDisabled");
-            await TemplateJobValidation.ValidateAsync(templateCatalog,editor.Revision,ct);
+            await TemplateJobValidation.ValidateAsync(templateCatalog,editor.Revision,ct,authoring,"Manual");
             WorkerDock.Contracts.Connections.ConnectionProfileRevision? pinnedProfile=null;
             if(editor.Revision.ProfileId is {} profileId)
                 pinnedProfile=profiles is not null ? (await profiles.GetCurrentAsync(profileId,ct)).Current : throw new WorkerDockException("ProfileUnavailable");

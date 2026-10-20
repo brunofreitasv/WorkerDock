@@ -24,7 +24,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var version = await VersionAsync(database, jobId);
         var lifecycle = new SqlJobLifecycle(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), null, new QuartzScheduleEvaluator(), TimeProvider.System);
@@ -43,7 +43,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var version = await VersionAsync(database, jobId);
         var lifecycle = new SqlJobLifecycle(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), null, new QuartzScheduleEvaluator(), TimeProvider.System);
@@ -66,7 +66,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var lifecycle = new SqlJobLifecycle(options, null, new QuartzScheduleEvaluator(), TimeProvider.System);
@@ -83,7 +83,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var lifecycle = new SqlJobLifecycle(options, null, new QuartzScheduleEvaluator(), TimeProvider.System);
@@ -105,7 +105,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         var start = new DateTime(2026, 10, 18, 0, 0, 0, DateTimeKind.Utc);
@@ -130,7 +130,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:00:00' WHERE ScheduleId='{scheduleId}'");
@@ -150,7 +150,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:00:00',MissedMode=N'CatchUp',LatenessToleranceMs=60000,CatchUpCount=3,CatchUpAgeMs=10800000 WHERE ScheduleId='{scheduleId}'");
@@ -173,7 +173,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         var store = new SqlScheduleCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), new QuartzScheduleEvaluator(), TimeProvider.System, new FixedRulesFingerprint(new string('B', 64)));
@@ -192,7 +192,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         for (var i = 0; i < 105; i++) await SeedScheduledJobAsync(database, enabled: false);
         var store = new SqlScheduleCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), new QuartzScheduleEvaluator(), TimeProvider.System, new FixedRulesFingerprint(new string('B', 64)));
 
@@ -208,7 +208,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var lifecycle = new SqlJobLifecycle(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), null, new QuartzScheduleEvaluator(), TimeProvider.System);
         await lifecycle.ApplyAsync(jobId, "PauseSchedule", await VersionAsync(database, jobId), Actor, default);
@@ -227,7 +227,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var commands = new SqlScheduleCommands(options, new QuartzScheduleEvaluator(), TimeProvider.System);
@@ -257,7 +257,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var profiles = new SqlConnectionProfiles(options);
         var proposed = SqlTemplateTests.Profile();
@@ -281,7 +281,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0005_scheduling", default);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:00:00' WHERE ScheduleId='{scheduleId}'");

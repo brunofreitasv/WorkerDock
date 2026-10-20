@@ -71,7 +71,7 @@ public sealed class CommandOutcomeSqlTests
     public async Task Sql_unconfirmed_running_stop_fails_and_stale_completion_cannot_apply_it(bool snapshot)
     {
         await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options, "command-worker");
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create()); var job = CommandOutcomeTests.Job();
@@ -96,7 +96,7 @@ public sealed class CommandOutcomeSqlTests
     public async Task Sql_ack_audit_failure_rolls_back_publication_and_command_outcome(bool snapshot)
     {
         await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options);
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create()); var job = CommandOutcomeTests.Job();
@@ -122,7 +122,7 @@ public sealed class CommandOutcomeSqlTests
     public async Task Sql_publication_receipts_match_memory_and_survive_lost_ack(bool snapshot, bool rejected)
     {
         await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options);
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create()); var job = CommandOutcomeTests.Job();
@@ -140,7 +140,7 @@ public sealed class CommandOutcomeSqlTests
     public async Task Sql_stop_completion_ordering_settles_confirmed_stop_only(bool snapshot, bool stopFirst)
     {
         await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options, "command-worker");
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create()); var job = CommandOutcomeTests.Job();

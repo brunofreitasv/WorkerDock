@@ -19,7 +19,7 @@ public sealed class ProjectionSqlTests
     public async Task Maintenance_cursor_survives_restart_and_bounds_large_job_backlog(bool snapshot)
     {
         await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await SqlCapacityTestSetup.ReadyAsync(options);
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
@@ -60,7 +60,7 @@ public sealed class ProjectionSqlTests
     {
         await using var fixture = new QuartzProcessFixture();
         await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0003d_dispatch", default);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         await SqlCapacityTestSetup.ReadyAsync(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId));
         var commands = new SqlJobCommands(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId), JobCommandTestCatalog.Create());
         var job = Job();

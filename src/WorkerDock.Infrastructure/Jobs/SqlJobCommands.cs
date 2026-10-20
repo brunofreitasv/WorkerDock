@@ -14,13 +14,14 @@ using WorkerDock.Infrastructure.Templates;
 
 namespace WorkerDock.Infrastructure.Jobs;
 
-public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatalog? templateCatalog = null) : IJobCommands
+public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatalog? templateCatalog = null, ITemplateAuthoringService? authoring = null) : IJobCommands
 {
     public async ValueTask<CommandReceipt> SaveAsync(JobRevision proposed, byte[]? expectedVersion, ActorContext actor, CancellationToken ct)
     {
         JobCommandValidation.ValidateActor(actor);
         JobCommandValidation.ValidateRevision(proposed);
         await TemplateJobValidation.RequireRegisteredAsync(templateCatalog, proposed.TemplateId, proposed.TemplateVersion, ct);
+        await TemplateJobValidation.ValidateBindingsAsync(templateCatalog, proposed, ct);
         if (expectedVersion is not null && expectedVersion.Length != 8)
             throw new WorkerDockException("ValidationFailed", "version");
         try
@@ -61,7 +62,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                     await insertJob.ExecuteNonQueryAsync(token);
                 }
                 await using var insertRevision = Command(connection, transaction,
-                    "INSERT INTO [workerdock].JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc) VALUES (@job,@rev,@name,@template,@version,@config,@profile,@policy,SYSUTCDATETIME())");
+                    "INSERT INTO [workerdock].JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc,DynamicValuesJson) VALUES (@job,@rev,@name,@template,@version,@config,@profile,@policy,SYSUTCDATETIME(),@dynamicValues)");
                 Add(insertRevision, "@job", SqlDbType.UniqueIdentifier, proposed.JobId);
                 Add(insertRevision, "@rev", SqlDbType.BigInt, number);
                 Add(insertRevision, "@name", SqlDbType.NVarChar, proposed.Name, 200);
@@ -70,6 +71,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 Add(insertRevision, "@config", SqlDbType.NVarChar, revision.Configuration.GetRawText(), -1);
                 Add(insertRevision, "@profile", SqlDbType.UniqueIdentifier, proposed.ProfileId ?? (object)DBNull.Value);
                 Add(insertRevision, "@policy", SqlDbType.NVarChar, JsonSerializer.Serialize(revision.Policy), -1);
+                Add(insertRevision, "@dynamicValues", SqlDbType.NVarChar, revision.DynamicValues is { } dynamicValues ? dynamicValues.GetRawText() : DBNull.Value, -1);
                 await insertRevision.ExecuteNonQueryAsync(token);
                 await using var update = Command(connection, transaction,
                     currentVersion is null
@@ -98,7 +100,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
             return await new BusinessTransaction(options).RunAsync<CommandReceipt>(async (connection, transaction, token) =>
             {
                 await CheckInstanceAsync(connection,transaction,token);
-                await using var read=Command(connection,transaction,"SELECT j.CurrentRevision,j.Version,j.Enabled,j.Archived,r.Name,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.ProfileId,r.PolicyJson FROM [workerdock].Jobs j JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision WHERE j.JobId=@id");
+                await using var read=Command(connection,transaction,"SELECT j.CurrentRevision,j.Version,j.Enabled,j.Archived,r.Name,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.ProfileId,r.PolicyJson,r.DynamicValuesJson FROM [workerdock].Jobs j JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision WHERE j.JobId=@id");
                 Add(read,"@id",SqlDbType.UniqueIdentifier,jobId);
                 await using var row=await read.ExecuteReaderAsync(token);
                 if(!await row.ReadAsync(token)) throw new WorkerDockException("JobNotFound");
@@ -106,9 +108,9 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 if(!version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
                 if(row.GetBoolean(3)) throw new WorkerDockException("JobArchived");
                 var isEnabled=row.GetBoolean(2);
-                var revision=new JobRevision(jobId,row.GetInt64(0),row.GetString(4),row.GetString(5),row.GetString(6),JsonDocument.Parse(row.GetString(7)).RootElement.Clone(),row.IsDBNull(8)?null:row.GetGuid(8),JsonSerializer.Deserialize<ExecutionPolicy>(row.GetString(9))!);
+                var revision=new JobRevision(jobId,row.GetInt64(0),row.GetString(4),row.GetString(5),row.GetString(6),JsonDocument.Parse(row.GetString(7)).RootElement.Clone(),row.IsDBNull(8)?null:row.GetGuid(8),JsonSerializer.Deserialize<ExecutionPolicy>(row.GetString(9))!,row.IsDBNull(10)?null:JsonDocument.Parse(row.GetString(10)).RootElement.Clone());
                 await row.CloseAsync();
-                await TemplateJobValidation.ValidateAsync(templateCatalog,revision,token);
+                await TemplateJobValidation.ValidateAsync(templateCatalog,revision,token,authoring, "Manual");
                 if(revision.ProfileId is { } profileId)
                 {
                     await using var profile=Command(connection,transaction,"SELECT Retired,CurrentRevisionId FROM [workerdock].ConnectionProfiles WHERE ProfileId=@id");
@@ -203,13 +205,14 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 }
 
                 await using var configuration = Command(connection, transaction,
-                    "SELECT TemplateId,TemplateVersion,ConfigurationJson FROM [workerdock].JobRevisions WHERE JobId=@job AND Revision=@rev");
+                    "SELECT TemplateId,TemplateVersion,ConfigurationJson,DynamicValuesJson FROM [workerdock].JobRevisions WHERE JobId=@job AND Revision=@rev");
                 Add(configuration, "@job", SqlDbType.UniqueIdentifier, jobId); Add(configuration, "@rev", SqlDbType.BigInt, revision);
                 await using var pinned = await configuration.ExecuteReaderAsync(token); await pinned.ReadAsync(token);
                 using var json = JsonDocument.Parse(pinned.GetString(2));
-                if (!WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(pinned.GetString(0), pinned.GetString(1), json.RootElement))
+                using var dynamicJson = pinned.IsDBNull(3) ? null : JsonDocument.Parse(pinned.GetString(3));
+                if (!WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(pinned.GetString(0), pinned.GetString(1), json.RootElement, dynamicJson?.RootElement))
                     throw new WorkerDockException("ValidationFailed", "configuration");
-                await TemplateJobValidation.ValidateAsync(templateCatalog,pinned.GetString(0),pinned.GetString(1),json.RootElement,token);
+                await TemplateJobValidation.ValidateAsync(templateCatalog,pinned.GetString(0),pinned.GetString(1),json.RootElement,token,authoring, dynamicJson is null ? null : WorkerDock.Contracts.Values.DynamicValueJson.Read(dynamicJson.RootElement), "Manual");
                 await pinned.CloseAsync();
 
                 var executionId = Guid.NewGuid();
@@ -283,8 +286,9 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
             var policy = JsonSerializer.Deserialize<ExecutionPolicy>(row.PolicyJson)
                 ?? throw new WorkerDockException("PersistenceUnavailable");
             using var configuration = JsonDocument.Parse(row.ConfigurationJson);
+            using var dynamicValues = row.DynamicValuesJson is null ? null : JsonDocument.Parse(row.DynamicValuesJson);
             var revision = new JobRevision(jobId, row.Revision, row.Name, row.TemplateId, row.TemplateVersion,
-                configuration.RootElement.Clone(), row.ProfileId, policy);
+                configuration.RootElement.Clone(), row.ProfileId, policy, dynamicValues?.RootElement.Clone());
             return new(revision, job.Version, job.Enabled, job.Archived, job.ConcurrencyLimit);
         }
         catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }

@@ -13,7 +13,7 @@ public sealed class TemplateCatalogSqlTests
     public async Task Restricted_catalog_promotes_bootstrap_once_and_preserves_retired_metadata(bool snapshot)
     {
         await using var fixture=new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant","0004_templates",default);
+        await fixture.Runner.ApplyAsync("tenant","0009_dynamic_values",default);
         var original=TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor() with { Id="workerdock.http" });
         var changed=TemplateMetadata.WithDigest(original with { Description="changed" });
         var options=new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString,fixture.Database.InstanceId);

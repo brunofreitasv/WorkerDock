@@ -19,7 +19,7 @@ public static class JobCommandValidation
         if (string.IsNullOrWhiteSpace(revision.Name) || revision.Name.Length > 200)
             throw new WorkerDockException("ValidationFailed", "name");
         if (revision.Configuration.ValueKind != System.Text.Json.JsonValueKind.Object ||
-            !WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(revision.TemplateId, revision.TemplateVersion, revision.Configuration))
+            !WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(revision.TemplateId, revision.TemplateVersion, revision.Configuration, revision.DynamicValues))
             throw new WorkerDockException("ValidationFailed", "configuration");
         var policy = revision.Policy;
         if (policy is null || (policy.Timeout is { } timeout && timeout <= TimeSpan.Zero) ||
@@ -43,6 +43,7 @@ public static class JobCommandValidation
     public static JobRevision Freeze(JobRevision revision) => revision with
     {
         Configuration = revision.Configuration.Clone(),
+        DynamicValues = revision.DynamicValues?.Clone(),
         Policy = revision.Policy with { RetryableCodes = revision.Policy.RetryableCodes.ToImmutableArray() }
     };
 }
