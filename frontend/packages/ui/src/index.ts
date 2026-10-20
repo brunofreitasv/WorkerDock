@@ -6,3 +6,4 @@ export { TemplateForm } from "./forms/TemplateForm";
 export type { TemplateDescriptorDto } from "./forms/TemplateForm";
 export { SecretReferenceField } from "./forms/SecretReferenceField";
 export { validateSchema } from "./forms/SchemaValidation";
+export { createSchemaDefault } from "./forms/schemaDefaults";

@@ -1,6 +1,7 @@
 import { Box, Button, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { Fragment } from "react";
 import { SecretReferenceField } from "./SecretReferenceField";
+import { createSchemaDefault } from "./schemaDefaults";
 
 export interface TemplateDescriptorDto {
   id: string; version: string; displayName: string; description: string;
@@ -30,7 +31,9 @@ function Node({ schema, value, path, onChange, errors, descriptor }: { schema: a
       {tag && <TextField select label={labelFor(path, descriptor)} value={current ?? selected?.properties?.[tag]?.const ?? ""} onChange={(event) => {
         const branch = branches.find((candidate) => candidate.properties?.[tag]?.const === event.target.value);
         const next: Record<string, unknown> = { ...(value ?? {}), [tag]: event.target.value };
+        const branchDefaults = branch ? createSchemaDefault(branch, descriptor.configurationSchema) as Record<string, unknown> : {};
         for (const key of Object.keys(value ?? {})) if (!branch?.properties?.[key]) delete next[key];
+        Object.assign(next, branchDefaults);
         onChange(next);
       }}>{branches.map((branch, index) => <MenuItem key={index} value={branch.properties?.[tag]?.const ?? index}>{String(branch.properties?.[tag]?.const ?? index)}</MenuItem>)}</TextField>}
       <Node schema={selected} value={value} path={path} onChange={onChange} errors={errors} descriptor={descriptor} />
@@ -43,14 +46,14 @@ function Node({ schema, value, path, onChange, errors, descriptor }: { schema: a
     const properties = schema.properties ?? {};
     return <Stack spacing={2} sx={{ my: 2 }}>
       {Object.entries(properties).map(([key, child]: [string, any]) => <Fragment key={key}>
-        <Node schema={child} value={object[key] ?? defaultFor(child)} path={`${path}.${key}`} onChange={(next) => onChange({ ...object, [key]: next })} errors={errors} descriptor={descriptor} />
+        <Node schema={child} value={object[key]} path={`${path}.${key}`} onChange={(next) => onChange({ ...object, [key]: next })} errors={errors} descriptor={descriptor} />
       </Fragment>)}
       {!schema.properties && schema.additionalProperties && Object.entries(object).map(([key, entry]) => <Stack key={key} direction={{ xs: "column", sm: "row" }} spacing={1}>
         <TextField label="Name" value={key} onChange={(event) => { const next = { ...object }; delete next[key]; onChange({ ...next, [event.target.value]: entry }); }} />
-        <Node schema={schema.additionalProperties} value={entry} path={`${path}.additional`} onChange={(next) => onChange({ ...object, [key]: next })} errors={errors} descriptor={descriptor} />
+        <Node schema={schema.additionalProperties} value={entry} path={path} onChange={(next) => onChange({ ...object, [key]: next })} errors={errors} descriptor={descriptor} />
         <Button onClick={() => { const next = { ...object }; delete next[key]; onChange(next); }}>Remove</Button>
       </Stack>)}
-      {!schema.properties && schema.additionalProperties && <Button onClick={() => onChange({ ...object, [`value${Object.keys(object).length + 1}`]: defaultFor(schema.additionalProperties) })}>Add entry</Button>}
+      {!schema.properties && schema.additionalProperties && <Button onClick={() => onChange({ ...object, [`value${Object.keys(object).length + 1}`]: createSchemaDefault(schema.additionalProperties, descriptor.configurationSchema) ?? "" })}>Add entry</Button>}
     </Stack>;
   }
   if (schema.type === "array" || Array.isArray(value)) {
@@ -58,10 +61,10 @@ function Node({ schema, value, path, onChange, errors, descriptor }: { schema: a
     return <Stack spacing={2} sx={{ my: 2 }}>
       <Typography variant="subtitle2">{labelFor(path, descriptor)}</Typography>
       {items.map((item, index) => <Stack key={index} direction={{ xs: "column", sm: "row" }} spacing={1}>
-        <Node schema={schema.items ?? { type: "string" }} value={item} path={`${path}[]`} onChange={(next) => onChange(items.map((entry, i) => i === index ? next : entry))} errors={errors} descriptor={descriptor} />
+        <Node schema={schema.items ?? { type: "string" }} value={item} path={`${path}[${index}]`} onChange={(next) => onChange(items.map((entry, i) => i === index ? next : entry))} errors={errors} descriptor={descriptor} />
         <Button onClick={() => onChange(items.filter((_, i) => i !== index))}>Remove</Button>
       </Stack>)}
-      <Button onClick={() => onChange([...items, defaultFor(schema.items ?? { type: "string" })])}>Add item</Button>
+      <Button onClick={() => onChange([...items, createSchemaDefault(schema.items ?? { type: "string" }, descriptor.configurationSchema) ?? ""])}>Add item</Button>
       {path !== "configuration" && errors[path] && <Typography color="error" role="alert">{errors[path]}</Typography>}
     </Stack>;
   }
@@ -80,16 +83,6 @@ function Node({ schema, value, path, onChange, errors, descriptor }: { schema: a
 function discriminator(branches: any[]): string | undefined {
   const keys = Object.keys(branches[0]?.properties ?? {});
   return keys.find((key) => branches.every((branch) => branch.required?.includes(key) && typeof branch.properties?.[key]?.const === "string"));
-}
-function defaultFor(schema: any): any {
-  if (Object.hasOwn(schema ?? {}, "default")) return schema.default;
-  if (schema?.type === "object" || schema?.properties) return {};
-  if (schema?.type === "array") return [];
-  if (schema?.enum?.length) return schema.enum[0];
-  if (Array.isArray(schema?.type) && schema.type.includes("null")) return null;
-  if (schema?.type === "boolean") return false;
-  if (schema?.type === "integer" || schema?.type === "number") return "";
-  return "";
 }
 function labelFor(path: string, descriptor: TemplateDescriptorDto): string {
   const key = path.slice(path.lastIndexOf(".") + 1);

@@ -111,6 +111,13 @@ public sealed partial class TemplateCatalogTests
             if(fixture.TryGetProperty("code",out var code)) Assert.Contains(issues,x=>x.Code==code.GetString() && x.Path==fixture.GetProperty("path").GetString());
         }
     }
+    [Fact]
+    public void Missing_required_member_identifies_array_row()
+    {
+        var descriptor=Descriptor("""{"type":"object","properties":{"parameters":{"type":"array","items":{"type":"object","properties":{"isNull":{"type":"boolean"}},"required":["isNull"]}}}}""");
+        var issues=TemplateSchemaValidator.Validate(descriptor,JsonSerializer.Deserialize<JsonElement>("""{"parameters":[{"isNull":true},{}]}"""));
+        Assert.Contains(issues,x=>x.Code=="Required" && x.Path=="configuration.parameters[1].isNull");
+    }
     [Theory]
     [InlineData("maximum","9007199254740992","9007199254740993",false)]
     [InlineData("minimum","9007199254740993","9007199254740992",false)]

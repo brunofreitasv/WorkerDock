@@ -23,7 +23,8 @@ export function validateSchema(schema: Schema, value: unknown): ValidationIssue[
       if (matchesCount !== 1) add(path, "OneOf");
     }
     if (current && typeof current === "object" && !Array.isArray(current)) {
-      for (const required of node.required ?? []) if (!Object.hasOwn(current, required)) add(path, "Required");
+      if (node.maxProperties !== undefined && Object.keys(current).length > node.maxProperties) add(path, "MaxProperties");
+      for (const required of node.required ?? []) if (!Object.hasOwn(current, required)) add(node.properties && Object.hasOwn(node.properties, required) ? `${path}.${required}` : path, "Required");
       for (const [key, child] of Object.entries(current)) {
         if (node.properties && Object.hasOwn(node.properties, key)) visit(node.properties[key], child, `${path}.${key}`, depth + 1);
         else if (Object.hasOwn(node, "additionalProperties")) {
@@ -35,7 +36,7 @@ export function validateSchema(schema: Schema, value: unknown): ValidationIssue[
       bound(current.length, node.minItems, "MinItems", false, path);
       bound(current.length, node.maxItems, "MaxItems", true, path);
       if (node.uniqueItems && current.some((item, i) => current.slice(0, i).some((other) => deepEqual(item, other)))) add(path, "UniqueItems");
-      if (node.items) current.forEach((item, i) => visit(node.items, item, `${path}[]`, depth + 1));
+      if (node.items) current.forEach((item, i) => visit(node.items, item, `${path}[${i}]`, depth + 1));
     } else if (typeof current === "string") {
       const length = [...current].length;
       bound(length, node.minLength, "MinLength", false, path);

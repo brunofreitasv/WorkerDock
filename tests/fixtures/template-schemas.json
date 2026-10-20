@@ -2,6 +2,8 @@
   {"name":"closed-object","schema":{"type":"object","properties":{"count":{"type":"integer","minimum":1,"maximum":5}},"required":["count"],"additionalProperties":false},"configuration":{"count":3},"valid":true},
   {"name":"unexpected-property","schema":{"type":"object","additionalProperties":false},"configuration":{"unexpected":"synthetic"},"valid":false,"path":"configuration","code":"AdditionalProperty"},
   {"name":"required","schema":{"type":"object","required":["name"]},"configuration":{},"valid":false,"path":"configuration","code":"Required"},
+  {"name":"missing-required-array-member","schema":{"type":"object","properties":{"parameters":{"type":"array","items":{"type":"object","properties":{"isNull":{"type":"boolean"}},"required":["isNull"]}}}},"configuration":{"parameters":[{"isNull":true},{}]},"valid":false,"path":"configuration.parameters[1].isNull","code":"Required"},
+  {"name":"max-properties","schema":{"type":"object","maxProperties":1,"additionalProperties":{"type":"string"}},"configuration":{"first":"a","second":"b"},"valid":false,"path":"configuration","code":"MaxProperties"},
   {"name":"nullable-type","schema":{"type":["string","null"]},"configuration":null,"valid":true},
   {"name":"enum","schema":{"type":"string","enum":["a","b"]},"configuration":"c","valid":false,"path":"configuration","code":"Enum"},
   {"name":"array-bound","schema":{"type":"array","minItems":1,"maxItems":2,"items":{"type":"boolean"}},"configuration":[true,false,true],"valid":false,"path":"configuration","code":"MaxItems"},

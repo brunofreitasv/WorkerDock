@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem, Paper, Stack, Step, StepButton, Stepper, Switch, TextField, Typography } from "@mui/material";
-import { TemplateForm, validateSchema, type Labels, type Language } from "@workerdock/ui";
+import { createSchemaDefault, TemplateForm, validateSchema, type Labels, type Language } from "@workerdock/ui";
 import { ApiError, mutate, read } from "../../api/client";
 import { TemplatePicker, type CatalogItem } from "../templates/TemplatePicker";
 import { ScheduleEditor, type ScheduleEditorInputDto } from "../schedules/ScheduleEditor";
@@ -42,7 +42,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
   const summary = useRef<HTMLDivElement>(null);
   const localIssues = useMemo(() => selected ? validateSchema(selected.descriptor.configurationSchema, configuration) : [], [selected, configuration]);
   const labels = [t.stageTemplate, t.stageConfiguration, t.stageSchedule, t.stagePolicy, t.stageReview, t.stageActivation];
-  useEffect(() => { let current = true; void read<{ items: CatalogItem[] }>("/api/templates").then(result => { if (current) { const initial = result.data.items.find(item => item.selectable); setCatalog(result.data.items); setSelected(initial); setConfiguration(initial ? defaults(initial.descriptor.configurationSchema) : {}); } }).catch(() => { if (current) setMessage(t.requestError); }).finally(() => { if (current) setLoading(false); }); return () => { current = false; }; }, []);
+  useEffect(() => { let current = true; void read<{ items: CatalogItem[] }>("/api/templates").then(result => { if (current) { const initial = result.data.items.find(item => item.selectable); setCatalog(result.data.items); setSelected(initial); setConfiguration(initial ? createSchemaDefault(initial.descriptor.configurationSchema, initial.descriptor.configurationSchema) as Record<string, unknown> : {}); } }).catch(() => { if (current) setMessage(t.requestError); }).finally(() => { if (current) setLoading(false); }); return () => { current = false; }; }, []);
   useEffect(() => { if (message) summary.current?.focus(); }, [message]);
   const saveDraft = async () => {
     if (staleConflict || !reviewAcknowledged) return false;
@@ -230,7 +230,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
     if (step === 4 && !job) { if (!(await saveDraft())) return; }
     setMessage(""); setStep(value => Math.min(5, value + 1));
   };
-  const selectTemplate = (item?: CatalogItem) => { setSelected(item); setConfiguration(item ? defaults(item.descriptor.configurationSchema) : {}); setIssues([]); };
+  const selectTemplate = (item?: CatalogItem) => { setSelected(item); setConfiguration(item ? createSchemaDefault(item.descriptor.configurationSchema, item.descriptor.configurationSchema) as Record<string, unknown> : {}); setIssues([]); };
   if (loading) return null;
   if (!catalog.length) return <Alert severity="info">{t.noTemplates}</Alert>;
   const fieldErrors = Object.fromEntries(issues.map(issue => [issue.path, issue.code]));
@@ -272,4 +272,3 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
 function schedulePayload(value: ScheduleEditorInputDto) { return { kind: value.kind, cron: value.kind === "Cron" ? value.cron : null, zoneId: value.zoneId, localOnce: value.kind === "Once" && value.localOnce ? `${value.localOnce}:00` : null, selectedOffset: value.kind === "Once" ? value.selectedOffset : null }; }
 function secondsToTimeSpan(seconds: number): string { const safe = Math.max(1, Math.floor(seconds)); return `${String(Math.floor(safe / 3600)).padStart(2, "0")}:${String(Math.floor((safe % 3600) / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`; }
 function timeSpanSeconds(value: string | null): number | "" { if (!value) return ""; const parts = value.split(":"); if (parts.length < 3) return ""; const dayHour = parts[0].split("."); const days = dayHour.length === 2 ? Number(dayHour[0]) : 0; const hours = Number(dayHour.at(-1)); return days * 86400 + hours * 3600 + Number(parts[1]) * 60 + Number(parts[2]); }
-function defaults(schema: any): Record<string, unknown> { const result: Record<string, unknown> = {}; for (const [key, property] of Object.entries<any>(schema.properties ?? {})) { if (Object.hasOwn(property, "default")) result[key] = property.default; else if (property.$ref?.startsWith("#/$defs/")) result[key] = ""; else if (property.type === "object" || property.properties) result[key] = defaults(property); else if (property.type === "array") result[key] = []; else if (property.enum?.length) result[key] = property.enum[0]; else if (Array.isArray(property.type) && property.type.includes("null")) result[key] = null; else if (property.type === "boolean") result[key] = false; else result[key] = ""; } return result; }

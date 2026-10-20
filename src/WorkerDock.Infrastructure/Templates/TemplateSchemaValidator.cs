@@ -192,7 +192,15 @@ public static class TemplateSchemaValidator
             case JsonValueKind.Object:
                 var propertyNames=new HashSet<string>(StringComparer.Ordinal);
                 if(schema.TryGetProperty("maxProperties",out var maxProperties) && value.EnumerateObject().Count()>maxProperties.GetInt32()) Add("MaxProperties");
-                if(schema.TryGetProperty("required",out var required)) foreach(var name in required.EnumerateArray()) if(!value.TryGetProperty(name.GetString()!,out _)) Add("Required");
+                if(schema.TryGetProperty("required",out var required)) foreach(var name in required.EnumerateArray())
+                {
+                    var member=name.GetString()!;
+                    if(!value.TryGetProperty(member,out _))
+                    {
+                        var memberPath=schema.TryGetProperty("properties",out var declared) && declared.ValueKind==JsonValueKind.Object && declared.TryGetProperty(member,out _) ? path+"."+member : path;
+                        if(issues.Count<64) issues.Add(new(memberPath,"Required"));
+                    }
+                }
                 foreach(var property in value.EnumerateObject())
                 {
                     if(!propertyNames.Add(property.Name)) Add("DuplicateProperty");
@@ -212,7 +220,7 @@ public static class TemplateSchemaValidator
                         if(JsonElement.DeepEquals(array[i],array[j])) { Add("UniqueItems"); return; }
                     }
                 }
-                if(schema.TryGetProperty("items",out var item)) foreach(var element in array) Check(root,item,element,path+"[]",issues,depth+1,budget);
+                if(schema.TryGetProperty("items",out var item)) for(var index=0;index<array.Length;index++) Check(root,item,array[index],path+"["+index.ToString(CultureInfo.InvariantCulture)+"]",issues,depth+1,budget);
                 break;
             case JsonValueKind.String:
                 var text=value.GetString()!; var length=text.EnumerateRunes().Count();
