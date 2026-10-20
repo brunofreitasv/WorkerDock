@@ -21,6 +21,42 @@ describe("tenant help guides", () => {
     }
   });
 
+  it("contains exactly twelve bilingual guides with required sections and resolvable links", () => {
+    const expected = ["getting-started", "dashboard", "monitoring", "workers-audit", "alerts", "sql-profiles", "templates", "jobs", "schedules", "sql-jobs", "http-jobs", "settings"];
+    expect(helpTopics.map(topic => topic.slug)).toEqual(expected);
+    const routes = new Set(["#/dashboard", "#/monitoring", "#/workers", "#/audit", "#/alerts", "#/templates", "#/jobs", "#/settings"]);
+    for (const language of ["en", "pt-BR"] as const) {
+      expect(helpTopics.every(topic => topic.title[language].trim() && topic.category[language].trim())).toBe(true);
+      for (const slug of expected) {
+        const article = getHelpArticle(language, slug);
+        expect(article, `${language}/${slug} exists`).toBeTruthy();
+        expect(article).toMatch(/## (Prerequisites|Pré-requisitos)/i);
+        expect(article).toMatch(/## (Role|Função|Permission|Permissão)/i);
+        expect(article).toMatch(/## (Steps|Etapas)/i);
+        expect(article).toMatch(/## (Result|Resultado)/i);
+        const links = [...article!.matchAll(/\]\((#[^\s)]+)\)/g)].map(match => match[1]);
+        for (const route of links) {
+          const helpSlug = route.match(/^#\/help:([a-z0-9-]+)$/)?.[1];
+          expect(routes.has(route) || helpTopics.some(topic => topic.slug === helpSlug), `${language}/${slug} link ${route}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("documents the tenant job, schedule, SQL, HTTP, and settings workflows", () => {
+    const en = (slug: string) => getHelpArticle("en", slug)!.toLowerCase();
+    expect(en("jobs")).toContain("six stages");
+    expect(en("jobs")).toMatch(/disabled draft|draft.*disabled/);
+    expect(en("jobs")).toMatch(/pause|resume|archive/);
+    expect(en("schedules")).toMatch(/time zone|timezone/);
+    expect(en("schedules")).toMatch(/overlap|misfire|missed/);
+    expect(en("sql-jobs")).toMatch(/typed parameter/);
+    expect(en("sql-jobs")).toMatch(/profile/);
+    expect(en("http-jobs")).toMatch(/allowlist/);
+    expect(en("http-jobs")).toMatch(/secret.*header|header.*secret/);
+    expect(en("settings")).toMatch(/retention/);
+  });
+
   it.each(["en", "pt-BR"] as const)("bundles monitoring, alert, profile, and template guides in %s", language => {
     const expected = ["monitoring", "workers-audit", "alerts", "sql-profiles", "templates"];
     const routes = new Set(["#/dashboard", "#/monitoring", "#/workers", "#/audit", "#/alerts", "#/templates", "#/jobs", "#/settings"]);

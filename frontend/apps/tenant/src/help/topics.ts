@@ -17,6 +17,11 @@ export const helpTopics: readonly HelpTopic[] = [
   { slug: "alerts", title: { en: "Set up alerts", "pt-BR": "Configure alertas" }, category: { en: "Operations", "pt-BR": "Operações" }, route: "#/alerts", requiredRole: "Manage" },
   { slug: "sql-profiles", title: { en: "Manage SQL Server profiles", "pt-BR": "Gerencie perfis do SQL Server" }, category: { en: "Integrations", "pt-BR": "Integrações" }, route: "#/settings", requiredRole: "Manage" },
   { slug: "templates", title: { en: "Browse installed templates", "pt-BR": "Explore modelos instalados" }, category: { en: "Jobs", "pt-BR": "Tarefas" }, route: "#/templates", requiredRole: "Read" },
+  { slug: "jobs", title: { en: "Create and manage jobs", "pt-BR": "Crie e gerencie tarefas" }, category: { en: "Jobs", "pt-BR": "Tarefas" }, route: "#/jobs", requiredRole: "Manage" },
+  { slug: "schedules", title: { en: "Manage schedules", "pt-BR": "Gerencie agendamentos" }, category: { en: "Jobs", "pt-BR": "Tarefas" }, route: "#/jobs", requiredRole: "Manage" },
+  { slug: "sql-jobs", title: { en: "Configure SQL Server jobs", "pt-BR": "Configure tarefas do SQL Server" }, category: { en: "Jobs", "pt-BR": "Tarefas" }, route: "#/jobs", requiredRole: "Manage" },
+  { slug: "http-jobs", title: { en: "Configure HTTP jobs", "pt-BR": "Configure tarefas HTTP" }, category: { en: "Jobs", "pt-BR": "Tarefas" }, route: "#/jobs", requiredRole: "Manage" },
+  { slug: "settings", title: { en: "Manage tenant settings", "pt-BR": "Gerencie as configurações do tenant" }, category: { en: "Administration", "pt-BR": "Administração" }, route: "#/settings", requiredRole: "Manage" },
 ];
 
 function normalize(value: string): string {
