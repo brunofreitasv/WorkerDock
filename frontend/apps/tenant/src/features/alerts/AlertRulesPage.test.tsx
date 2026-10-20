@@ -81,6 +81,87 @@ test("managers create webhook sinks without If-Match and load the saved ETag", a
   expect(await screen.findByRole("textbox", { name: "Sink name" })).toHaveValue("Created sink");
 });
 
+test("managers create disabled rules then enable them with the loaded ETag", async () => {
+  const id = "44444444-4444-4444-8444-444444444444";
+  const calls: Array<{ path: string; init?: RequestInit }> = [];
+  vi.stubGlobal("crypto", { randomUUID: () => id });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost"); calls.push({ path: url.pathname, init });
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response("[]");
+    if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
+    if (url.pathname === `/api/alert-rules/${id}` && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ rule: body, version: body.enabled ? "enabled-v2" : "created-v1" }));
+    }
+    if (url.pathname === `/api/alert-rules/${id}`) {
+      const enabled = calls.some(call => call.path === `/api/alert-rules/${id}` && call.init?.method === "PUT" && JSON.parse(String(call.init.body)).enabled);
+      return new Response(JSON.stringify({ ...rule, id, name: "Created rule", enabled }), { headers: { ETag: enabled ? '"enabled-v2"' : '"created-v1"' } });
+    }
+    if (url.pathname === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
+    return new Response("{}", { status: 404 });
+  }));
+  const user = userEvent.setup();
+  render(<AlertRulesPage t={translations.en} canManage />);
+  await user.click(await screen.findByRole("button", { name: "New alert rule" }));
+  await user.type(screen.getByRole("textbox", { name: "Rule name" }), "Created rule");
+  await user.click(screen.getByRole("button", { name: "Create rule" }));
+  await waitFor(() => expect(calls.some(call => call.path === `/api/alert-rules/${id}` && call.init?.method === "PUT")).toBe(true));
+  const create = calls.find(call => call.path === `/api/alert-rules/${id}` && call.init?.method === "PUT")!;
+  expect(JSON.parse(String(create.init?.body))).toMatchObject({ id, enabled: false, condition: "RepeatedFailure", threshold: 3, windowSeconds: 300, graceSeconds: 0, reminderSeconds: 0, sinkId: sink.id });
+  expect(new Headers(create.init?.headers).has("If-Match")).toBe(false);
+  await user.click(await screen.findByRole("button", { name: "Enable" }));
+  await waitFor(() => expect(calls.filter(call => call.path === `/api/alert-rules/${id}` && call.init?.method === "PUT")).toHaveLength(2));
+  const enable = calls.filter(call => call.path === `/api/alert-rules/${id}` && call.init?.method === "PUT")[1];
+  expect(JSON.parse(String(enable.init?.body)).enabled).toBe(true);
+  expect(new Headers(enable.init?.headers).get("If-Match")).toBe('"created-v1"');
+});
+
+test("rule creation without an enabled sink gives guidance and keeps the draft", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response("[]");
+    if (url.pathname === "/api/alert-sinks") return new Response("[]");
+    return new Response("{}", { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const user = userEvent.setup();
+  render(<AlertRulesPage t={translations.en} canManage />);
+  await user.click(await screen.findByRole("button", { name: "New alert rule" }));
+  expect(await screen.findByText(translations.en.alertRuleNeedsSink)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Create rule" })).toBeDisabled();
+  expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/api/alert-rules/") && init?.method === "PUT")).toBe(false);
+});
+
+test("invalid condition threshold and timing fields retain the rule draft", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response("[]");
+    if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
+    if (url.pathname === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
+    return new Response("{}", { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const user = userEvent.setup();
+  render(<AlertRulesPage t={translations.en} canManage />);
+  await user.click(await screen.findByRole("button", { name: "New alert rule" }));
+  await user.type(screen.getByRole("textbox", { name: "Rule name" }), "Draft rule");
+  await user.click(screen.getByRole("combobox", { name: "Condition" }));
+  await user.click(await screen.findByRole("option", { name: "Long running" }));
+  const threshold = screen.getByRole("spinbutton", { name: "Threshold" });
+  await user.clear(threshold); await user.type(threshold, "3");
+  const window = screen.getByRole("spinbutton", { name: "Window (seconds)" });
+  await user.clear(window); await user.type(window, "2592001");
+  await user.click(screen.getByRole("button", { name: "Create rule" }));
+  expect(threshold).toHaveValue(3);
+  expect(window).toHaveValue(2592001);
+  expect(await screen.findByText(translations.en.alertRuleThresholdInvalid)).toBeVisible();
+  expect(screen.getByText(translations.en.alertRuleTimingInvalid)).toBeVisible();
+  expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/api/alert-rules/") && init?.method === "PUT")).toBe(false);
+});
+
 test("invalid webhook fields keep a new sink draft without sending it", async () => {
   const id = "33333333-3333-4333-8333-333333333333";
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

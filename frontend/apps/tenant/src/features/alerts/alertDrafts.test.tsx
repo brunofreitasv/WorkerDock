@@ -1,5 +1,16 @@
 import { expect, test } from "vitest";
-import { createSinkDraft, sinkPayload } from "./alertDrafts";
+import { createRuleDraft, rulePayload, createSinkDraft, sinkPayload } from "./alertDrafts";
+
+test("creates a disabled alert rule with safe defaults", () => {
+  expect(createRuleDraft("rule-id", "sink-id")).toEqual({
+    id: "rule-id", name: "", condition: "RepeatedFailure", threshold: 3,
+    windowSeconds: 300, graceSeconds: 0, reminderSeconds: 0, sinkId: "sink-id", enabled: false, version: "",
+  });
+  expect(rulePayload(createRuleDraft("rule-id", "sink-id"))).toEqual({
+    id: "rule-id", name: "", condition: "RepeatedFailure", threshold: 3,
+    windowSeconds: 300, graceSeconds: 0, reminderSeconds: 0, sinkId: "sink-id", enabled: false,
+  });
+});
 
 test("creates a webhook sink with safe defaults", () => {
   expect(createSinkDraft("sink-id")).toEqual({

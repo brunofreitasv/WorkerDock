@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Checkbox, FormControlLabel, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { ApiError, mutate, read } from "../../api/client";
 import type { Labels } from "../../../../../packages/ui/src/preferences";
-import { createSinkDraft, sinkPayload, type AlertSink } from "./alertDrafts";
+import { createRuleDraft, createSinkDraft, rulePayload, sinkPayload, type AlertRule, type AlertSink } from "./alertDrafts";
 
 const conditions = ["RepeatedFailure", "RetryExhausted", "Timeout", "LongRunning", "MissedExecution", "WorkerUnavailable"] as const;
 const forbiddenHeaders = new Set(["host", "content-length", "transfer-encoding", "connection", "keep-alive", "proxy-connection", "upgrade", "te", "trailer", "expect"]);
 const controls = /[\u0000-\u001f\u007f]/;
-interface AlertRule { id: string; name: string; condition: string; threshold: number; windowSeconds: number; graceSeconds: number; reminderSeconds: number; sinkId: string; enabled: boolean; version: string }
 interface HeaderReference { name: string; secretReference: string }
 interface Incident { incidentId: string; ruleName: string; condition: string; subjectKey: string; state: string; openedAtUtc: string; lastObservedAtUtc: string; resolvedAtUtc: string | null; safeCode: string | null }
 interface Delivery { deliveryId: string; incidentId: string; kind: string; status: string; attemptCount: number; nextAvailableAtUtc: string; completedAtUtc: string | null; safeCode: string | null }
@@ -35,6 +34,8 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
   const [ruleDraft, setRuleDraft] = useState<AlertRule>(); const [sinkDraft, setSinkDraft] = useState<AlertSink>();
   const [ruleEtag, setRuleEtag] = useState<string>(); const [sinkEtag, setSinkEtag] = useState<string>();
   const [creatingSink, setCreatingSink] = useState(false);
+  const [creatingRule, setCreatingRule] = useState(false);
+  const [sinksLoaded, setSinksLoaded] = useState(false);
   const [createdSink, setCreatedSink] = useState(false);
   const [incidents, setIncidents] = useState<Incident[]>([]); const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [error, setError] = useState(""); const [saved, setSaved] = useState(false); const [busy, setBusy] = useState(false); const [invalid, setInvalid] = useState(false);
@@ -42,14 +43,14 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
     setError("");
     const tasks: Promise<unknown>[] = [read<Incident[]>("/api/alerts/incidents?limit=100").then(x => setIncidents(x.data)), read<Delivery[]>("/api/alerts/deliveries?limit=100").then(x => setDeliveries(x.data))];
     if (canManage) {
-      tasks.push(read<AlertRule[]>("/api/alert-rules").then(x => { setRules(x.data); setRuleId(id => id || x.data[0]?.id || ""); }), read<AlertSink[]>("/api/alert-sinks").then(x => { const data = x.data.map(safeSink); setSinks(data); setSinkId(id => id || data[0]?.id || ""); }));
+      tasks.push(read<AlertRule[]>("/api/alert-rules").then(x => { setRules(x.data); setRuleId(id => id || x.data[0]?.id || ""); }), read<AlertSink[]>("/api/alert-sinks").then(x => { const data = x.data.map(safeSink); setSinks(data); setSinksLoaded(true); setSinkId(id => id || data[0]?.id || ""); }));
       if (ruleId) tasks.push(read<AlertRule>(`/api/alert-rules/${ruleId}`).then(({ data, etag }) => { setRuleDraft(data); setRuleEtag(etag ?? undefined); }));
       if (sinkId && !creatingSink) tasks.push(read<AlertSink>(`/api/alert-sinks/${sinkId}`).then(({ data, etag }) => { setSinkDraft(safeSink(data)); setSinkEtag(etag ?? undefined); }));
     }
     void Promise.all(tasks).catch(() => setError(t.requestError));
   };
   useEffect(load, [canManage, t.requestError]);
-  useEffect(() => { if (canManage && ruleId) void read<AlertRule>(`/api/alert-rules/${ruleId}`).then(({ data, etag }) => { setRuleDraft(data); setRuleEtag(etag ?? undefined); }).catch(() => setError(t.requestError)); }, [canManage, ruleId]);
+  useEffect(() => { if (canManage && ruleId && !creatingRule) void read<AlertRule>(`/api/alert-rules/${ruleId}`).then(({ data, etag }) => { setRuleDraft(data); setRuleEtag(etag ?? undefined); }).catch(() => setError(t.requestError)); }, [canManage, ruleId, creatingRule]);
   useEffect(() => { if (canManage && sinkId && !creatingSink) void read<AlertSink>(`/api/alert-sinks/${sinkId}`).then(({ data, etag }) => { setSinkDraft(safeSink(data)); setSinkEtag(etag ?? undefined); }).catch(() => setError(t.requestError)); }, [canManage, sinkId, creatingSink]);
   const ruleValid = !!ruleDraft && ruleDraft.name.trim().length > 0 && ruleDraft.name.length <= 150 && !controls.test(ruleDraft.name) && conditions.includes(ruleDraft.condition as typeof conditions[number]) && integer(ruleDraft.threshold, 1, 1000) && integer(ruleDraft.windowSeconds, 1, 2592000) && integer(ruleDraft.graceSeconds, 0, 2592000) && integer(ruleDraft.reminderSeconds, 0, 2592000) && (!(["LongRunning", "WorkerUnavailable"].includes(ruleDraft.condition)) || ruleDraft.threshold === 1) && sinks.some(s => s.id === ruleDraft.sinkId && s.enabled);
   const sinkValid = !!sinkDraft && sinkDraft.name.trim().length > 0 && sinkDraft.name.length <= 150 && !controls.test(sinkDraft.name) && sinkDraft.type === "webhook" && validUrl(sinkDraft.configuration.url) && validHeaders(sinkDraft.configuration.headers) && integer(sinkDraft.maxAttempts, 1, 20) && integer(sinkDraft.retryBaseDelaySeconds, 0, 86400) && integer(sinkDraft.retryMaxDelaySeconds, sinkDraft.retryBaseDelaySeconds, 86400) && integer(sinkDraft.timeoutSeconds, 1, 120) && new TextEncoder().encode(JSON.stringify(sinkDraft.configuration)).length <= 4000;
@@ -58,6 +59,27 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
     setBusy(true); setError("");
     try { const result = await mutate<{ rule: Omit<AlertRule, "version">; version: string }>(`/api/alert-rules/${ruleDraft.id}`, "PUT", { id: ruleDraft.id, name: ruleDraft.name.trim(), condition: ruleDraft.condition, threshold: ruleDraft.threshold, windowSeconds: ruleDraft.windowSeconds, graceSeconds: ruleDraft.graceSeconds, reminderSeconds: ruleDraft.reminderSeconds, sinkId: ruleDraft.sinkId, enabled: ruleDraft.enabled }, ruleEtag); const updated = { ...result.rule, version: result.version }; setRuleDraft(updated); setRuleEtag(`"${updated.version}"`); setRules(items => items.map(item => item.id === updated.id ? updated : item)); setCreatedSink(false); setSaved(true); setInvalid(false); }
     catch (cause) { setError(cause instanceof ApiError && cause.status === 412 ? t.stale : t.requestError); } finally { setBusy(false); }
+  };
+  const createRule = async () => {
+    setInvalid(true); setSaved(false); if (!ruleDraft || !ruleValid) return;
+    setBusy(true); setError("");
+    try {
+      await mutate(`/api/alert-rules/${ruleDraft.id}`, "PUT", rulePayload({ ...ruleDraft, name: ruleDraft.name.trim(), enabled: false }));
+      const { data, etag } = await read<AlertRule>(`/api/alert-rules/${ruleDraft.id}`);
+      setRuleDraft(data); setRuleEtag(etag ?? undefined); setRules(items => [data, ...items.filter(item => item.id !== data.id)]);
+      setCreatingRule(false); setSaved(true); setInvalid(false);
+    } catch (cause) { setError(t.alertRuleCreateError); }
+    finally { setBusy(false); }
+  };
+  const enableRule = async () => {
+    if (!ruleDraft || !ruleEtag || ruleDraft.enabled) return;
+    setBusy(true); setError("");
+    try {
+      const result = await mutate<{ rule: Omit<AlertRule, "version">; version: string }>(`/api/alert-rules/${ruleDraft.id}`, "PUT", rulePayload({ ...ruleDraft, enabled: true }), ruleEtag);
+      const updated = { ...result.rule, version: result.version }; setRuleDraft(updated); setRuleEtag(`"${updated.version}"`);
+      setRules(items => items.map(item => item.id === updated.id ? updated : item)); setSaved(true);
+    } catch (cause) { setError(cause instanceof ApiError && cause.status === 412 ? t.stale : t.requestError); }
+    finally { setBusy(false); }
   };
   const saveSink = async () => {
     setInvalid(true); setSaved(false); if (!sinkDraft || (!creatingSink && !sinkEtag) || !sinkValid) return;
@@ -93,18 +115,22 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
     {canManage && <>
       <Paper variant="outlined" sx={{ p: 3, maxWidth: 900 }}><Stack spacing={2}>
         <Typography component="h2" variant="h6">{t.alertRules}</Typography><Typography color="text.secondary">{t.alertDuplicateDeliveryHelp}</Typography>
+        <Button variant="outlined" disabled={!sinksLoaded} onClick={() => { const defaultSink = sinks.find(s => s.enabled); const draft = createRuleDraft(crypto.randomUUID(), defaultSink?.id ?? ""); setRuleDraft(draft); setRuleId(""); setRuleEtag(undefined); setCreatingRule(true); setSaved(false); setInvalid(false); setError(""); }}>{t.alertNewRule}</Button>
+        {sinksLoaded && !sinks.some(s => s.enabled) && <Typography role="status" color="text.secondary">{t.alertRuleNeedsSink}</Typography>}
         <TextField select label={t.alertRule} value={ruleId} onChange={e => { setRuleId(e.target.value); setRuleDraft(undefined); setRuleEtag(undefined); }} disabled={!rules.length}>{rules.map(r => <MenuItem key={r.id} value={r.id}>{r.name} · {r.enabled ? t.enabled : t.disabled}</MenuItem>)}</TextField>
         {ruleDraft && <Stack spacing={2}>
           <TextField label={t.alertRuleName} value={ruleDraft.name} onChange={e => updateRule({ name: e.target.value })} />
           <TextField select label={t.alertCondition} value={ruleDraft.condition} onChange={e => updateRule({ condition: e.target.value })}>{conditions.map(c => <MenuItem key={c} value={c}>{t[`alertCondition${c}` as keyof Labels]}</MenuItem>)}</TextField>
-          <TextField type="number" label={t.alertThreshold} value={ruleDraft.threshold} onChange={e => updateRule({ threshold: Number(e.target.value) })} slotProps={{ htmlInput: { min: 1, max: 1000 } }} />
-          <TextField type="number" label={t.alertWindowSeconds} value={ruleDraft.windowSeconds} onChange={e => updateRule({ windowSeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 1, max: 2592000 } }} />
-          <TextField type="number" label={t.alertGraceSeconds} value={ruleDraft.graceSeconds} onChange={e => updateRule({ graceSeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 0, max: 2592000 } }} />
-          <TextField type="number" label={t.alertReminderSeconds} value={ruleDraft.reminderSeconds} onChange={e => updateRule({ reminderSeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 0, max: 2592000 } }} />
+          <TextField type="number" label={t.alertThreshold} value={ruleDraft.threshold} error={invalid && (!integer(ruleDraft.threshold, 1, 1000) || (["LongRunning", "WorkerUnavailable"].includes(ruleDraft.condition) && ruleDraft.threshold !== 1))} onChange={e => updateRule({ threshold: Number(e.target.value) })} slotProps={{ htmlInput: { min: 1, max: 1000 } }} />
+          <TextField type="number" label={t.alertWindowSeconds} value={ruleDraft.windowSeconds} error={invalid && !integer(ruleDraft.windowSeconds, 1, 2592000)} onChange={e => updateRule({ windowSeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 1, max: 2592000 } }} />
+          <TextField type="number" label={t.alertGraceSeconds} value={ruleDraft.graceSeconds} error={invalid && !integer(ruleDraft.graceSeconds, 0, 2592000)} onChange={e => updateRule({ graceSeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 0, max: 2592000 } }} />
+          <TextField type="number" label={t.alertReminderSeconds} value={ruleDraft.reminderSeconds} error={invalid && !integer(ruleDraft.reminderSeconds, 0, 2592000)} onChange={e => updateRule({ reminderSeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 0, max: 2592000 } }} />
           <TextField select label={t.alertSink} value={ruleDraft.sinkId} onChange={e => updateRule({ sinkId: e.target.value })}>{sinks.map(s => <MenuItem key={s.id} value={s.id} disabled={!s.enabled}>{s.name}{s.enabled ? "" : ` · ${t.disabled}`}</MenuItem>)}</TextField>
-          <FormControlLabel control={<Checkbox checked={ruleDraft.enabled} onChange={e => updateRule({ enabled: e.target.checked })} />} label={t.enabled} />
+          {!ruleDraft.enabled && !creatingRule && <Button onClick={enableRule} disabled={busy || !ruleEtag || !ruleValid}>{t.alertEnableRule}</Button>}
           {invalid && !ruleValid && <Typography role="alert" color="error">{t.validation}</Typography>}
-          <Button variant="contained" onClick={saveRule} disabled={busy || !ruleEtag}>{t.save}</Button>
+          {invalid && (!integer(ruleDraft.threshold, 1, 1000) || (["LongRunning", "WorkerUnavailable"].includes(ruleDraft.condition) && ruleDraft.threshold !== 1)) && <Typography role="alert" color="error">{t.alertRuleThresholdInvalid}</Typography>}
+          {invalid && (!integer(ruleDraft.windowSeconds, 1, 2592000) || !integer(ruleDraft.graceSeconds, 0, 2592000) || !integer(ruleDraft.reminderSeconds, 0, 2592000)) && <Typography role="alert" color="error">{t.alertRuleTimingInvalid}</Typography>}
+          {creatingRule ? <Button variant="contained" onClick={createRule} disabled={busy || !sinks.some(s => s.enabled)}>{t.alertCreateRule}</Button> : <Button variant="contained" onClick={saveRule} disabled={busy || !ruleEtag}>{t.save}</Button>}
         </Stack>}
       </Stack></Paper>
       <Paper variant="outlined" sx={{ p: 3, maxWidth: 900 }}><Stack spacing={2}>
