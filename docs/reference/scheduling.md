@@ -43,7 +43,7 @@ Cron definitions retain their IANA zone. The evaluator is authoritative for DST 
 
 Enable validates the current saved job revision, template configuration, profile availability, execution policy, and optional schedule under the job lock, then updates enabled state, activation boundary, audit, command receipt, and schedule projection intent transactionally. `EnableManual` additionally rejects any saved schedule. Pause removes future Quartz triggers and resume resets the cursor to the resume instant, so the paused interval is not replayed. Disable/Archive close the business start gate before projecting Quartz removal. Archive tombstones the schedule; deleting a schedule leaves a manual job. These controls do not cancel accepted or running work. Retry operates on its accepted execution and never re-enters missed-occurrence policy.
 
-The delay from the scheduled UTC instant to execution start is the schedule delay metric; the time from occurrence materialization to Quartz projection is the projection delay metric. Durable lifecycle state and the acceptance path are SQL Server owned. Migration `0005_scheduling` introduced the schedule tables; current tenant installation and upgrade instructions are in [Set up SQL Server](how-to/setup-sql-server.md).
+The delay from the scheduled UTC instant to execution start is the schedule delay metric; the time from occurrence materialization to Quartz projection is the projection delay metric. Durable lifecycle state and the acceptance path are SQL Server owned. Migration `0005_scheduling` introduced the schedule tables; current tenant installation and upgrade instructions are in [Set up SQL Server](../how-to/setup-sql-server.md).
 
 ## Operator editor
 

@@ -1,11 +1,11 @@
 # Database migrations and verification
 
-Use [Set up SQL Server](how-to/setup-sql-server.md) for current tenant database
+Use [Set up SQL Server](../how-to/setup-sql-server.md) for current tenant database
 provisioning, migration, runtime identity, rollback, and SQL integration test
 procedures. The Control Center uses protected files and has no SQL database,
 migration, or runtime SQL identity. There is no Control Center SQL migration
-or import command. See [Control Center](control-center.md).
-The [database object reference](reference/database-objects.md) lists current
+or import command. See [Control Center](../how-to/configure-control-center.md).
+The [database object reference](database-objects.md) lists current
 tenant migration objects and test-only SQL fixtures.
 
 Tenant schema history is ordered by `database/tenant/manifest.json`. The current

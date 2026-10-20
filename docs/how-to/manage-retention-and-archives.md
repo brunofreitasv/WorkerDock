@@ -26,7 +26,7 @@ Include an `ETag` response header (for example, `"retention-v1"`) and have `PUT`
 
 ## SQL Server installation and migration
 
-Use SQL Server 2022 or newer with database compatibility level 160. Back up the tenant database and verify the backup before applying migration `0008_retention` with the repository's `WorkerDock.DatabaseMigrator`; do not apply ad hoc SQL edits. The migrator verifies recorded checksums and schema history, checks prerequisites and transactional boundaries, and records the applied migration. Preserve the migration manifest with the release. See [SQL setup and migrations](how-to/setup-sql-server.md) for the current migration command and identity requirements.
+Use SQL Server 2022 or newer with database compatibility level 160. Back up the tenant database and verify the backup before applying migration `0008_retention` with the repository's `WorkerDock.DatabaseMigrator`; do not apply ad hoc SQL edits. The migrator verifies recorded checksums and schema history, checks prerequisites and transactional boundaries, and records the applied migration. Preserve the migration manifest with the release. See [SQL setup and migrations](setup-sql-server.md) for the current migration command and identity requirements.
 
 Use a separate migration identity for schema changes. The IIS, scheduler and worker runtime identities must not have schema-change rights. Runtime retention access is limited to the application's required data operations and the restricted purge routine. Ordinary service principals cannot directly delete audit events. Inspect the migration's documented prerequisites and current schema history before applying it to an existing tenant.
 

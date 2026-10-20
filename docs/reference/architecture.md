@@ -52,7 +52,7 @@ Schedules use five-field cron semantics and an explicit time zone. DST gaps and 
 
 OIDC/Entra authentication is optional in configuration. When configured, readers need an authenticated session and management actions may additionally require the configured role. When OIDC settings are absent, **Anonymous mode allows both read and management access**; do not expose an instance in this mode to an untrusted network.
 
-Connection profiles store nonsecret settings and credential references, not passwords or full connection strings. Secret values resolve at execution time through `ISecretVault`. The repository includes an environment-backed adapter for development; production vault adapters are not supplied and must be installed in the relevant service composition roots before secret-backed production work. The Control Center currently refuses Production startup without its adapter. Its health credential is not a tenant management credential. See [secret integration](secrets.md) and [deployment](how-to/deploy-production.md).
+Connection profiles store nonsecret settings and credential references, not passwords or full connection strings. Secret values resolve at execution time through `ISecretVault`. The repository includes an environment-backed adapter for development; production vault adapters are not supplied and must be installed in the relevant service composition roots before secret-backed production work. The Control Center currently refuses Production startup without its adapter. Its health credential is not a tenant management credential. See [secret integration](secrets.md) and [deployment](../how-to/deploy-production.md).
 
 ## Capacity and limits
 
@@ -64,4 +64,4 @@ Finite execution deadlines and configured service drain periods bound normal wor
 
 WorkerDock records execution events, safe logs, audit records, service health, alerts, and bounded metric aggregates in SQL Server. Alerts and the Control Center cannot report through a prolonged database, scheduler, or network outage. Operators should also monitor Windows services, host health, SQL Server, clock synchronization, disk space, archive health, and worker catalog compatibility independently.
 
-Retention is bounded and preserves active work and replay dependencies. Archive-before-delete is opt-in; archives are integrity-checked exports, not database backups or proof against an administrator changing both archive and manifest. See [retention and archive operations](retention-archive.md).
+Retention is bounded and preserves active work and replay dependencies. Archive-before-delete is opt-in; archives are integrity-checked exports, not database backups or proof against an administrator changing both archive and manifest. See [retention and archive operations](../how-to/manage-retention-and-archives.md).

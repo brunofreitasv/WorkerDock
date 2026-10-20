@@ -112,7 +112,7 @@ absolute `Central__Storage__DataDirectory` outside the release and web
 directories. Keep it protected for the center identity and administrators.
 The center instance ID must remain stable across restarts and restores. Tenant
 SQL setup above is unchanged; no central SQL provisioning or migration is
-needed. See [Control Center setup](../control-center.md).
+needed. See [Control Center setup](../how-to/configure-control-center.md).
 
 Workers begin with zero acquisition limits. To allow one HTTP attempt, set
 both the template and this worker's limit after it has registered. In another
@@ -140,5 +140,5 @@ needed, then drop only that dedicated database using your SQL Server
 administration tool. Do not run migration rollback against a populated database;
 see the setup guide for rollback limits.
 
-See [Local development](../development.md) for SQL-independent test commands
-and [Database setup](../database.md) for migration and runtime role details.
+See [Local development](../validation/development-checks.md) for SQL-independent test commands
+and [Database setup](../reference/database-migrations.md) for migration and runtime role details.

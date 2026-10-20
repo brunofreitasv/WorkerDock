@@ -80,7 +80,7 @@ The current center uses `Central:InstanceId` and an absolute
 the directory so only the center IIS application-pool identity and
 administrators can modify it, and keep it outside web serving. No central SQL
 database, migration, SQL identity, or SQL connection string is required. See
-[Control Center setup](../control-center.md) for persistent storage and
+[Control Center setup](configure-control-center.md) for persistent storage and
 health-probe configuration. Tenant SQL setup above remains required for each
 tenant.
 
@@ -109,4 +109,4 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release
 
 The fixtures own their generated databases and test objects. Their test-only SQL lives under `tests/sql` and `tests/WorkerDock.IntegrationTests/Sql`; it is not part of runtime provisioning. Missing SQL configuration causes the SQL fixtures to report `SQL_TEST_BLOCKED`. Record actual runs in the [release evidence](../validation/release-evidence.md).
 
-See [database object reference](../reference/database-objects.md), [Control Center setup](../control-center.md), and [Quartz integration](../quartz-integration.md) for object inventories and design details.
+See [database object reference](../reference/database-objects.md), [Control Center setup](configure-control-center.md), and [Quartz integration](../reference/quartz-integration.md) for object inventories and design details.

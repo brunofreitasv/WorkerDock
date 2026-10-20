@@ -35,8 +35,8 @@ copies of its creation section and grants `WorkerDockRuntime` table DML plus
 schema-history read. `0002_quartz.down.sql` refuses populated stores and drops
 both table sets in a migrator-owned serializable transaction. The upstream
 script is retained for attribution and must not be run directly because its
-default drops existing Quartz tables. See [database.md](database.md) for exact
-local setup and [development.md](development.md) for memory commands.
+default drops existing Quartz tables. See [database.md](database-migrations.md) for exact
+local setup and [development.md](../validation/development-checks.md) for memory commands.
 
 The SQL integration suite is gated by `WORKERDOCK_TEST_SQL` and a distinct
 restricted SQL login in `WORKERDOCK_TEST_SQL_RUNTIME`. It runs the two
@@ -192,8 +192,8 @@ restricted-runtime SQL reads/writes, lost ack, concurrent replay after a fresh
 Quartz handle, retirement, retry metadata, instance fencing and paired migration
 checks in both isolation modes. These SQL and multi-process/cluster proofs require
 the disposable SQL fixture; memory success does not establish those properties.
-See [Set up SQL Server](how-to/setup-sql-server.md) for test prerequisites and
-[development.md](development.md) for memory tests.
+See [Set up SQL Server](../how-to/setup-sql-server.md) for test prerequisites and
+[development.md](../validation/development-checks.md) for memory tests.
 
 
 ## Live capacity, capability admission and logical job permits
@@ -273,7 +273,7 @@ capacity algorithm, wrapper and actual RAMJobStore tests are disposable fixtures
 The memory adapter supports local policy and Quartz tests, but does not establish
 SQL adapter behavior, migration execution, restricted-runtime grants, or
 capacity coordination across SQL-backed workers. Run those checks using the
-disposable SQL setup in [Set up SQL Server](how-to/setup-sql-server.md). All
+disposable SQL setup in [Set up SQL Server](../how-to/setup-sql-server.md). All
 current tenant and Quartz objects use the `[workerdock]` schema; an older
 unreleased database created with a different schema requires a fresh database
 or a separately planned data migration.

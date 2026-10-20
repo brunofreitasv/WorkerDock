@@ -10,7 +10,7 @@ an unavailable provider unless the development-only environment mapping is
 enabled. Install and review your tenant vault adapter before relying on
 secret-backed jobs or alert sinks. These integration steps require code and
 deployment configuration; the installer does not supply an enterprise vault.
-Complete the [release checklist](../release-checklist.md) on disposable
+Complete the [release checklist](../validation/release-checklist.md) on disposable
 infrastructure before using this procedure for a live workload.
 
 ## Requirements and identities
@@ -41,7 +41,7 @@ The center does not use the tenant SQL permissions script.
 
 ## Install a tenant
 
-Copy `deploy/config/tenant.example.json` and `worker.example.json` to protected deployment storage. Set the same `Tenant.InstanceId` GUID in both files, the runtime connection string, Entra settings (if used), absolute Data Protection key and archive directories, and the worker's unique installation GUID, installed catalog digest, ceiling and drain time. Replace every placeholder. Use `Access.RequiredManagementRole` only when management must be restricted by role; remove it to allow any authenticated user to manage. See [tenant configuration](configure-tenants.md) and [authentication](../authentication.md).
+Copy `deploy/config/tenant.example.json` and `worker.example.json` to protected deployment storage. Set the same `Tenant.InstanceId` GUID in both files, the runtime connection string, Entra settings (if used), absolute Data Protection key and archive directories, and the worker's unique installation GUID, installed catalog digest, ceiling and drain time. Replace every placeholder. Use `Access.RequiredManagementRole` only when management must be restricted by role; remove it to allow any authenticated user to manage. See [tenant configuration](configure-tenants.md) and [authentication](configure-authentication.md).
 
 Install using the package version whose migrations are applied:
 
@@ -87,7 +87,7 @@ pwsh -File .\deploy\Install-Center.ps1 `
   -CertificateThumbprint '<CERTIFICATE_THUMBPRINT>'
 ```
 
-The center needs no central SQL connection; a nonempty `Central:ConnectionString` is rejected. The center health vault must be implemented for production and bound to a center-only identity; the application deliberately fails production startup without an `ISecretVault` adapter. Resolve only approved tenant health credential references. Do not grant that identity access to tenant databases or credentials. Details for tenant registration URL and credential reference are in [configure tenants](configure-tenants.md) and [Control Center](../control-center.md).
+The center needs no central SQL connection; a nonempty `Central:ConnectionString` is rejected. The center health vault must be implemented for production and bound to a center-only identity; the application deliberately fails production startup without an `ISecretVault` adapter. Resolve only approved tenant health credential references. Do not grant that identity access to tenant databases or credentials. Details for tenant registration URL and credential reference are in [configure tenants](configure-tenants.md) and [Control Center](configure-control-center.md).
 
 ## Start and check
 
@@ -95,7 +95,7 @@ After checking tenant SQL roles and app settings, start each configured Windows 
 
 ## Upgrade and rollback
 
-Read [upgrade and restore](../upgrades.md) before each release. Block new admissions, inspect running executions and decide how to handle infinite-timeout jobs. Stop tenant services, IIS site and application pool manually. Then run the upgrade script with the persisted config, matching package, and a new UNC `.bak` location writable by the SQL Server service account:
+Read [upgrade and restore](upgrade-and-restore.md) before each release. Block new admissions, inspect running executions and decide how to handle infinite-timeout jobs. Stop tenant services, IIS site and application pool manually. Then run the upgrade script with the persisted config, matching package, and a new UNC `.bak` location writable by the SQL Server service account:
 
 ```powershell
 pwsh -File .\deploy\Upgrade-Instance.ps1 `

@@ -2,7 +2,7 @@
 
 Production configuration is normally kept in protected JSON files copied from `deploy/config/tenant.example.json`, `worker.example.json` and `center.example.json`. Files are stored under the installation root's `config` directory and retained across installer reruns and upgrades. A .NET environment variable uses double underscore (`__`) for each nested section. For example, `Tenant__ConnectionString` maps to `Tenant.ConnectionString`.
 
-`WORKERDOCK_DEVELOPMENT_VAULT=1` enables the explicitly mapped environment-backed development secret provider; it is not a production vault integration. The tenant hosts currently register this development provider, which otherwise resolves no secrets. A production deployment must register its own `ISecretVault` adapter in every process that needs one. The Control Center rejects a missing production adapter at startup. See [secret integration](../secrets.md).
+`WORKERDOCK_DEVELOPMENT_VAULT=1` enables the explicitly mapped environment-backed development secret provider; it is not a production vault integration. The tenant hosts currently register this development provider, which otherwise resolves no secrets. A production deployment must register its own `ISecretVault` adapter in every process that needs one. The Control Center rejects a missing production adapter at startup. See [secret integration](secrets.md).
 
 | Host | Configuration keys | Notes |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Production configuration is normally kept in protected JSON files copied from `d
 
 `Access.Authority` must be the exact HTTPS issuer authority for the directory; common, organizations and consumers authorities are rejected. `Access.ClientId` is the audience. `Access.ClientSecretReference` names the protected bootstrap client secret; the current bootstrap adapter reads only `WORKERDOCK_BOOTSTRAP_<reference>`. Reference syntax is uppercase ASCII letters, digits and underscore, 1–128 characters. Supply all three keys or omit all three. `Access.RequiredManagementRole` is optional and case-sensitive. `Access.RoleClaimType` defaults to `roles`.
 
-No authentication settings means anonymous read and management. Entra without a required role means authenticated read and management. Entra plus required role means any accepted user can read and only the matching role can manage. See [authentication](../authentication.md).
+No authentication settings means anonymous read and management. Entra without a required role means authenticated read and management. Entra plus required role means any accepted user can read and only the matching role can manage. See [authentication](../how-to/configure-authentication.md).
 
 ## Worker and scheduler settings
 

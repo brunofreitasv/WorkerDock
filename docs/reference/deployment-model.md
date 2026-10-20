@@ -1,8 +1,8 @@
 # Windows deployment
 
-Follow the [production deployment guide](how-to/deploy-production.md) for the
-package, SQL, installation, and upgrade sequence. Use [tenant configuration](how-to/configure-tenants.md)
-for service settings and Control Center registration, and [SQL setup](how-to/setup-sql-server.md)
+Follow the [production deployment guide](../how-to/deploy-production.md) for the
+package, SQL, installation, and upgrade sequence. Use [tenant configuration](../how-to/configure-tenants.md)
+for service settings and Control Center registration, and [SQL setup](../how-to/setup-sql-server.md)
 for migration and runtime-role commands. This page summarizes deployment boundaries
 and operational checks.
 
@@ -21,7 +21,7 @@ executor use an unavailable vault unless a trusted adapter is integrated; the
 development environment mapping is disabled unless explicitly enabled. Do not
 rely on secret-backed jobs, health probes, or alert sinks until the appropriate
 vault integration is installed and verified. Complete the
-[release checklist](release-checklist.md) against disposable Windows and SQL
+[release checklist](../validation/release-checklist.md) against disposable Windows and SQL
 infrastructure before live use.
 
 The deployment scripts require elevated PowerShell 7 for IIS and service setup.
@@ -49,7 +49,7 @@ external secret provider, or restore path has been validated. The portable
 package-manifest hash handling only; it does not provision IIS or verify live
 SQL Server, Entra, or workload behavior.
 
-For upgrades and restores, follow [upgrade and restore](upgrades.md). The upgrade
+For upgrades and restores, follow [upgrade and restore](../how-to/upgrade-and-restore.md). The upgrade
 script leaves IIS and services stopped after staging; operators must start them
 manually and verify readiness and execution state. SQL Server is required for
 each deployed tenant; the Control Center can run without SQL. Memory mode is for

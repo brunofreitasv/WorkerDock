@@ -8,7 +8,7 @@
 
 **Tech Stack:** .NET 10/C#, SQL Server 2022+, xUnit, PowerShell 7, React/Vite, Git.
 
-**Spec:** [Repository cleanup design](../specs/2026-10-19-repository-cleanup-design.md).
+**Spec:** [Repository cleanup design](repository-cleanup-design.md).
 
 ## Global Constraints
 

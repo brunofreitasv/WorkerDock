@@ -27,7 +27,7 @@ Development Tenant:Adapter=Memory supports profile CRUD, allowlists, revision pi
 
 SQL template integration tests use a separate target database and restricted
 target login in addition to the disposable tenant database identities. Follow
-[Set up SQL Server](how-to/setup-sql-server.md) for test prerequisites and the
+[Set up SQL Server](../how-to/setup-sql-server.md) for test prerequisites and the
 full command. The target fixture scripts under `tests/sql` create only test
 objects in generated databases. SQL results and memory-test results are separate:
 memory adapter support does not execute SQL or establish target connectivity.

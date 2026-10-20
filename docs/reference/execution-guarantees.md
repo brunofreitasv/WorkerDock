@@ -4,7 +4,7 @@ Jobs use immutable revisions. New jobs begin disabled with concurrency limit 1; 
 
 An accepted manual run commits one queued execution, its revision, audit event, 24-hour actor/session-and-job-scoped request record, command receipt and `ExecutionDispatch` outbox intent in one business transaction. Concurrent retries with the same request key return the original receipt during that window. An expired key may create a new run. The current manual command has no caller payload beyond job ID and request key; the stored request hash protects that input and future payload-bearing commands must compare their full canonical input. The execution idempotency key is separate from the request key and stays stable across attempts. Outbox publication to Quartz occurs later and is not part of this transaction. WorkerDock promises durable intent and guarded redelivery, not exactly-once external effects. Unknown effects require review unless the job policy explicitly permits replay.
 
-The memory adapter is a development/test substitute for `IJobCommands`, selected only with `Tenant:Adapter=Memory` in Development. Its state is lost on process exit. The integration suite has memory-backed tests; see [development](development.md) for local commands.
+The memory adapter is a development/test substitute for `IJobCommands`, selected only with `Tenant:Adapter=Memory` in Development. Its state is lost on process exit. The integration suite has memory-backed tests; see [development](../validation/development-checks.md) for local commands.
 
 Start a memory-backed HTTPS host in PowerShell:
 
@@ -17,7 +17,7 @@ dotnet run --project src/WorkerDock.Web --urls https://localhost:5001
 
 Use a second PowerShell terminal to request a session-bound CSRF token, then send `Origin: https://localhost:5001` and `X-WorkerDock-CSRF: <token>` on POST/PUT requests. `POST /api/jobs` accepts a revision body with `jobId` set to the empty GUID; the server assigns its ID. `GET /api/jobs/{id}/configuration` returns the edit `ETag`; `PUT /api/jobs/{id}` requires that value in `If-Match`. `POST /api/jobs/{id}/runs` accepts `{ "requestKey": "new-client-key" }` once the job is enabled.
 
-For tenant SQL provisioning, restricted identities, integration test prerequisites, and rollback, follow [Set up SQL Server](how-to/setup-sql-server.md). Do not apply an old migration ID to create a current database; the latest tenant chain is documented in the [database object reference](reference/database-objects.md).
+For tenant SQL provisioning, restricted identities, integration test prerequisites, and rollback, follow [Set up SQL Server](../how-to/setup-sql-server.md). Do not apply an old migration ID to create a current database; the latest tenant chain is documented in the [database object reference](database-objects.md).
 
 ## Durable attempts, retries and stop
 
@@ -79,4 +79,4 @@ containment. Cleanup still runs if the scheduler standby call fails. Unknown
 effects or a lost outcome acknowledgement never become a fabricated success.
 Status events feed the current [execution monitoring](monitoring.md) timeline.
 Real SQL fences, restart, and migration proofs remain pending as described in
-[database verification](database.md); memory and real-process tests establish separate facts.
+[database verification](database-migrations.md); memory and real-process tests establish separate facts.
