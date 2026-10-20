@@ -129,7 +129,9 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
           {!ruleDraft.enabled && !creatingRule && <Button onClick={enableRule} disabled={busy || !ruleEtag || !ruleValid}>{t.alertEnableRule}</Button>}
           {invalid && !ruleValid && <Typography role="alert" color="error">{t.validation}</Typography>}
           {invalid && (!integer(ruleDraft.threshold, 1, 1000) || (["LongRunning", "WorkerUnavailable"].includes(ruleDraft.condition) && ruleDraft.threshold !== 1)) && <Typography role="alert" color="error">{t.alertRuleThresholdInvalid}</Typography>}
-          {invalid && (!integer(ruleDraft.windowSeconds, 1, 2592000) || !integer(ruleDraft.graceSeconds, 0, 2592000) || !integer(ruleDraft.reminderSeconds, 0, 2592000)) && <Typography role="alert" color="error">{t.alertRuleTimingInvalid}</Typography>}
+          {invalid && !integer(ruleDraft.windowSeconds, 1, 2592000) && <Typography role="alert" color="error">{t.alertRuleWindowInvalid}</Typography>}
+          {invalid && !integer(ruleDraft.graceSeconds, 0, 2592000) && <Typography role="alert" color="error">{t.alertRuleGraceInvalid}</Typography>}
+          {invalid && !integer(ruleDraft.reminderSeconds, 0, 2592000) && <Typography role="alert" color="error">{t.alertRuleReminderInvalid}</Typography>}
           {creatingRule ? <Button variant="contained" onClick={createRule} disabled={busy || !sinks.some(s => s.enabled)}>{t.alertCreateRule}</Button> : <Button variant="contained" onClick={saveRule} disabled={busy || !ruleEtag}>{t.save}</Button>}
         </Stack>}
       </Stack></Paper>

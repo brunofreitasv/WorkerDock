@@ -154,11 +154,19 @@ test("invalid condition threshold and timing fields retain the rule draft", asyn
   await user.clear(threshold); await user.type(threshold, "3");
   const window = screen.getByRole("spinbutton", { name: "Window (seconds)" });
   await user.clear(window); await user.type(window, "2592001");
+  const grace = screen.getByRole("spinbutton", { name: "Grace period (seconds)" });
+  await user.clear(grace); await user.type(grace, "2592001");
+  const reminder = screen.getByRole("spinbutton", { name: "Reminder interval (seconds)" });
+  await user.clear(reminder); await user.type(reminder, "2592001");
   await user.click(screen.getByRole("button", { name: "Create rule" }));
   expect(threshold).toHaveValue(3);
   expect(window).toHaveValue(2592001);
+  expect(grace).toHaveValue(2592001);
+  expect(reminder).toHaveValue(2592001);
   expect(await screen.findByText(translations.en.alertRuleThresholdInvalid)).toBeVisible();
-  expect(screen.getByText(translations.en.alertRuleTimingInvalid)).toBeVisible();
+  expect(screen.getByText(translations.en.alertRuleWindowInvalid)).toBeVisible();
+  expect(screen.getByText(translations.en.alertRuleGraceInvalid)).toBeVisible();
+  expect(screen.getByText(translations.en.alertRuleReminderInvalid)).toBeVisible();
   expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/api/alert-rules/") && init?.method === "PUT")).toBe(false);
 });
 
