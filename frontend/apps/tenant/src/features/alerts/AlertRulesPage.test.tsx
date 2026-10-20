@@ -389,3 +389,43 @@ test("losing manager permission clears management UI and does not fetch manageme
   expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   expect(managementCalls()).toBe(before);
 });
+
+test("a sink recovery response after manager permission is lost cannot repopulate management state", async () => {
+  const id = "88888888-8888-4888-8888-888888888888";
+  let releasePut!: (response: Response) => void;
+  const pendingPut = new Promise<Response>(resolve => { releasePut = resolve; });
+  let putCount = 0;
+  let sinkListCount = 0;
+  let releaseSecondSinkList!: (response: Response) => void;
+  const pendingSecondSinkList = new Promise<Response>(resolve => { releaseSecondSinkList = resolve; });
+  vi.stubGlobal("crypto", { randomUUID: () => id });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response("[]");
+    if (url.pathname === "/api/alert-sinks") {
+      sinkListCount++;
+      return sinkListCount === 1 ? new Response("[]") : pendingSecondSinkList;
+    }
+    if (url.pathname === `/api/alert-sinks/${id}` && init?.method === "PUT") { putCount++; return pendingPut; }
+    if (url.pathname === `/api/alert-sinks/${id}`) return new Response(JSON.stringify({ ...sink, id, name: "Stale recovered sink" }), { headers: { ETag: '"recovered"' } });
+    if (url.pathname === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
+    return new Response("{}", { status: 404 });
+  }));
+  const user = userEvent.setup();
+  const view = render(<AlertRulesPage t={translations.en} canManage />);
+  await user.click(await screen.findByRole("button", { name: "New webhook sink" }));
+  await user.type(screen.getByRole("textbox", { name: "Sink name" }), "Local draft");
+  await user.type(screen.getByRole("textbox", { name: "Webhook URL" }), "https://example.test/hook");
+  await user.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
+  await waitFor(() => expect(putCount).toBe(1));
+
+  view.rerender(<AlertRulesPage t={translations.en} canManage={false} />);
+  releasePut(new Response("{}", { status: 412 }));
+  await waitFor(() => expect(sinkListCount).toBe(1));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  view.rerender(<AlertRulesPage t={translations.en} canManage />);
+  await waitFor(() => expect(sinkListCount).toBe(2));
+  expect(screen.getByRole("combobox", { name: "Webhook sink" })).toHaveAttribute("aria-disabled", "true");
+  releaseSecondSinkList(new Response("[]"));
+}, 15000);

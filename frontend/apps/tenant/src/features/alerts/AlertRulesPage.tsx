@@ -105,7 +105,7 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
     setInvalid(true); setSaved(false); if (!ruleDraft || !ruleEtag || !ruleValid) return;
     const generation = requestGeneration.current.rule;
     setBusy(true); setError("");
-    try { const result = await mutate<{ rule: Omit<AlertRule, "version">; version: string }>(`/api/alert-rules/${ruleDraft.id}`, "PUT", { id: ruleDraft.id, name: ruleDraft.name.trim(), condition: ruleDraft.condition, threshold: ruleDraft.threshold, windowSeconds: ruleDraft.windowSeconds, graceSeconds: ruleDraft.graceSeconds, reminderSeconds: ruleDraft.reminderSeconds, sinkId: ruleDraft.sinkId, enabled: ruleDraft.enabled }, ruleEtag); const updated = { ...result.rule, version: result.version }; setRules(items => items.map(item => item.id === updated.id ? updated : item)); if (generation !== requestGeneration.current.rule) return; setRuleDraft(updated); setRuleEtag(`"${updated.version}"`); setCreatedSink(false); setSaved(true); setInvalid(false); setRuleDirty(false); }
+    try { const result = await mutate<{ rule: Omit<AlertRule, "version">; version: string }>(`/api/alert-rules/${ruleDraft.id}`, "PUT", { id: ruleDraft.id, name: ruleDraft.name.trim(), condition: ruleDraft.condition, threshold: ruleDraft.threshold, windowSeconds: ruleDraft.windowSeconds, graceSeconds: ruleDraft.graceSeconds, reminderSeconds: ruleDraft.reminderSeconds, sinkId: ruleDraft.sinkId, enabled: ruleDraft.enabled }, ruleEtag); const updated = { ...result.rule, version: result.version }; if (generation !== requestGeneration.current.rule) return; setRules(items => items.map(item => item.id === updated.id ? updated : item)); setRuleDraft(updated); setRuleEtag(`"${updated.version}"`); setCreatedSink(false); setSaved(true); setInvalid(false); setRuleDirty(false); }
     catch (cause) { if (generation === requestGeneration.current.rule) setError(cause instanceof ApiError && cause.status === 412 ? t.stale : t.requestError); } finally { setBusy(false); }
   };
   const createRule = async () => {
@@ -117,15 +117,13 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
       catch (cause) {
         if (!(cause instanceof ApiError) || cause.status !== 412) throw cause;
         const { data, etag } = await read<AlertRule>(`/api/alert-rules/${ruleDraft.id}`);
-        setRules(items => [data, ...items.filter(item => item.id !== data.id)]);
         if (generation !== requestGeneration.current.rule) return;
-        setRuleDraft(data); setRuleEtag(etag ?? undefined);
+        setRuleDraft(data); setRuleEtag(etag ?? undefined); setRules(items => [data, ...items.filter(item => item.id !== data.id)]);
         setCreatingRule(false); setRuleDirty(false); setSaved(true); setInvalid(false); return;
       }
       const { data, etag } = await read<AlertRule>(`/api/alert-rules/${ruleDraft.id}`);
-      setRules(items => [data, ...items.filter(item => item.id !== data.id)]);
       if (generation !== requestGeneration.current.rule) return;
-      setRuleDraft(data); setRuleEtag(etag ?? undefined);
+      setRuleDraft(data); setRuleEtag(etag ?? undefined); setRules(items => [data, ...items.filter(item => item.id !== data.id)]);
       setCreatingRule(false); setSaved(true); setInvalid(false); setRuleDirty(false);
     } catch (cause) { if (generation === requestGeneration.current.rule) setError(t.alertRuleCreateError); }
     finally { setBusy(false); }
@@ -136,8 +134,8 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
     setBusy(true); setError("");
     try {
       const result = await mutate<{ rule: Omit<AlertRule, "version">; version: string }>(`/api/alert-rules/${ruleDraft.id}`, "PUT", rulePayload({ ...ruleDraft, enabled: true }), ruleEtag);
-      const updated = { ...result.rule, version: result.version }; setRules(items => items.map(item => item.id === updated.id ? updated : item));
       if (generation !== requestGeneration.current.rule) return;
+      const updated = { ...result.rule, version: result.version }; setRules(items => items.map(item => item.id === updated.id ? updated : item));
       setRuleDraft(updated); setRuleEtag(`"${updated.version}"`); setRuleDirty(false); setSaved(true);
     } catch (cause) { if (generation === requestGeneration.current.rule) setError(cause instanceof ApiError && cause.status === 412 ? t.stale : t.requestError); }
     finally { setBusy(false); }
@@ -153,14 +151,12 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
         if (!creatingSink || !(cause instanceof ApiError) || cause.status !== 412) throw cause;
         const { data, etag } = await read<AlertSink>(`/api/alert-sinks/${sinkDraft.id}`);
         const clean = safeSink(data);
-        setSinks(items => [clean, ...items.filter(item => item.id !== clean.id)]);
         if (generation !== requestGeneration.current.sink) return;
-        setSinkDraft(clean); setSinkEtag(etag ?? undefined);
+        setSinkDraft(clean); setSinkEtag(etag ?? undefined); setSinks(items => [clean, ...items.filter(item => item.id !== clean.id)]);
         setCreatingSink(false); setSinkDirty(false); setCreatedSink(true); setSaved(true); setInvalid(false); return;
       }
       const { data, etag } = await read<AlertSink>(`/api/alert-sinks/${sinkDraft.id}`);
       const clean = safeSink(data);
-      setSinks(items => items.some(item => item.id === clean.id) ? items.map(item => item.id === clean.id ? clean : item) : [clean, ...items]);
       if (generation !== requestGeneration.current.sink) return;
       setSinkDraft(clean); setSinkEtag(etag ?? undefined); setSinks(items => items.some(item => item.id === clean.id) ? items.map(item => item.id === clean.id ? clean : item) : [clean, ...items]); setCreatingSink(false); setCreatedSink(creatingSink); setSaved(true); setInvalid(false); setSinkDirty(false);
     }
