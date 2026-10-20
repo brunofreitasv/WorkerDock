@@ -49,6 +49,63 @@ test("webhook updates send only secret references with If-Match and never expose
   expect(new Headers(submittedHeaders).get("If-Match")).toBe('"sink-etag"');
 });
 
+test("managers create webhook sinks without If-Match and load the saved ETag", async () => {
+  const id = "33333333-3333-4333-8333-333333333333";
+  const calls: Array<{ path: string; init?: RequestInit }> = [];
+  vi.stubGlobal("crypto", { randomUUID: () => id });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost"); calls.push({ path: url.pathname, init });
+    if (url.pathname === "/api/alerts/incidents" || url.pathname === "/api/alerts/deliveries") return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response("[]");
+    if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
+    if (url.pathname === `/api/alert-sinks/${id}` && init?.method === "PUT") return new Response(JSON.stringify({ definition: { ...sink, id }, version: "bmV3" }));
+    if (url.pathname === `/api/alert-sinks/${id}`) return new Response(JSON.stringify({ ...sink, id, name: "Created sink" }), { headers: { ETag: '"created-etag"' } });
+    if (url.pathname === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
+    return new Response("{}", { status: 404 });
+  }));
+  const user = userEvent.setup();
+  render(<AlertRulesPage t={translations.en} canManage />);
+  await user.click(await screen.findByRole("button", { name: "New webhook sink" }));
+  await user.type(screen.getByRole("textbox", { name: "Sink name" }), "Created sink");
+  await user.type(screen.getByRole("textbox", { name: "Webhook URL" }), "https://example.test/hook");
+  await user.click(screen.getByRole("button", { name: "Add header" }));
+  await user.type(screen.getAllByRole("textbox", { name: "Header name" })[0], "Authorization");
+  await user.type(screen.getAllByRole("textbox", { name: "Secret reference" })[0], "vault/created-token");
+  await user.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
+
+  await waitFor(() => expect(calls.some(call => call.path === `/api/alert-sinks/${id}` && call.init?.method === "PUT")).toBe(true));
+  const put = calls.find(call => call.path === `/api/alert-sinks/${id}` && call.init?.method === "PUT")!;
+  expect(new Headers(put.init?.headers).has("If-Match")).toBe(false);
+  expect(JSON.parse(String(put.init?.body))).toMatchObject({ id, configuration: { url: "https://example.test/hook", headers: [{ name: "Authorization", secretReference: "vault/created-token" }] } });
+  await waitFor(() => expect(calls.some(call => call.path === `/api/alert-sinks/${id}` && !call.init?.method)).toBe(true));
+  expect(await screen.findByRole("textbox", { name: "Sink name" })).toHaveValue("Created sink");
+});
+
+test("invalid webhook fields keep a new sink draft without sending it", async () => {
+  const id = "33333333-3333-4333-8333-333333333333";
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response("[]");
+    if (url.pathname === "/api/alert-sinks") return new Response("[]");
+    if (url.pathname === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
+    return new Response("{}", { status: 404 });
+  });
+  vi.stubGlobal("crypto", { randomUUID: () => id });
+  vi.stubGlobal("fetch", fetchMock);
+  const user = userEvent.setup();
+  render(<AlertRulesPage t={translations.en} canManage />);
+  await user.click(await screen.findByRole("button", { name: "New webhook sink" }));
+  await user.type(screen.getByRole("textbox", { name: "Sink name" }), "Draft sink");
+  await user.type(screen.getByRole("textbox", { name: "Webhook URL" }), "not a URL");
+  await user.click(screen.getByRole("button", { name: "Add header" }));
+  await user.type(screen.getAllByRole("textbox", { name: "Header name" })[0], "Bad Header");
+  await user.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
+  expect(screen.getByRole("textbox", { name: "Sink name" })).toHaveValue("Draft sink");
+  expect(screen.getByRole("textbox", { name: "Webhook URL" })).toHaveValue("not a URL");
+  expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes(`/api/alert-sinks/${id}`) && init?.method === "PUT")).toBe(false);
+});
+
 test("shows stale-version errors for concurrent rule edits", async () => {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
