@@ -43,7 +43,7 @@
 - frontend/apps/tenant/src/help/documentationCopy.ts: local UI copy in both languages.
 - frontend/apps/tenant/src/help/content/{en,pt-BR}/*.md: 24 guide pairs.
 - frontend/apps/tenant/src/App.tsx and frontend/packages/ui/locales/{en,pt-BR}.json: visible navigation and contextual labels.
-- frontend/apps/tenant/src/help/*.test.ts(x), frontend/apps/tenant/src/auth/SessionProvider.test.tsx, and frontend/e2e/help.spec.ts: unit, integration, and browser checks.
+- frontend/apps/tenant/src/help/*.test.ts(x), frontend/apps/tenant/src/auth/SessionProvider.test.tsx, and frontend/e2e/help.spec.ts: unit, integration, and browser checks. The guide groups use separate content-start-monitoring.test.ts, content-jobs.test.ts, content-integrations.test.ts, and content-admin.test.ts files; contentCoverage.test.ts validates the full corpus after all groups land.
 
 ---
 
@@ -95,56 +95,56 @@
 
 ### Task 5: Start here and Operate and monitor guides
 
-**Files:** Modify existing getting-started.md, dashboard.md, monitoring.md in both locales; create first-job.md, execution-events.md, workers.md, audit.md in both locales; delete old workers-audit.md pairs; create contentCoverage.test.ts.
+**Files:** Modify existing getting-started.md, dashboard.md, monitoring.md in both locales; create first-job.md, execution-events.md, workers.md, audit.md in both locales; delete old workers-audit.md pairs; create content-start-monitoring.test.ts.
 
 **Interfaces:** Use H2 headings What you will do, Before you start, Steps (or Explore the screen for overviews), Example, Check the result, If it does not work, and Related guides; Portuguese equivalents are O que você vai fazer, Antes de começar, Etapas (or Explore a tela), Exemplo, Verifique o resultado, Se não funcionar, and Guias relacionados. References use known tenant hash routes and canonical guide slugs.
 
 - [ ] **Step 1: Write failing content tests for these seven slugs.** Assert both languages exist, required task sections or overview equivalents exist, and every internal link resolves. Include role/availability checks for worker, audit, and stale-data guidance.
-- [ ] **Step 2: Run npx vitest run apps/tenant/src/help/contentCoverage.test.ts from frontend; expect failures.**
+- [ ] **Step 2: Run npx vitest run apps/tenant/src/help/content-start-monitoring.test.ts from frontend; expect failures.**
 - [ ] **Step 3: Write the seven bilingual guides.** Verify UI labels and behavior against Dashboard, JobsTable, ExecutionDetails, WorkersPage, AuditPage, docs/reference/monitoring.md, and existing source guidance. Include synthetic status/timeline examples and how to recognize stale or unavailable data.
 - [ ] **Step 4: Rerun the content test; expect pass. Read both languages once for equivalent coverage. Commit Task 5 files.**
 
 ### Task 6: Build and run jobs guides
 
-**Files:** Modify templates.md, jobs.md, sql-jobs.md, http-jobs.md, schedules.md in both locales; create job-inputs.md, manual-runs.md, execution-policies.md in both locales; extend contentCoverage.test.ts.
+**Files:** Modify templates.md, jobs.md, sql-jobs.md, http-jobs.md, schedules.md in both locales; create job-inputs.md, manual-runs.md, execution-policies.md in both locales; create content-jobs.test.ts.
 
 **Interfaces:** Eight guide pairs use canonical slugs and the content contract from Task 5.
 
-- [ ] **Step 1: Extend the failing coverage test for all eight guide pairs.** Assert links and prerequisite/example/verification/recovery sections; specifically verify the installed-template guide points to docs/how-to/add-custom-template.md as a source reference, not a tenant creation link.
-- [ ] **Step 2: Run the focused content test; expect failures.**
+- [ ] **Step 1: Write content-jobs.test.ts for all eight guide pairs.** Assert links and prerequisite/example/verification/recovery sections; specifically verify the installed-template guide points to docs/how-to/add-custom-template.md as a source reference, not a tenant creation link.
+- [ ] **Step 2: Run npx vitest run apps/tenant/src/help/content-jobs.test.ts from frontend; expect failures.**
 - [ ] **Step 3: Write the bilingual guides.** Check JobWizard, ManualJobEditor, template picker, ScheduleEditor, docs/how-to/manage-jobs.md, SQL/HTTP template references, and scheduling docs. Cover disabled drafts, activation, safe SQL/HTTP examples, parameter modes, dynamic preview limits, time zones, run-now override, retries, overlap, and lifecycle actions.
 - [ ] **Step 4: Rerun content tests; expect pass. Read both languages for equivalent coverage. Commit Task 6 files.**
 
 ### Task 7: Integrations and alerts guides
 
-**Files:** Modify sql-profiles.md in both locales; create outbound-policy.md, secrets.md, webhook-sinks.md, alert-rules.md, incidents-deliveries.md in both locales; delete old alerts.md pairs; extend contentCoverage.test.ts.
+**Files:** Modify sql-profiles.md in both locales; create outbound-policy.md, secrets.md, webhook-sinks.md, alert-rules.md, incidents-deliveries.md in both locales; delete old alerts.md pairs; create content-integrations.test.ts.
 
 **Interfaces:** Six guide pairs use canonical slugs and the same content contract.
 
-- [ ] **Step 1: Extend the failing coverage test for these six guide pairs and valid links.** Assert secret references are explained without inline secret values, alert rule first save is disabled, and delivery retry/deduplication guidance is present.
-- [ ] **Step 2: Run the focused content test; expect failures.**
+- [ ] **Step 1: Write content-integrations.test.ts for these six guide pairs and valid links.** Assert secret references are explained without inline secret values, alert rule first save is disabled, and delivery retry/deduplication guidance is present.
+- [ ] **Step 2: Run npx vitest run apps/tenant/src/help/content-integrations.test.ts from frontend; expect failures.**
 - [ ] **Step 3: Write the bilingual guides.** Check ProfileEditor, VaultSettingsPage, OutboundPolicyPage, AlertRulesPage, docs/reference/alerts.md and outbound/secrets references. Cover profile diagnostics, host and port policy, sink setup, rule conditions/activation, incident review, delivery results, and at-least-once delivery.
 - [ ] **Step 4: Rerun content tests; expect pass. Read both languages for equivalent coverage. Commit Task 7 files.**
 
-### Task 8: Administration guides and full content validation
+### Task 8: Administration guides
 
-**Files:** Modify settings.md in both locales; create retention.md and troubleshooting.md in both locales; extend contentCoverage.test.ts.
+**Files:** Modify settings.md in both locales; create retention.md and troubleshooting.md in both locales; create content-admin.test.ts.
 
 **Interfaces:** Three guide pairs complete the 24-topic corpus.
 
-- [ ] **Step 1: Extend the failing content test to all 24 topics.** Assert both locale files exist, every internal guide/tenant link and related slug resolves, and no article references a deleted broad guide except supported alias tests.
-- [ ] **Step 2: Run the focused content test; expect failures.**
+- [ ] **Step 1: Write content-admin.test.ts for these three guide pairs.** Assert both locale files exist, every internal guide/tenant link and related slug resolves, and no article references a deleted broad guide except supported alias tests.
+- [ ] **Step 2: Run npx vitest run apps/tenant/src/help/content-admin.test.ts from frontend; expect failures.**
 - [ ] **Step 3: Write the three bilingual guides.** Verify current settings, retention/archive controls, permission messages, stale data, and common job/alert failure recovery against the tenant UI and source references.
 - [ ] **Step 4: Rerun content tests; expect pass. Review both languages for accuracy and equivalent coverage. Commit Task 8 files.**
 
 ### Task 9: Diagrams and selective annotated screenshots
 
-**Files:** Create local SVG diagrams and PNG screenshots under frontend/apps/tenant/src/help/media/, media/README.md, and frontend/scripts/capture-documentation.mjs; modify relevant guide pairs to reference them; extend contentCoverage.test.ts.
+**Files:** Create local SVG diagrams and PNG screenshots under frontend/apps/tenant/src/help/media/, media/README.md, and frontend/scripts/capture-documentation.mjs; modify relevant guide pairs to reference them; create mediaAssets.test.ts.
 
 **Interfaces:** Markdown uses ./media/<asset>.svg or .png, resolved by getHelpMedia. Each image has meaningful alt text, a visible caption, and adjacent prose.
 
-- [ ] **Step 1: Add failing media-reference tests.** Assert every referenced asset resolves locally, has alt text and a following italic Figure:/Figura: caption, and no article embeds a remote image.
-- [ ] **Step 2: Run the focused content and renderer tests; expect failures.**
+- [ ] **Step 1: Add failing media-reference tests.** Assert at least five named SVGs are referenced by guides, every asset resolves locally, each image has alt text and a following italic Figure:/Figura: caption, no more than three PNG screenshots are registered, and no article embeds a remote image.
+- [ ] **Step 2: Run npx vitest run apps/tenant/src/help/mediaAssets.test.ts apps/tenant/src/help/HelpMarkdown.test.tsx from frontend; expect failures.**
 - [ ] **Step 3: Create at least five simple SVG flow/decision diagrams.** Cover first job, execution lifecycle, SQL/HTTP input choice, scheduling, and alert delivery. Make text legible on narrow screens.
 - [ ] **Step 4: Implement capture-documentation.mjs.** Use Playwright routes and synthetic fixtures patterned after existing e2e job, monitoring, and alert specs; target the job wizard, execution timeline, and alert setup.
 - [ ] **Step 5: Run the capture script against the local tenant preview.** Save at most three real UI screenshots, with no tenant identifiers or secrets.
@@ -153,17 +153,18 @@
 - [ ] **Step 8: Run the media/content tests and tenant build; expect pass. Visually inspect each asset at desktop and narrow widths.**
 - [ ] **Step 9: Commit Task 9 files.**
 
-### Task 10: Browser journeys and final verification
+### Task 10: Corpus-integrity tests and browser journeys
 
-**Files:** Modify frontend/e2e/help.spec.ts and frontend/apps/tenant/src/auth/SessionProvider.test.tsx; modify Documentation components only for issues revealed by tests.
+**Files:** Create contentCoverage.test.ts; modify frontend/e2e/help.spec.ts and frontend/apps/tenant/src/auth/SessionProvider.test.tsx; modify Documentation components only for issues revealed by tests.
 
 **Interfaces:** Existing hash routes and session fixtures remain the browser entry points.
 
-- [ ] **Step 1: Write browser tests for English and Portuguese home/article journeys, search rank and no-result reset, contextual links, legacy aliases, language-preserving deep links, reader role behavior, no external documentation fetches, and outline navigation.** Use a narrow viewport case with long Portuguese labels and keyboard navigation.
-- [ ] **Step 2: Run npx playwright test e2e/help.spec.ts --project=chromium from frontend; record any failures as concrete defects for Step 3. A pass is valid if the earlier tasks already satisfy the journeys.**
-- [ ] **Step 3: Correct only observed layout, behavior, or content defects.** Review screenshots at desktop and narrow widths for hierarchy, clipping, callout legibility, and focus states.
-- [ ] **Step 4: Run npx vitest run apps/tenant/src/help apps/tenant/src/auth/SessionProvider.test.tsx from frontend; expect pass.**
-- [ ] **Step 5: Run npm run build --workspace @workerdock/tenant from frontend; expect pass.**
-- [ ] **Step 6: Run npx playwright test e2e/help.spec.ts --project=chromium from frontend; expect pass.**
-- [ ] **Step 7: Check git diff --check and review the final diff against the spec.**
-- [ ] **Step 8: Commit Task 10 changes.**
+- [ ] **Step 1: Write a full-corpus test for all 24 bilingual articles, valid internal/related links, and canonical media references.**
+- [ ] **Step 2: Write browser tests for English and Portuguese home/article journeys, search rank and no-result reset, contextual links, legacy aliases, language-preserving deep links, reader role behavior, no external documentation fetches, and outline navigation.** Use a narrow viewport case with long Portuguese labels and keyboard navigation.
+- [ ] **Step 3: Run npx playwright test e2e/help.spec.ts --project=chromium from frontend; record any failures as concrete defects for Step 4. A pass is valid if the earlier tasks already satisfy the journeys.**
+- [ ] **Step 4: Correct only observed layout, behavior, or content defects.** Review screenshots at desktop and narrow widths for hierarchy, clipping, callout legibility, and focus states.
+- [ ] **Step 5: Run npx vitest run apps/tenant/src/help apps/tenant/src/auth/SessionProvider.test.tsx from frontend; expect pass.**
+- [ ] **Step 6: Run npm run build --workspace @workerdock/tenant from frontend; expect pass.**
+- [ ] **Step 7: Run npx playwright test e2e/help.spec.ts --project=chromium from frontend; expect pass.**
+- [ ] **Step 8: Check git diff --check and review the final diff against the spec.**
+- [ ] **Step 9: Commit Task 10 changes.**
