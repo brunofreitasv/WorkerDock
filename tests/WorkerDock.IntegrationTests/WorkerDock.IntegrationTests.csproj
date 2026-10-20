@@ -16,6 +16,7 @@
   <ItemGroup>
     <Content Include="../../database/tenant/**/*" Link="database/tenant/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../fixtures/template-schemas.json" Link="fixtures/template-schemas.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../fixtures/dynamic-values.json" Link="fixtures/dynamic-values.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../sql/*.sql" Link="target-sql/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" /><Content Include="Sql/*.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="CopyQuartzTestHost" AfterTargets="Build">

@@ -1,0 +1,10 @@
+{
+  "calendarCases": [
+    { "name": "month-clamps-leap-day", "source": "2024-01-31", "months": 1, "days": 0, "expected": "2024-02-29" },
+    { "name": "months-before-days", "source": "2024-01-31", "months": 1, "days": 1, "expected": "2024-03-01" }
+  ],
+  "boundaries": [
+    { "name": "date-end-of-month", "source": "2024-02-12", "boundary": "EndOfMonth", "expected": "2024-02-29" },
+    { "name": "timestamp-end-of-month-exclusive", "source": "2024-02-12T12:34:56+00:00", "boundary": "EndOfMonth", "expected": "2024-03-01T00:00:00.0000000+00:00" }
+  ]
+}
