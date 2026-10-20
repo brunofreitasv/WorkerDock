@@ -14,10 +14,13 @@ public sealed class SqlConfigurationValidator(string version) : ITemplateAuthori
     public IReadOnlyList<ValidationIssue> ValidateAuthoring(TemplateAuthoringContext context)
     {
         var issues = new List<ValidationIssue>();
-        if (!context.Configuration.TryGetProperty("commandKind", out var kind) || kind.GetString() != "Query")
+        if (context.Configuration.ValueKind != JsonValueKind.Object)
+            return [new("configuration", "SqlConfigurationInvalid")];
+
+        if (context.Configuration.TryGetProperty("commandKind", out var kind) && kind.ValueKind == JsonValueKind.String && kind.GetString() == "Procedure")
         {
             if (context.Configuration.TryGetProperty("commandText", out var text) && text.ValueKind == JsonValueKind.String &&
-                !Regex.IsMatch(text.GetString()!, @"^(\[[A-Za-z_][A-Za-z0-9_]*\]|[A-Za-z_][A-Za-z0-9_]*)(\.(\[[A-Za-z_][A-Za-z0-9_]*\]|[A-Za-z_][A-Za-z0-9_]*))?$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)))
+                (text.GetString()!.Length > 257 || !Regex.IsMatch(text.GetString()!, @"^(\[[A-Za-z_][A-Za-z0-9_]*\]|[A-Za-z_][A-Za-z0-9_]*)(\.(\[[A-Za-z_][A-Za-z0-9_]*\]|[A-Za-z_][A-Za-z0-9_]*))?$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))))
                 issues.Add(new("configuration.commandText", "SqlProcedureNameRequired"));
         }
 
@@ -31,9 +34,15 @@ public sealed class SqlConfigurationValidator(string version) : ITemplateAuthori
         foreach (var row in parameters.EnumerateArray())
         {
             var path = $"configuration.parameters[{index}]";
+            if (row.ValueKind != JsonValueKind.Object)
+            {
+                issues.Add(new(path, "SqlParameterInvalid"));
+                index++;
+                continue;
+            }
             if (!row.TryGetProperty("name", out var nameElement) || nameElement.ValueKind != JsonValueKind.String || !names.Add(nameElement.GetString()!))
                 issues.Add(new(path + ".name", "SqlParameterNameInvalid"));
-            var dbType = row.TryGetProperty("dbType", out var typeElement) && Enum.TryParse<SqlDbType>(typeElement.GetString(), out var parsed) ? parsed : (SqlDbType?)null;
+            var dbType = row.TryGetProperty("dbType", out var typeElement) && typeElement.ValueKind == JsonValueKind.String && Enum.TryParse<SqlDbType>(typeElement.GetString(), out var parsed) ? parsed : (SqlDbType?)null;
             var target = $"/parameters/{index}/value";
             var binding = context.DynamicValues?.Bindings.FirstOrDefault(candidate => candidate.Target == target);
             if (binding is not null && dbType is { } targetType && !Compatible(targetType, binding))
@@ -73,7 +82,7 @@ public sealed class SqlConfigurationValidator(string version) : ITemplateAuthori
         if (type is SqlDbType.NVarChar or SqlDbType.VarChar or SqlDbType.NChar or SqlDbType.Char)
             return binding.Source is not (DynamicValueSource.ReferenceDate or DynamicValueSource.ScheduledTimestamp or DynamicValueSource.FirstExecutionStart) || binding.Format is DynamicValueFormat.String or DynamicValueFormat.IsoDate or DynamicValueFormat.IsoOffsetTimestamp or DynamicValueFormat.IsoUtcTimestamp or DynamicValueFormat.UnixSeconds or DynamicValueFormat.UnixMilliseconds;
         if (type == SqlDbType.Date) return binding.Source == DynamicValueSource.ReferenceDate && binding.Format == DynamicValueFormat.IsoDate || binding.Source is DynamicValueSource.ScheduledTimestamp or DynamicValueSource.FirstExecutionStart && binding.Format == DynamicValueFormat.IsoDate;
-        if (type is SqlDbType.DateTime or SqlDbType.DateTime2) return binding.Source is DynamicValueSource.ScheduledTimestamp or DynamicValueSource.FirstExecutionStart && binding.Format is DynamicValueFormat.IsoDate or DynamicValueFormat.IsoOffsetTimestamp or DynamicValueFormat.IsoUtcTimestamp;
+        if (type is SqlDbType.DateTime or SqlDbType.DateTime2) return binding.Source is DynamicValueSource.ReferenceDate or DynamicValueSource.ScheduledTimestamp or DynamicValueSource.FirstExecutionStart && binding.Format is DynamicValueFormat.IsoDate or DynamicValueFormat.IsoOffsetTimestamp or DynamicValueFormat.IsoUtcTimestamp;
         if (type == SqlDbType.DateTimeOffset) return binding.Source is DynamicValueSource.ScheduledTimestamp or DynamicValueSource.FirstExecutionStart && binding.Format is DynamicValueFormat.IsoOffsetTimestamp or DynamicValueFormat.IsoUtcTimestamp;
         if (type == SqlDbType.BigInt) return binding.Source is DynamicValueSource.ScheduledTimestamp or DynamicValueSource.FirstExecutionStart && binding.Format is DynamicValueFormat.UnixSeconds or DynamicValueFormat.UnixMilliseconds;
         if (type == SqlDbType.UniqueIdentifier) return binding.Source == DynamicValueSource.ExecutionId && binding.Format == DynamicValueFormat.String;

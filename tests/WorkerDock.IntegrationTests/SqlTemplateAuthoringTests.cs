@@ -39,6 +39,42 @@ public sealed class SqlTemplateAuthoringTests
     }
 
     [Fact]
+    public void Malformed_sql_json_shapes_return_validation_issues_without_throwing()
+    {
+        var descriptor = SqlTemplateDescriptors.Get("1.1.0");
+        var service = BuiltInAuthoringValidators.Create();
+        var arrayRoot = JsonDocument.Parse("[]").RootElement.Clone();
+        var primitiveRow = JsonDocument.Parse("""{"commandKind":17,"parameters":[1]}""").RootElement.Clone();
+        var rootIssues = service.Validate(new(descriptor, arrayRoot, null, null, "Manual"));
+        var rowIssues = service.Validate(new(descriptor, primitiveRow, null, null, "Manual"));
+        Assert.NotEmpty(rootIssues);
+        Assert.Contains(rowIssues, issue => issue.Path == "configuration.parameters[0]");
+    }
+
+    [Fact]
+    public void Procedure_identifier_length_matches_runtime_limit()
+    {
+        var descriptor = SqlTemplateDescriptors.Get("1.1.0");
+        var tooLong = new string('a', 258);
+        var config = Base(tooLong) with { CommandKind = "Procedure" };
+        var result = BuiltInAuthoringValidators.Create().Validate(new(descriptor, JsonSerializer.SerializeToElement(config, SqlJobConfiguration.JsonOptions), null, null, "Manual"));
+        Assert.Contains(result, issue => issue.Code == "SqlProcedureNameRequired" && issue.Path == "configuration.commandText");
+    }
+
+    [Fact]
+    public void Reference_date_can_bind_to_datetime_using_iso_date()
+    {
+        var descriptor = SqlTemplateDescriptors.Get("1.1.0");
+        var config = Base("dbo.Job") with
+        {
+            Parameters = [new("@at", SqlDbType.DateTime2, null, null, false, false, null, null, null)]
+        };
+        var plan = new DynamicValuePlan(1, "UTC", [new("/parameters/0/value", DynamicValueSource.ReferenceDate, null, 0, 0, DynamicValueBoundary.None, DynamicValueFormat.IsoDate)]);
+        var result = BuiltInAuthoringValidators.Create().Validate(new(descriptor, JsonSerializer.SerializeToElement(config, SqlJobConfiguration.JsonOptions), plan, null, "Manual"));
+        Assert.DoesNotContain(result, issue => issue.Code is "DynamicTypeMismatch" or "DynamicBindingInvalid");
+    }
+
+    [Fact]
     public void Decimal_validation_explains_scale_and_size_metadata_rules()
     {
         var descriptor = SqlTemplateDescriptors.Get("1.1.0");

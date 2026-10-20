@@ -21,3 +21,12 @@
 - `src/WorkerDock.Templates.SqlServer/SqlTemplate.cs`
 - `src/WorkerDock.Infrastructure/Templates/BuiltInAuthoringValidators.cs`
 - `tests/WorkerDock.IntegrationTests/SqlTemplateAuthoringTests.cs`
+
+## Review follow-up
+
+- Guarded malformed configuration roots, non-object parameter rows, and non-string `commandKind`/`dbType` values so authoring validation returns bounded issues instead of throwing.
+- Aligned `DateTime`/`DateTime2` dynamic acceptance with the declared ISO date/timestamp formats, including ReferenceDate with IsoDate.
+- Matched Procedure validation to the runtime's 257-character limit.
+- Added regressions for array roots, primitive parameter rows, ReferenceDate-to-DateTime2, and an overlong procedure identifier.
+- RED: the three new focused regressions failed before the fixes for malformed JSON, reference-date compatibility, and length.
+- GREEN: non-fixture SQL authoring/catalog/template regression command passed (49 tests). The broader filter had six SQL target fixture tests fail because `WORKERDOCK_TEST_SQL` is unset; all remaining 54 passed.
