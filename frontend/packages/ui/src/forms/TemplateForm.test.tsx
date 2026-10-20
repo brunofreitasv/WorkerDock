@@ -5,6 +5,8 @@ import fixtures from "../../../../../tests/fixtures/template-schemas.json";
 import { TemplateForm } from "./TemplateForm";
 import { validateSchema } from "./SchemaValidation";
 import { createSchemaDefault } from "./schemaDefaults";
+import { translations } from "../preferences";
+import type { DynamicValuePlan } from "./dynamicValueTypes";
 
 describe("shared schema fixtures", () => {
   it("matches every server fixture validity, issue path, and code", () => {
@@ -62,6 +64,33 @@ it("creates defaults for refs and selected oneOf branches without nullable optio
 it("maps missing required array members to their concrete row path", () => {
   const schema = { type: "object", properties: { parameters: { type: "array", items: { type: "object", properties: { isNull: { type: "boolean" } }, required: ["isNull"] } } } };
   expect(validateSchema(schema, { parameters: [{ isNull: true }, {}] })).toContainEqual({ path: "configuration.parameters[1].isNull", code: "Required" });
+});
+
+it("treats a bound eligible scalar as supplied while preserving other schema errors", () => {
+  const schema = { type: "object", required: ["parameters"], properties: { parameters: { type: "object", required: ["referenceDate", "name"], properties: { referenceDate: { type: "string", "x-workerDock-dynamicValue": true }, name: { type: "string" } } } } };
+  expect(validateSchema(schema, { parameters: {} }, new Set(["/parameters/referenceDate"]))).toEqual([{ path: "configuration.parameters.name", code: "Required" }]);
+  expect(validateSchema({ type: "object", required: ["name"], properties: { name: { type: "string" } } }, {}, new Set(["/name"]))).toEqual([{ path: "configuration.name", code: "Required" }]);
+});
+
+it("uses explicit SQL procedure/query language and hides decimal metadata for Date parameters", () => {
+  const descriptor = { id: "workerdock.sql-server", version: "1.1.0", displayName: "SQL Server", description: "SQL template", configurationSchema: {} };
+  const plan: DynamicValuePlan = { resolverVersion: 1, timeZoneId: "UTC", bindings: [] };
+  render(<TemplateForm descriptor={descriptor} value={{ profileId: "profile", catalog: "jobs", commandKind: "Procedure", commandText: "dbo.Job", parameters: [{ name: "@Dt_Ref", dbType: "Date", value: "2026-10-20", useExecutionKey: false, isNull: false }], useTransaction: true, commandTimeoutSeconds: null }} onChange={() => {}} errors={{}} dynamicValues={plan} onDynamicValuesChange={() => {}} t={translations.en} />);
+  expect(screen.getByLabelText("Stored procedure name")).toHaveValue("dbo.Job");
+  expect(screen.getByText(/Enter only the procedure name/)).toBeInTheDocument();
+  expect(screen.getByRole("combobox", { name: "Value source" })).toHaveTextContent("Fixed value");
+  expect(screen.queryByLabelText("Decimal places (scale)")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/Use Execution Key|Is Null/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/No SQL command timeout is set/)).toBeInTheDocument();
+});
+
+it("explains query text and parameters separately", () => {
+  const descriptor = { id: "workerdock.sql-server", version: "1.0.0", displayName: "SQL Server", description: "SQL template", configurationSchema: {} };
+  render(<TemplateForm descriptor={descriptor} value={{ commandKind: "Query", commandText: "SELECT * FROM dbo.Items WHERE Id = @Id", parameters: [], useTransaction: true, commandTimeoutSeconds: 30 }} onChange={() => {}} errors={{}} t={translations.en} />);
+  expect(screen.getByLabelText("SQL statement")).toHaveValue("SELECT * FROM dbo.Items WHERE Id = @Id");
+  expect(screen.getByText(/complete SQL statement using @parameter placeholders/)).toBeInTheDocument();
+  expect(screen.getByText(/Add matching parameter names, types, and values below/)).toBeInTheDocument();
+  expect(screen.getByText(/does not support dynamic values/)).toBeInTheDocument();
 });
 
 it("keeps a second row error attached while the first row changes", async () => {
