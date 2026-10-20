@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.IO.Compression;
+using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Jobs;
 using WorkerDock.DatabaseMigrator;
@@ -109,6 +110,31 @@ public sealed class DynamicValuePersistenceTests
             await database.ExecuteAsync($"UPDATE [workerdock].Executions SET ValueSnapshotJson=N'{{\"resolverVersion\":1,\"inputDigest\":\"{new string('A', 64)}\",\"values\":{{}}}}' WHERE ExecutionId='{executionId}'");
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.RollbackAsync("tenant", "0009_dynamic_values", default));
         Assert.Equal("UnsafeRollback", error.Code);
+    }
+
+    [Theory]
+    [InlineData("error")]
+    [InlineData("first-start")]
+    public async Task Execution_value_state_trigger_rejects_nulling_populated_sentinel_values(string stateKind)
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var jobId = Guid.NewGuid();
+        var executionId = Guid.NewGuid();
+        await database.ExecuteAsync($$"""
+            INSERT [workerdock].Jobs(JobId,CurrentRevision,Enabled,Archived,ConcurrencyLimit) VALUES('{{jobId}}',NULL,0,0,1);
+            INSERT [workerdock].JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc)
+            VALUES('{{jobId}}',1,N'immutable',N'workerdock.http',N'1.0.0',N'{}',NULL,N'{}',SYSUTCDATETIME());
+            UPDATE [workerdock].Jobs SET CurrentRevision=1 WHERE JobId='{{jobId}}';
+            INSERT [workerdock].Executions(ExecutionId,JobId,JobRevision,TriggerKind,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc,ValueResolutionError,FirstStartedAtUtc)
+            VALUES('{{executionId}}','{{jobId}}',1,N'Manual',N'immutability-key',N'Queued',N'Known',SYSUTCDATETIME(),NEWID(),SYSUTCDATETIME(),{{(stateKind == "error" ? "N''" : "NULL")}},{{(stateKind == "first-start" ? "CONVERT(datetime2(7),'0001-01-01T00:00:00')" : "NULL")}});
+            """);
+
+        var error = await Assert.ThrowsAsync<SqlException>(() => database.ExecuteAsync($"UPDATE [workerdock].Executions SET {(stateKind == "error" ? "ValueResolutionError=NULL" : "FirstStartedAtUtc=NULL")} WHERE ExecutionId='{executionId}'"));
+
+        Assert.Equal(51061, error.Number);
     }
 
     [Fact]

@@ -1,5 +1,7 @@
 using Microsoft.Data.SqlClient;
+using System.Text.Json;
 using WorkerDock.Application.Common;
+using WorkerDock.Contracts.Values;
 using WorkerDock.Domain.Scheduling;
 using WorkerDock.Infrastructure.Jobs;
 using WorkerDock.Infrastructure.Persistence;
@@ -10,12 +12,48 @@ using WorkerDock.Infrastructure.Workers;
 using WorkerDock.Infrastructure.Dispatch;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Quartz.Scheduling;
+using WorkerDock.Templates.Http;
 
 namespace WorkerDock.IntegrationTests;
 
 public sealed class JobLifecycleTests
 {
     private static readonly WorkerDock.Application.Common.ActorContext Actor = new("operator", "Anonymous", Guid.NewGuid());
+
+    [Trait("Store", "Sql")]
+    [Fact]
+    public async Task Enable_rejects_scheduled_timestamp_binding_when_job_has_no_schedule()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new WorkerDock.DatabaseMigrator.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        var descriptor = HttpTemplateDescriptors.Get("1.1.0");
+        var catalog = new TemplateCatalog([descriptor]);
+        await catalog.RegisterAsync([descriptor], default);
+        await database.ExecuteAsync($"INSERT [workerdock].TemplateCatalog(TemplateId,TemplateVersion,MetadataDigest,Enabled) VALUES(N'workerdock.http',N'1.1.0',N'{descriptor.MetadataDigest}',1)");
+        var jobId = Guid.NewGuid();
+        var plan = DynamicValueJson.Write(new(1, "UTC", [new("/parameters/when", DynamicValueSource.ScheduledTimestamp, null, 0, 0, DynamicValueBoundary.None, DynamicValueFormat.IsoUtcTimestamp)]));
+        var configuration = JsonSerializer.SerializeToElement(new
+        {
+            method = "GET", url = "https://example.test", query = new { }, headers = new { }, secretHeaders = new { },
+            parameters = new { when = "fixed" }, successStatuses = Array.Empty<int>(), maxResponseBytes = 1024, responseMode = "SafeSummary"
+        });
+        var policy = "{\"Timeout\":null,\"MaxAttempts\":1,\"RetryBaseDelay\":\"00:00:00\",\"RetryMaxDelay\":\"00:00:00\",\"JitterRatio\":0,\"RetryableCodes\":[],\"ReplaySafe\":false,\"Overlap\":\"Queue\",\"BacklogLimit\":10,\"Priority\":5}";
+        await database.ExecuteAsync($$"""
+            INSERT [workerdock].Jobs(JobId,CurrentRevision,Enabled,Archived,ConcurrencyLimit) VALUES('{{jobId}}',NULL,0,0,1);
+            INSERT [workerdock].JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc,DynamicValuesJson)
+            VALUES('{{jobId}}',1,N'dynamic unscheduled',N'workerdock.http',N'1.1.0',N'{{configuration.GetRawText()}}',NULL,N'{{policy}}',SYSUTCDATETIME(),N'{{plan.GetRawText()}}');
+            UPDATE [workerdock].Jobs SET CurrentRevision=1 WHERE JobId='{{jobId}}';
+            """);
+        var lifecycle = new SqlJobLifecycle(options, catalog, new QuartzScheduleEvaluator(), TimeProvider.System);
+
+        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await lifecycle.ApplyAsync(jobId, "Enable", await VersionAsync(database, jobId), Actor, default));
+
+        Assert.Equal("ValidationFailed", error.Code);
+        Assert.Equal(0, await database.ScalarAsync($"SELECT Enabled FROM [workerdock].Jobs WHERE JobId='{jobId}'"));
+    }
 
     [Trait("Store", "Sql")]
     [Fact]

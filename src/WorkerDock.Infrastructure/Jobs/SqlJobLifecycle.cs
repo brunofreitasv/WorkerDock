@@ -111,7 +111,11 @@ public sealed class SqlJobLifecycle(TenantDatabaseOptions options, ITemplateCata
 
     private async ValueTask ValidateForEnableAsync(DbConnection c, DbTransaction t, JobRevision job, CancellationToken ct, bool requireNoSchedule)
     {
-        JobCommandValidation.ValidateRevision(job); await TemplateJobValidation.ValidateAsync(templates, job, ct, authoring, requireNoSchedule ? null : "Scheduled");
+        await using var scheduleExists = Command(c, t, "SELECT CASE WHEN EXISTS(SELECT 1 FROM [workerdock].Schedules WITH(UPDLOCK,HOLDLOCK) WHERE JobId=@job AND Removed=0) THEN 1 ELSE 0 END");
+        Add(scheduleExists, "@job", SqlDbType.UniqueIdentifier, job.JobId);
+        var hasSchedule = (int)(await scheduleExists.ExecuteScalarAsync(ct))! == 1;
+        var triggerKind = hasSchedule ? "Scheduled" : "Manual";
+        JobCommandValidation.ValidateRevision(job); await TemplateJobValidation.ValidateAsync(templates, job, ct, authoring, triggerKind);
         if (job.ProfileId is { } id)
         {
             await using var profile = Command(c, t, "SELECT Retired,CurrentRevisionId FROM [workerdock].ConnectionProfiles WITH(UPDLOCK,HOLDLOCK) WHERE ProfileId=@id"); Add(profile, "@id", SqlDbType.UniqueIdentifier, id); await using var row = await profile.ExecuteReaderAsync(ct);

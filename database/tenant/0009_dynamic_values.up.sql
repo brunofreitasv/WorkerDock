@@ -16,10 +16,10 @@ BEGIN
     SET NOCOUNT ON;
     IF EXISTS (
         SELECT 1 FROM inserted i JOIN deleted d ON d.ExecutionId=i.ExecutionId
-        WHERE (d.ValueContextJson IS NOT NULL AND ISNULL(i.ValueContextJson,N'')<>ISNULL(d.ValueContextJson,N''))
-           OR (d.FirstStartedAtUtc IS NOT NULL AND ISNULL(i.FirstStartedAtUtc,CONVERT(datetime2(7),'0001-01-01'))<>d.FirstStartedAtUtc)
-           OR (d.ValueSnapshotJson IS NOT NULL AND ISNULL(i.ValueSnapshotJson,N'')<>ISNULL(d.ValueSnapshotJson,N''))
-           OR (d.ValueResolutionError IS NOT NULL AND ISNULL(i.ValueResolutionError,N'')<>ISNULL(d.ValueResolutionError,N''))
+        WHERE (d.ValueContextJson IS NOT NULL AND (i.ValueContextJson IS NULL OR i.ValueContextJson<>d.ValueContextJson))
+           OR (d.FirstStartedAtUtc IS NOT NULL AND (i.FirstStartedAtUtc IS NULL OR i.FirstStartedAtUtc<>d.FirstStartedAtUtc))
+           OR (d.ValueSnapshotJson IS NOT NULL AND (i.ValueSnapshotJson IS NULL OR i.ValueSnapshotJson<>d.ValueSnapshotJson))
+           OR (d.ValueResolutionError IS NOT NULL AND (i.ValueResolutionError IS NULL OR i.ValueResolutionError<>d.ValueResolutionError))
     ) THROW 51061, 'Execution value state is immutable once populated', 1;
 END;
 GO
