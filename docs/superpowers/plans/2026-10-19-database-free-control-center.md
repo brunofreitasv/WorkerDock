@@ -54,7 +54,7 @@
 - Test: `tests/WorkerDock.UnitTests/CentralJournalStoreTests.cs`
 
 **Interfaces:**
-- Produces: `CentralJournalStore.Open(string dataDirectory, Guid instanceId) -> CentralJournalStore`, `IReadOnlyList<CentralJournalMutation> Mutations`, `AppendAsync(CentralJournalMutation mutation, CancellationToken ct) -> ValueTask<long>`, `IsWritable`, `Dispose()`. An internal `ICentralJournalWriter.AppendAndFlushAsync(ReadOnlyMemory<byte> frame, CancellationToken ct) -> ValueTask` seam permits deterministic partial-write and flush-failure tests.
+- Produces: `CentralJournalStore.Open(string dataDirectory, Guid instanceId) -> CentralJournalStore`, `IReadOnlyList<CentralJournalRecord> Records`, `AppendAsync(CentralJournalMutation mutation, CancellationToken ct) -> ValueTask<long>`, `IsWritable`, `Dispose()`. `CentralJournalRecord(long Sequence, CentralJournalMutation Mutation)` supplies the ETag revision. `TenantRegistrationSnapshot(Guid Id, string DisplayName, Guid ExpectedInstanceId, string DashboardUrl, string HealthCredentialReference, DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc)` is journal state. `CentralJournalMutation(string Action, Guid RegistrationId, TenantRegistrationSnapshot? Before, TenantRegistrationSnapshot? After, DateTimeOffset AtUtc, ActorContext Actor, string SafeDetailsJson)` is the append payload. An internal `ICentralJournalWriter.AppendAndFlushAsync(ReadOnlyMemory<byte> frame, CancellationToken ct) -> ValueTask` seam permits deterministic partial-write and flush-failure tests.
 - A mutation has action `Registered`/`Updated`/`Removed`/`ImportedRegistration`/`LegacyAudit`; registration ID; optional before/after snapshot; UTC time; actor ID/mode; correlation ID; safe audit projection. It contains no resolved secret.
 - The store writes one identity header followed by length-prefixed, SHA-256-checked frames (maximum payload 16 KiB), each with increasing sequence and previous-frame hash. It flushes each acknowledged append to disk.
 
@@ -89,7 +89,7 @@
 - Create: `src/WorkerDock.ControlCenter/Registry/CentralStorageOptions.cs`
 - Modify: `src/WorkerDock.ControlCenter/Program.cs`
 - Modify: `src/WorkerDock.ControlCenter/Endpoints/RegistryEndpoints.cs` only if storage-unavailable error mapping needs a focused change.
-- Remove from center runtime: `src/WorkerDock.ControlCenter/Registry/SqlCentralRegistry.cs` (move its read-only legacy logic to Task 5's tool).
+- Remove from center runtime: `src/WorkerDock.ControlCenter/Registry/SqlCentralRegistry.cs`; Task 5 implements a separate read-only legacy table reader in the importer project.
 - Test: `tests/WorkerDock.IntegrationTests/ControlCenterIsolationTests.cs`
 - Test: `tests/WorkerDock.IntegrationTests/ControlCenterFileHostTests.cs`
 
@@ -133,11 +133,11 @@
 - Create: `src/WorkerDock.ControlCenter/Registry/CentralJournalBootstrap.cs`
 - Test: `tests/WorkerDock.UnitTests/CentralJournalBootstrapTests.cs`
 - Test: `tests/WorkerDock.IntegrationTests/CentralLegacyImportSqlTests.cs` (gated on `WORKERDOCK_TEST_SQL`)
-- Modify: `docs/control-center.md`, `docs/reference/configuration.md`, `docs/reference/database-objects.md`, `docs/how-to/setup-sql-server.md`, `docs/tutorials/run-in-memory.md`, `docs/tutorials/run-with-sql-server.md`, `docs/how-to/deploy-production.md`, `docs/upgrades.md`, `docs/architecture.md`, `docs/database.md`, `README.md`, and the original design spec's top-level supersession note.
+- Modify: `docs/control-center.md`, `docs/reference/configuration.md`, `docs/reference/database-objects.md`, `docs/how-to/setup-sql-server.md`, `docs/tutorials/run-in-memory.md`, `docs/tutorials/run-with-sql-server.md`, `docs/architecture.md`, `docs/database.md`, `README.md`, and the original design spec's top-level supersession note.
 
 **Interfaces:**
 - Consumes: Tasks 1–4 journal format, old `[workerdock].CentralSettings`/`TenantRegistrations`/`TenantHealthObservations`/`AuditEvents`, and existing `database/central` migration history.
-- Produces: `CentralJournalBootstrap.ImportAsync(string dataDirectory, Guid instanceId, IReadOnlyList<LegacyRegistration> registrations, IReadOnlyList<LegacyAuditEvent> audit, IReadOnlyList<LegacyHealthObservation> health, CancellationToken ct) -> Task<ImportReceipt>`. `WorkerDock.CentralImport` reads legacy SQL with a read-only identity and calls bootstrap; it is a separate migration tool, not a runtime dependency.
+- Produces: `LegacyRegistration(Guid Id, string DisplayName, Guid ExpectedInstanceId, string DashboardUrl, string HealthCredentialReference, DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc)`; `LegacyAuditEvent(Guid Id, DateTimeOffset AtUtc, string ActorId, string AuthenticationMode, string Action, string EntityType, string EntityId, Guid CorrelationId, string SafeDetailsJson)`; `LegacyHealthObservation(Guid RegistrationId, string Health, string? SafeCode, DateTimeOffset LastAttemptUtc, DateTimeOffset? LastSuccessUtc)`. `CentralJournalBootstrap.ImportAsync(string dataDirectory, Guid instanceId, IReadOnlyList<LegacyRegistration> registrations, IReadOnlyList<LegacyAuditEvent> audit, IReadOnlyList<LegacyHealthObservation> health, CancellationToken ct) -> Task<ImportReceipt>`. `WorkerDock.CentralImport` reads legacy SQL with a read-only identity and calls bootstrap; it is a separate migration tool, not a runtime dependency.
 
 - [ ] **Step 1: Write failing import tests.** Synthetic unit cases preserve IDs/timestamps/safe audit counts/latest health observations, assign new ETags, and reject identity mismatch, duplicate IDs, unsafe URL/secret-bearing URL, invalid credential reference, and nonempty target without partial output. SQL-gated integration creates a disposable legacy center DB, imports it, reopens the file registry, and compares safe records without printing secret references.
 - [ ] **Step 2: Run red.** `dotnet test tests/WorkerDock.UnitTests --filter FullyQualifiedName~CentralJournalBootstrapTests`; expect missing import types.
