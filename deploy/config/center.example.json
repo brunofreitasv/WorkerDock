@@ -1,8 +1,9 @@
 {
   "Central": {
     "InstanceId": "<CENTER_INSTANCE_GUID>",
-    "ConnectionString": "Server=<SQL_SERVER>;Database=<CENTER_DATABASE>;Integrated Security=true;Encrypt=true;TrustServerCertificate=false;Application Name=WorkerDock-Center",
-    "Adapter": "Sql",
+    "Storage": {
+      "DataDirectory": "C:\\ProgramData\\WorkerDock\\ControlCenter\\state"
+    },
     "Health": {
       "AllowedHosts": [
         "<TENANT_HEALTH_HOST>"

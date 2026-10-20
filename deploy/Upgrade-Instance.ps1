@@ -46,6 +46,28 @@ try {
     if ($site.State -ne 'Stopped') { throw 'Unsafe upgrade state: IIS site must be stopped after operator-managed admission blocking; this script cannot block admission or drain requests.' }
     if ((Get-WebAppPoolState -Name $metadata.poolName).Value -ne 'Stopped') { throw 'Unsafe upgrade state: IIS application pool must be stopped first.' }
 
+    if ($kind -eq 'center') {
+        if ([IO.Path]::GetExtension($backupFullPath) -ne '.zip') { throw 'Center BackupPath must be a new .zip archive path.' }
+        if (Test-Path -LiteralPath $backupFullPath) { throw 'BackupPath already exists; refusing to overwrite a center backup.' }
+        $stateCompatibility = $package.Manifest.stateFormatCompatibility
+        if ($null -eq $stateCompatibility -or [int]$stateCompatibility.minimum -gt 1 -or [int]$stateCompatibility.maximum -lt 1) {
+            throw 'Center package does not support persistent state format 1.'
+        }
+        $stateDirectory = if ($metadata.stateDirectory) { [string]$metadata.stateDirectory } else { Assert-CenterDataDirectory $existingConfig $root }
+        if ((Assert-CenterDataDirectory $existingConfig $root) -ne [IO.Path]::GetFullPath($stateDirectory)) { throw 'Configured center state directory differs from installed metadata.' }
+        $oldRelease = Join-Path $root "releases/$($metadata.activeVersion)"
+        if (-not (Test-Path -LiteralPath $oldRelease -PathType Container)) { throw "Active release directory is missing: $oldRelease" }
+        $previousVersion = [string]$metadata.activeVersion
+        [void](New-CenterBackupArchive $stateDirectory $storedConfig $oldRelease $backupFullPath $instanceId $previousVersion)
+        $release = Install-VerifiedRelease $package $root
+        Set-ReleaseConfig $storedConfig (Join-Path $release 'web/appsettings.Production.json')
+        Set-ItemProperty "IIS:\Sites\$($metadata.siteName)" -Name physicalPath -Value (Join-Path $release 'web')
+        $metadata.activeVersion = [string]$package.Manifest.version
+        $metadata | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $root 'config/deployment.json') -Encoding utf8
+        Write-Output "Center upgrade staged to version $($package.Manifest.version). IIS remains stopped. Verified state/config/release backup: $backupFullPath. Review the backup and start the application manually; readiness is not claimed."
+        return
+    }
+
     if (-not $backupFullPath.StartsWith('\\') -or [IO.Path]::GetExtension($backupFullPath) -ne '.bak') {
         throw 'BackupPath must be a new UNC .bak path accessible to the SQL Server service account.'
     }

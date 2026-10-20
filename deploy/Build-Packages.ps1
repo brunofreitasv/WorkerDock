@@ -10,8 +10,8 @@ param(
     [string] $Configuration = 'Release',
     [int] $TenantSchemaMinVersion = 1,
     [int] $TenantSchemaMaxVersion = 8,
-    [int] $CenterSchemaMinVersion = 1,
-    [int] $CenterSchemaMaxVersion = 1
+    [int] $CenterStateMinVersion = 1,
+    [int] $CenterStateMaxVersion = 1
 )
 
 Set-StrictMode -Version Latest
@@ -58,7 +58,7 @@ function Copy-Frontend([string] $WorkspaceName, [string] $WebRoot, [string] $Dis
     Copy-Item -Path (Join-Path $DistPath '*') -Destination $wwwroot -Recurse -Force
 }
 
-function Write-PackageManifest([string] $PackageRoot, [string] $Kind, [int] $MinSchema, [int] $MaxSchema) {
+function Write-PackageManifest([string] $PackageRoot, [string] $Kind, [int] $MinCompatibility, [int] $MaxCompatibility) {
     $rootManifest = Join-Path $PackageRoot 'manifest.json'
     $files = @(Get-ChildItem -LiteralPath $PackageRoot -File -Recurse |
         Where-Object { $_.FullName -ne $rootManifest } |
@@ -77,16 +77,19 @@ function Write-PackageManifest([string] $PackageRoot, [string] $Kind, [int] $Min
         components = if ($Kind -eq 'tenant') {
             [ordered]@{ web = $Version; scheduler = $Version; worker = $Version; executor = $Version; migrator = $Version }
         } else {
-            [ordered]@{ web = $Version; migrator = $Version }
+            [ordered]@{ web = $Version }
         }
-        schemaCompatibility = [ordered]@{ minimum = $MinSchema; maximum = $MaxSchema }
+        schemaCompatibility = if ($Kind -eq 'tenant') { [ordered]@{ minimum = $MinCompatibility; maximum = $MaxCompatibility } } else { $null }
+        stateFormatCompatibility = if ($Kind -eq 'center') { [ordered]@{ minimum = $MinCompatibility; maximum = $MaxCompatibility } } else { $null }
         layout = if ($Kind -eq 'tenant') {
             [ordered]@{ web = 'web/'; scheduler = 'scheduler/'; worker = 'worker/'; executor = 'worker/executor/'; migrator = 'tools/database-migrator/' }
         } else {
-            [ordered]@{ web = 'web/'; migrator = 'tools/database-migrator/' }
+            [ordered]@{ web = 'web/' }
         }
         files = $files
     }
+    if ($Kind -eq 'center') { $manifest.Remove('schemaCompatibility') }
+    else { $manifest.Remove('stateFormatCompatibility') }
     $manifestPath = Join-Path $PackageRoot 'manifest.json'
     $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 }
@@ -94,8 +97,8 @@ function Write-PackageManifest([string] $PackageRoot, [string] $Kind, [int] $Min
 if ($TenantSchemaMinVersion -lt 1 -or $TenantSchemaMaxVersion -lt $TenantSchemaMinVersion) {
     throw 'Tenant schema compatibility window must be a positive inclusive range.'
 }
-if ($CenterSchemaMinVersion -lt 1 -or $CenterSchemaMaxVersion -lt $CenterSchemaMinVersion) {
-    throw 'Center schema compatibility window must be a positive inclusive range.'
+if ($CenterStateMinVersion -ne 1 -or $CenterStateMaxVersion -ne 1) {
+    throw 'Center state format compatibility must remain exactly version 1.'
 }
 
 $SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
@@ -125,7 +128,6 @@ try {
     Publish-Project 'src/WorkerDock.DatabaseMigrator/WorkerDock.DatabaseMigrator.csproj' (Join-Path $tenantRoot 'tools/database-migrator')
     Publish-Project 'src/WorkerDock.ControlCenter/WorkerDock.ControlCenter.csproj' (Join-Path $centerRoot 'web')
     Copy-Frontend '@workerdock/center' (Join-Path $centerRoot 'web') (Join-Path $stagingRoot 'frontend/center-dist')
-    Publish-Project 'src/WorkerDock.DatabaseMigrator/WorkerDock.DatabaseMigrator.csproj' (Join-Path $centerRoot 'tools/database-migrator')
 
     $tenantConfig = Get-RequiredPath 'deploy/config/tenant.example.json'
     $workerConfig = Get-RequiredPath 'deploy/config/worker.example.json'
@@ -141,7 +143,7 @@ try {
     }
 
     Write-PackageManifest $tenantRoot 'tenant' $TenantSchemaMinVersion $TenantSchemaMaxVersion
-    Write-PackageManifest $centerRoot 'center' $CenterSchemaMinVersion $CenterSchemaMaxVersion
+    Write-PackageManifest $centerRoot 'center' $CenterStateMinVersion $CenterStateMaxVersion
 
     foreach ($kind in @('tenant', 'center')) {
         $archive = Join-Path $OutputRoot "workerdock-$kind-$Version.zip"

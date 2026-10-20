@@ -21,6 +21,7 @@ try {
     $configPathStored = Join-Path $root 'config/center.json'
     $incomingConfig = Read-DeploymentConfig $ConfigPath
     [void](Assert-ConfigIdentity $incomingConfig 'center' $InstanceId)
+    $stateDirectory = Assert-CenterDataDirectory $incomingConfig $root
     $metadataPath = Join-Path $root 'config/deployment.json'
     $ownsIis = Test-Path -LiteralPath $metadataPath -PathType Leaf
     if ($ownsIis) {
@@ -35,14 +36,17 @@ try {
         }
     }
     $config = Save-PersistentConfig $ConfigPath $configPathStored $InstanceId 'center'
+    [IO.Directory]::CreateDirectory($stateDirectory) | Out-Null
+    $poolName = "WorkerDock-$($InstanceId.ToString('N').Substring(0,8))-Center"
+    Protect-SensitiveDirectory $stateDirectory "IIS AppPool\$poolName"
     $release = Install-VerifiedRelease $package $root
     Set-ReleaseConfig $configPathStored (Join-Path $release 'web/appsettings.Production.json')
-    $poolName = "WorkerDock-$($InstanceId.ToString('N').Substring(0,8))-Center"
     Write-DeploymentMetadata $root ([ordered]@{
         kind = 'center'; instanceId = $InstanceId.ToString(); activeVersion = [string]$package.Manifest.version
         siteName = $SiteName; poolName = $poolName
-        hostName = $HostName; certificateThumbprint = $CertificateThumbprint.Replace(' ','').ToUpperInvariant()
+        hostName = $HostName; certificateThumbprint = $CertificateThumbprint.Replace(' ','').ToUpperInvariant(); stateDirectory = $stateDirectory
     })
     New-HttpsIisSite $SiteName $poolName $HostName $CertificateThumbprint (Join-Path $release 'web') -Owned:$ownsIis
     Protect-ConfigDirectory (Join-Path $root 'config') @("IIS AppPool\$poolName")
+    Protect-SensitiveDirectory $stateDirectory "IIS AppPool\$poolName"
 } finally { Close-VerifiedPackage $package }

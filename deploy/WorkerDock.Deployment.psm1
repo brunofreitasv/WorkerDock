@@ -52,8 +52,30 @@ function Assert-ConfigIdentity($Config, [ValidateSet('tenant','center')] [string
     $parsedId = [guid]::Empty
     if (-not [guid]::TryParse([string]$configuredId, [ref]$parsedId)) { throw "$section.InstanceId must be a GUID." }
     if ([string]$configuredId -ne $InstanceId) { throw "Configuration instance identity does not match requested instance $InstanceId." }
-    if ([string]::IsNullOrWhiteSpace([string]$configuredConnection)) { throw "$section.ConnectionString is required." }
+    if ($Kind -eq 'tenant' -and [string]::IsNullOrWhiteSpace([string]$configuredConnection)) { throw "$section.ConnectionString is required." }
+    if ($Kind -eq 'center') {
+        $central = $Config['Central']
+        $dataDirectory = if ($central -is [System.Collections.IDictionary] -and $central['Storage'] -is [System.Collections.IDictionary]) { $central['Storage']['DataDirectory'] } else { $null }
+        if ([string]::IsNullOrWhiteSpace([string]$dataDirectory) -or -not [IO.Path]::IsPathFullyQualified([string]$dataDirectory)) { throw 'Central.Storage.DataDirectory must be an absolute path.' }
+    }
     return $section
+}
+
+function Assert-CenterDataDirectory($Config, [string] $InstallRoot) {
+    $central = $Config['Central']
+    $value = if ($central -is [System.Collections.IDictionary] -and $central['Storage'] -is [System.Collections.IDictionary]) { $central['Storage']['DataDirectory'] } else { $null }
+    if ([string]::IsNullOrWhiteSpace([string]$value) -or -not [IO.Path]::IsPathFullyQualified([string]$value)) {
+        throw 'Central.Storage.DataDirectory must be an absolute path.'
+    }
+    $path = [IO.Path]::GetFullPath([string]$value).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $root = [IO.Path]::GetFullPath($InstallRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $webRoot = [IO.Path]::GetFullPath((Join-Path $root 'wwwroot')).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    foreach ($protectedRoot in @($root, $webRoot)) {
+        if ($path.Equals($protectedRoot, [StringComparison]::OrdinalIgnoreCase) -or $path.StartsWith($protectedRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Central.Storage.DataDirectory must be outside the install, release, and web directories.'
+        }
+    }
+    return $path
 }
 
 function Get-VerifiedPackage([string] $PackagePath, [ValidateSet('tenant','center')] [string] $ExpectedKind) {
@@ -78,10 +100,14 @@ function Get-VerifiedPackage([string] $PackagePath, [ValidateSet('tenant','cente
         if ([string]$manifest.version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
             throw 'Package manifest version must be a safe SemVer-style version.'
         }
-        if ($null -eq $manifest.schemaCompatibility -or [int]$manifest.schemaCompatibility.minimum -lt 1 -or
-            [int]$manifest.schemaCompatibility.maximum -lt [int]$manifest.schemaCompatibility.minimum) {
-            throw 'Package schemaCompatibility range is invalid.'
-        }
+        if ($ExpectedKind -eq 'center') {
+            if ($null -eq $manifest.stateFormatCompatibility -or [int]$manifest.stateFormatCompatibility.minimum -lt 1 -or
+                [int]$manifest.stateFormatCompatibility.maximum -lt [int]$manifest.stateFormatCompatibility.minimum) { throw 'Package stateFormatCompatibility range is invalid.' }
+            if (-not $manifest.Contains('components') -or $manifest.components.Count -ne 1 -or -not $manifest.components.Contains('web')) { throw 'Center package must contain the web component only.' }
+            if (($manifest.Contains('components') -and $manifest.components.Contains('migrator')) -or
+                ($manifest.Contains('layout') -and $manifest.layout.Contains('migrator'))) { throw 'Center package must not contain a database migrator.' }
+        } elseif ($null -eq $manifest.schemaCompatibility -or [int]$manifest.schemaCompatibility.minimum -lt 1 -or
+            [int]$manifest.schemaCompatibility.maximum -lt [int]$manifest.schemaCompatibility.minimum) { throw 'Package schemaCompatibility range is invalid.' }
         if ($null -eq $manifest.files -or $manifest.files.Count -eq 0) { throw 'Package manifest file list is empty.' }
 
         $listed = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -145,6 +171,101 @@ function Assert-DirectoryArchive([string] $ArchivePath, [string] $SourceDirector
         } finally { $hasher.Dispose() }
     } finally { $archive.Dispose() }
     return $true
+}
+
+function New-CenterBackupArchive([string] $StateDirectory, [string] $ConfigPath, [string] $ReleaseDirectory, [string] $BackupPath, [guid] $InstanceId, [string] $ReleaseVersion) {
+    $archivePath = Resolve-DeploymentPath $BackupPath 'BackupPath'
+    if ([IO.Path]::GetExtension($archivePath) -ne '.zip') { throw 'Center BackupPath must use the .zip extension.' }
+    if (Test-Path -LiteralPath $archivePath) { throw 'BackupPath already exists; refusing to overwrite a center backup.' }
+    $state = Resolve-DeploymentPath $StateDirectory 'StateDirectory'
+    $config = Resolve-DeploymentPath $ConfigPath 'ConfigPath'
+    $release = Resolve-DeploymentPath $ReleaseDirectory 'ReleaseDirectory'
+    if ($InstanceId -eq [guid]::Empty -or $ReleaseVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') { throw 'Center backup requires a valid instance ID and previous release version.' }
+    foreach ($required in @($state,$config,$release)) { if (-not (Test-Path -LiteralPath $required)) { throw "Center backup input is missing: $required" } }
+    if (-not (Test-Path -LiteralPath (Join-Path $state 'registry.journal') -PathType Leaf)) { throw 'Center state directory has no registry.journal to back up.' }
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $archivePath)) | Out-Null
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::Open($archivePath, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $files = [Collections.Generic.List[object]]::new()
+        foreach ($source in Get-ChildItem -LiteralPath $state -File -Recurse) {
+            $relative = $source.FullName.Substring($state.Length).TrimStart([char[]]@('\','/')).Replace('\','/')
+            $entryName = "state/$relative"
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $source.FullName, $entryName, [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+            $files.Add([ordered]@{ path = $entryName; sha256 = (Get-FileHash -LiteralPath $source.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); sizeBytes = $source.Length })
+        }
+        [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $config, 'config/center.json', [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        $files.Add([ordered]@{ path = 'config/center.json'; sha256 = (Get-FileHash -LiteralPath $config -Algorithm SHA256).Hash.ToLowerInvariant(); sizeBytes = (Get-Item -LiteralPath $config).Length })
+        foreach ($source in Get-ChildItem -LiteralPath $release -File -Recurse) {
+            $relative = $source.FullName.Substring($release.Length).TrimStart([char[]]@('\','/')).Replace('\','/')
+            $entryName = "release/$relative"
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $source.FullName, $entryName, [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+            $files.Add([ordered]@{ path = $entryName; sha256 = (Get-FileHash -LiteralPath $source.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); sizeBytes = $source.Length })
+        }
+        $manifest = [ordered]@{ format = 1; instanceId = $InstanceId; releaseVersion = $ReleaseVersion; createdUtc = [DateTimeOffset]::UtcNow.ToString('O'); files = @($files) }
+        $entry = $zip.CreateEntry('manifest.json')
+        $stream = $entry.Open()
+        try { $writer = [IO.StreamWriter]::new($stream); try { $writer.Write(($manifest | ConvertTo-Json -Depth 8)) } finally { $writer.Dispose() } } finally { $stream.Dispose() }
+    } catch { $zip.Dispose(); Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue; throw }
+    $zip.Dispose()
+    [void](Assert-CenterBackupArchive $archivePath)
+    return $archivePath
+}
+
+function Assert-CenterBackupArchive([string] $ArchivePath) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-DeploymentPath $ArchivePath 'BackupPath'))
+    try {
+        $manifestEntry = $archive.GetEntry('manifest.json')
+        if (-not $manifestEntry) { throw 'Center backup manifest is missing.' }
+        $reader = [IO.StreamReader]::new($manifestEntry.Open())
+        try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable } finally { $reader.Dispose() }
+        if ($manifest.format -ne 1 -or $manifest.files.Count -eq 0) { throw 'Center backup manifest format is invalid.' }
+        $listed = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($file in $manifest.files) {
+            $path = [string]$file.path
+            if (-not $path -or $path.Contains('\') -or $path.Contains(':') -or $path.StartsWith('/') -or $path.Split('/') -contains '..' -or
+                -not ($path.StartsWith('state/', [StringComparison]::Ordinal) -or $path -eq 'config/center.json' -or $path.StartsWith('release/', [StringComparison]::Ordinal)) -or -not $listed.Add($path)) {
+                throw "Unsafe or duplicate center backup path: $path"
+            }
+            $entry = $archive.GetEntry($path)
+            if (-not $entry -or $entry.Length -ne [long]$file.sizeBytes) { throw "Center backup entry is missing or has wrong size: $path" }
+            $stream = $entry.Open(); $hasher = [Security.Cryptography.SHA256]::Create()
+            try { $hash = [Convert]::ToHexString($hasher.ComputeHash($stream)).ToLowerInvariant() } finally { $stream.Dispose(); $hasher.Dispose() }
+            if ($hash -ne ([string]$file.sha256).ToLowerInvariant()) { throw "Center backup checksum mismatch: $path" }
+        }
+        if (-not $listed.Contains('state/registry.journal') -or -not $listed.Contains('config/center.json') -or
+            -not @($manifest.files | Where-Object { ([string]$_.path).StartsWith('release/', [StringComparison]::Ordinal) }).Count) {
+            throw 'Center backup must contain the journal, configuration, and previous release.'
+        }
+        if ($archive.Entries.Count -ne $listed.Count + 1) { throw 'Center backup contains unverified entries.' }
+        return $manifest
+    } finally { $archive.Dispose() }
+}
+
+function Restore-CenterBackupArchive([string] $ArchivePath, [string] $Destination) {
+    $manifest = Assert-CenterBackupArchive $ArchivePath
+    $archiveForIdentity = [IO.Compression.ZipFile]::OpenRead((Resolve-DeploymentPath $ArchivePath 'BackupPath'))
+    try {
+        $configEntry = $archiveForIdentity.GetEntry('config/center.json')
+        $reader = [IO.StreamReader]::new($configEntry.Open())
+        try { $centerConfig = $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable } finally { $reader.Dispose() }
+        if (-not $manifest.instanceId -or [string]$centerConfig.Central.InstanceId -ne [string]$manifest.instanceId) { throw 'Center backup configuration identity does not match its manifest.' }
+    } finally { $archiveForIdentity.Dispose() }
+    $root = Resolve-DeploymentPath $Destination 'RestoreDestination'
+    if (Test-Path -LiteralPath $root) {
+        if (@(Get-ChildItem -LiteralPath $root -Force).Count -gt 0) { throw 'Center restore destination must be empty.' }
+    } else { [IO.Directory]::CreateDirectory($root) | Out-Null }
+    $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-DeploymentPath $ArchivePath 'BackupPath'))
+    try {
+        foreach ($file in $manifest.files) {
+            $target = Join-Path $root ([string]$file.path).Replace('/', [IO.Path]::DirectorySeparatorChar)
+            [IO.Directory]::CreateDirectory((Split-Path -Parent $target)) | Out-Null
+            $source = $archive.GetEntry([string]$file.path).Open(); $destinationStream = [IO.File]::Create($target)
+            try { $source.CopyTo($destinationStream) } finally { $destinationStream.Dispose(); $source.Dispose() }
+        }
+    } finally { $archive.Dispose() }
+    return $root
 }
 
 function Install-VerifiedRelease($Package, [string] $InstallRoot) {
@@ -393,7 +514,7 @@ function Read-DeploymentMetadata([string] $InstallRoot, [string] $InstanceId) {
 }
 
 Export-ModuleMember -Function Assert-DeploymentHost, Resolve-DeploymentPath, Read-DeploymentConfig, Get-ConfigValue, Assert-ConfigIdentity,
-    Get-VerifiedPackage, Close-VerifiedPackage, Assert-DirectoryArchive, Install-VerifiedRelease, Save-PersistentConfig, Save-WorkerConfig, Set-ReleaseConfig,
+    Assert-CenterDataDirectory, Get-VerifiedPackage, Close-VerifiedPackage, Assert-DirectoryArchive, New-CenterBackupArchive, Assert-CenterBackupArchive, Restore-CenterBackupArchive, Install-VerifiedRelease, Save-PersistentConfig, Save-WorkerConfig, Set-ReleaseConfig,
     Assert-IisAvailable, Assert-HttpsCertificate, Set-ServiceEnvironment, Protect-ConfigDirectory, Grant-DirectoryAccess,
     Protect-SensitiveDirectory, Ensure-Service, Assert-OwnedService, Test-ServiceExecutableOwned,
     New-HttpsIisSite, Write-DeploymentMetadata, Read-DeploymentMetadata
