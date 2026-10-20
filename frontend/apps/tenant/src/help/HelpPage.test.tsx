@@ -21,6 +21,42 @@ describe("tenant help guides", () => {
     }
   });
 
+  it.each(["en", "pt-BR"] as const)("bundles monitoring, alert, profile, and template guides in %s", language => {
+    const expected = ["monitoring", "workers-audit", "alerts", "sql-profiles", "templates"];
+    const routes = new Set(["#/dashboard", "#/monitoring", "#/workers", "#/audit", "#/alerts", "#/templates", "#/jobs", "#/settings"]);
+    for (const slug of expected) {
+      const topic = helpTopics.find(item => item.slug === slug);
+      const article = getHelpArticle(language, slug);
+      expect(topic, `${language} manifest entry for ${slug}`).toBeTruthy();
+      expect(article, `${language} article for ${slug}`).toBeTruthy();
+      const sections = language === "en" ? ["Prerequisites", "Role", "Steps", "Result"] : ["Pré-requisitos", "Permissão", "Etapas", "Resultado"];
+      for (const section of sections) expect(article).toMatch(new RegExp(`^## ${section}$`, "m"));
+      expect(topic?.route).toMatch(/^#\/[a-z-]+$/);
+      expect(routes.has(topic?.route ?? "")).toBe(true);
+      for (const [, route] of article!.matchAll(/\]\((#\/[^)]+)\)/g)) {
+        const helpSlug = route.match(/^#\/help:([a-z0-9-]+)$/)?.[1];
+        expect(routes.has(route) || helpTopics.some(item => item.slug === helpSlug), `${slug} route ${route}`).toBe(true);
+      }
+    }
+  });
+
+  it("documents current monitoring, alert setup, SQL diagnostic, and developer template workflows", () => {
+    const article = (slug: string) => getHelpArticle("en", slug) ?? "";
+    expect(article("alerts")).toMatch(/sink[\s\S]*disabled[\s\S]*enable/i);
+    expect(article("alerts")).toMatch(/outbound policy/i);
+    expect(article("alerts")).toMatch(/secret reference/i);
+    expect(article("alerts")).toMatch(/incident[\s\S]*deliver/i);
+    expect(article("sql-profiles")).toMatch(/Run safe diagnostic/i);
+    expect(article("monitoring")).toMatch(/timeline/i);
+    expect(article("monitoring")).toMatch(/stale data/i);
+    expect(article("monitoring")).toMatch(/memory/i);
+    expect(article("workers-audit")).toMatch(/worker/i);
+    expect(article("workers-audit")).toMatch(/audit/i);
+    expect(article("templates")).toContain("docs/how-to/add-custom-template.md");
+    expect(helpTopics.find(topic => topic.slug === "monitoring")?.route).toBe("#/monitoring");
+    expect(helpTopics.find(topic => topic.slug === "sql-profiles")?.route).toBe("#/settings");
+  });
+
   it.each([
     ["en", "Unknown help topic", "All help topics"],
     ["pt-BR", "Tópico de ajuda não encontrado", "Todos os tópicos"],
