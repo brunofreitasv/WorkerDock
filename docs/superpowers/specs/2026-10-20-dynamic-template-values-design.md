@@ -43,15 +43,39 @@ The first release supports dates, timestamps, execution ID, and idempotency key.
 
 Procedure mode labels the field **Stored procedure name**, uses `dbo.Job` as the example, and explains: “Enter only the procedure name. Add its parameters below.” An EXEC statement produces a field-specific message explaining how to correct it.
 
-Query mode labels the field **SQL command text** and explains that named parameters must be configured below. Switching modes preserves the user's text and reports any incompatibility rather than silently rewriting it.
+Query mode labels the field **SQL statement** and explains: “Enter the complete SQL statement using @parameter placeholders. Add matching parameter names, types, and values below.” Guide users to enter a complete statement in Query mode, including explicit EXEC syntax when invoking a procedure. Do not require users to declare parameter variables or insert their runtime values into the statement.
+
+Show examples next to the selected mode, not only in external documentation:
+
+- Procedure: `dbo.Job`, with a separate `@Dt_Ref` parameter row.
+- Query: `SELECT * FROM dbo.Orders WHERE ReferenceDate = @Dt_Ref;`, with a separate `@Dt_Ref` row.
+- Procedure invoked as Query text: `EXEC dbo.Job @Dt_Ref = @Dt_Ref;`, with a separate `@Dt_Ref` row. The left name is the procedure argument and the right name is the bound command parameter; they may use the same name.
+
+Parameter values, including dynamic dates, are supplied through typed bindings. Switching modes preserves the user's text and reports any incompatibility rather than silently rewriting it. Explain locally that “object name only” applies to Procedure mode, while Query mode requires the complete statement.
 
 ### Parameter values
 
-Each SQL parameter has one **Value source** selector: Fixed value, Dynamic value, Secret, or Null. Show only the selected source's controls. The existing execution-key capability appears under Dynamic value. Parameter type, size, precision, and scale remain available where applicable.
+Each SQL parameter has one **Value source** selector: Fixed value, Dynamic value, Secret, or Send SQL NULL. Show only the selected source's controls. The raw `Use Execution Key` and `Is Null` booleans are not exposed as independent form fields.
+
+- **Send SQL NULL:** explicitly sends a database null for this execution. It does not mark a parameter as nullable, omit the parameter, invoke a procedure's default argument, send an empty string, or send the text `NULL`. Help text explains that the target procedure/query must accept this value.
+- **Execution retry key (idempotency key):** appears under Dynamic value. Help text explains that it identifies one execution, remains the same across its retries, and changes for a separate execution. It lets a cooperating procedure recognize an already processed execution; passing it alone does not prevent duplicate effects. It is distinct from the Execution ID source and is offered only for compatible target types.
+- **Parameter type:** uses a plain label and examples relevant to the selected SQL type.
+- **Maximum length:** replaces the unexplained Size label for supported text and binary types. Help identifies characters for text or bytes for binary; an unlimited/MAX choice appears only where the SQL type supports it.
+- **Total digits (precision)** and **Decimal places (scale):** appear for Decimal parameters. Explain that precision counts all digits and scale counts digits after the decimal point. Example: `decimal(5,2)` allows five total digits, two decimal places, and three digits before the decimal point; `123.45` fits. Require scale to be no greater than precision.
+
+Hide irrelevant numeric metadata for Date and other types that do not use these controls in the template. Switching types removes inapplicable metadata from the draft rather than silently submitting stale hidden values. Explanations appear beside the relevant control and are available in the wizard's supported languages.
 
 New rows initialize their actual stored values consistently with their displayed controls. Required controls are marked. Clearing an optional source removes its payload; it must not create an empty secret object or select multiple sources.
 
 Supported fields in HTTP and custom templates expose the same fixed/dynamic selection. Secret and null choices appear only where the target's contract permits them. Dynamic support does not implicitly apply to every configuration field.
+
+### SQL command timeout
+
+An empty **SQL command timeout (seconds)** means no SQL-specific timeout. Show “No timeout” as the empty-state explanation and an inline warning: “No SQL command timeout is set. This command can wait indefinitely unless the job timeout or a cancellation stops it.” Repeat the effective setting in Review.
+
+A positive integer sets a SQL-specific limit. If the job has an overall timeout, it still bounds execution; show “Limited by the job timeout” rather than claiming unlimited execution. A blank input must never silently adopt a driver default such as 30 seconds or remove a configured job timeout. Cancellation and Stop remain effective.
+
+Keep blank input represented as an absent/null command timeout, preserving the current runtime's use of the remaining outer deadline or zero when there is no deadline. Explicit numeric zero is an advanced legacy representation of unlimited timeout: accept it only without a finite outer deadline, matching the existing contract; otherwise show a field-specific message to clear the SQL timeout field or enter a positive value. Do not normalize blank to explicit zero, which would incorrectly trigger that existing incompatibility.
 
 ### Preview and manual runs
 
@@ -143,6 +167,11 @@ New dynamic contexts are required only for jobs using the new capability. Previo
 - Adding a SQL parameter persists displayed defaults and removes the reported duplicate missing-field failure.
 - Missing or conflicting sources identify the exact row and control.
 - Procedure mode explains accepted input and rejects EXEC syntax before activation.
+- Query mode shows a complete statement with parameter placeholders and explains how to populate the matching parameter rows.
+- Source controls explain SQL NULL and the execution retry key without implying nullability or automatic duplicate prevention.
+- Precision and scale have plain labels, examples, and type-dependent visibility; Date parameters do not show them.
+- Blank command timeout produces the warning and no SQL-specific deadline; a configured overall job deadline still applies.
+- Positive, blank, and explicit-zero timeout configurations retain their documented semantics and receive specific validation feedback.
 - Existing fixed SQL, HTTP, and custom-template configurations remain valid.
 - Equivalent dynamic declarations resolve identically across all three template types.
 - Delayed jobs and catch-up jobs use their original occurrence dates.
