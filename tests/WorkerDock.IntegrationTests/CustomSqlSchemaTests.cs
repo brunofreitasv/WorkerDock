@@ -51,7 +51,7 @@ public sealed class CustomSqlSchemaTests
         var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "manifest.json")));
         var ids = manifest.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetString()!).ToArray();
-        Assert.Equal(new[] { "0001_bootstrap", "0002_quartz", "0003_execution", "0003a_projection", "0003b_attempts", "0003c_capacity", "0003d_dispatch", "0004_templates", "0004a_profiles", "0004b_integration_settings", "0005_scheduling", "0006_observability", "0007_alerts", "0008_retention" }, ids);
+        Assert.Equal(new[] { "0001_bootstrap", "0002_quartz", "0003_execution", "0003a_projection", "0003b_attempts", "0003c_capacity", "0003d_dispatch", "0004_templates", "0004a_profiles", "0004b_integration_settings", "0005_scheduling", "0006_observability", "0007_alerts", "0008_retention", "0009_dynamic_values" }, ids);
         Assert.Equal(ids.Length * 2, Directory.GetFiles(directory, "*.sql").Length);
         foreach (var entry in manifest.RootElement.EnumerateArray())
         foreach (var direction in new[] { "up", "down" })
@@ -105,6 +105,7 @@ public sealed class CustomSqlSchemaTests
         foreach (var area in new[] { "src", "tests", Path.Combine("database", "tenant") })
         foreach (var path in Directory.GetFiles(Path.Combine(Root, area), "*", SearchOption.AllDirectories)
             .Where(path => !path.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar) && !path.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar))
+            .Where(path => !path.StartsWith(Path.Combine(Root, "tests") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || Path.GetExtension(path) == ".sql")
             .Where(path => Path.GetExtension(path) is ".cs" or ".sql"))
         {
             if (path.EndsWith(nameof(CustomSqlSchemaTests) + ".cs", StringComparison.Ordinal)) continue;

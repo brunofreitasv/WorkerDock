@@ -21,6 +21,8 @@ No authentication settings means anonymous read and management. Entra without a 
 
 `Worker.InstallationId` must be a nonempty GUID unique to a worker service; changing it identifies a different installed worker. `Worker.CatalogDigest` must match the aggregate digest for the reviewed descriptors installed in that package. `Worker.HostCeiling` is the service process's host capacity ceiling. `Worker.DrainSeconds` is constrained to 1 through 60. `Executor.Path` and arguments are deployment-authored and never job-supplied. The default worker example uses a ceiling of 10 and 40-second drain period.
 
+Dynamic-value plans are job-revision data, not host configuration or secrets. A plan stores its resolver version, timezone, declared JSON Pointer targets, sources, and transformations. Execution context and resolved nonsecret values are stored with the execution. No additional environment variable, vault key, or deployment credential is needed to enable the built-in dynamic sources. See [job execution guarantees](execution-guarantees.md) for source semantics and retry behavior.
+
 The scheduler uses `Retention.ArchiveRoot` for archive output. If set, this must be an absolute directory writable only by the scheduler service identity and administrators.
 
 ## Control Center health probe

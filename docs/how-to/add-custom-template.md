@@ -19,6 +19,16 @@ The [tenant configuration guide](configure-tenants.md) explains where the worker
 
 `Validate` returns bounded path/code issues without side effects. `ExecuteAsync` receives `context.Execution`, the child-local resolve-only vault and safe logging facade. Use the pinned `ProfileRevisionId` and nonsecret profile snapshot, stable `IdempotencyKey`, and optional `DeadlineUtc`. Secret values resolve at execution time; a profile revision pins reference metadata rather than a credential value. Missing deadline means unlimited handler duration, while startup, IPC setup and local termination remain bounded.
 
+## Dynamic configuration values
+
+A template can opt individual scalar configuration leaves into dynamic authoring by adding `"x-workerDock-dynamicValue": true` to the leaf's schema. The current schema subset supports string, integer, number, and boolean scalar targets. The binding is a JSON Pointer to a declared field; array item fields use a concrete index. Bindings cannot target secret-reference or sensitive fields, alter object structure, overlap, or point outside the descriptor schema. The shared validator checks the plan and target types before activation and validates the resolved configuration again before template execution.
+
+The shared sources are **ReferenceDate**, **ScheduledTimestamp**, **FirstExecutionStart**, **ExecutionId**, and **IdempotencyKey**. Date/time sources support bounded month/day offsets, period boundaries, a pinned timezone, and compatible string or Unix formats. ReferenceDate resolves from the original scheduled occurrence in the plan timezone; for manual work it uses the optional date override or accepted request date. ScheduledTimestamp is unavailable to manual executions. FirstExecutionStart is the first accepted attempt start and remains stable on retries. Execution ID and idempotency key are execution identifiers, not wall-clock values.
+
+`IWorkerTemplate` continues to receive ordinary configuration with resolved scalar values; it does not receive binding expressions as field values. Keep descriptor versions immutable: publish a new version when adding or changing dynamic annotations, then register the exact descriptor and digest in each trusted catalog. Existing versions and jobs stay pinned to their existing behavior. The built-in SQL Server and HTTP templates publish dynamic support in version 1.1.0 while retaining version 1.0.0. `examples/WorkerDock.SampleTemplate` demonstrates the opt-in annotation; it is an example package, not automatically installed in production.
+
+The manager-only template-values preview uses the same resolver with an explicit sample context. It returns only example resolved values and bounded validation issues; it does not run template code, call an external target, or resolve a secret. Dynamic plans and execution snapshots contain no secret values. Keep custom validators side-effect-free and never include secret material or arbitrary configuration values in issue text, results, or logs. See [execution guarantees](../reference/execution-guarantees.md) for retry, snapshot, and compatibility behavior.
+
 Authoring example (illustrative, not installed or executed):
 
 ```csharp

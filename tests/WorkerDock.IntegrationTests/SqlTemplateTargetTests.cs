@@ -13,8 +13,8 @@ public sealed partial class SqlTemplateTests
     private static SqlJobConfiguration Configuration(SqlTemplateTargetFixture f,string kind="Query",bool transaction=true)=>
         new(f.Profile.ProfileId,f.Profile.AllowedCatalogs[0],kind,kind=="Query"?"INSERT [workerdock].SqlTemplateTarget(ExecutionKey,Amount,TextValue,OptionalValue) VALUES(@key,@amount,@text,@optional)":"[workerdock].InsertSqlTemplateTarget",
         [new("@key",SqlDbType.NVarChar,null,null,true,false,100,null,null),new("@amount",SqlDbType.Decimal,SqlTemplateTests.Json(12.34m),null,false,false,null,10,2),new("@text",SqlDbType.NVarChar,SqlTemplateTests.Json(Literal),null,false,false,400,null,null),new("@optional",SqlDbType.Int,null,null,false,true,null,null,null)],null,transaction);
-    private static TemplateExecutionContext Context(SqlTemplateTargetFixture f,SqlJobConfiguration configuration,string key,DateTimeOffset? until=null,bool diagnostic=false)=>
-        new(new ExecutionDescriptor(Guid.NewGuid(),1,"workerdock.sql-server","1.0.0",key,SqlTemplateTests.Json(configuration),f.Profile.ProfileRevisionId,SqlTemplateTests.Json(f.Profile),JsonSerializer.SerializeToElement(new { sqlProfileDiagnostic=diagnostic }),until),f.Vault,new SafeExecutionLog(_=>{}));
+    private static TemplateExecutionContext Context(SqlTemplateTargetFixture f,SqlJobConfiguration configuration,string key,DateTimeOffset? until=null,bool diagnostic=false,string templateVersion="1.0.0")=>
+        new(new ExecutionDescriptor(Guid.NewGuid(),1,"workerdock.sql-server",templateVersion,key,SqlTemplateTests.Json(configuration),f.Profile.ProfileRevisionId,SqlTemplateTests.Json(f.Profile),JsonSerializer.SerializeToElement(new { sqlProfileDiagnostic=diagnostic }),until),f.Vault,new SafeExecutionLog(_=>{}));
     [Trait("Store","Sql")]
     [Theory]
     [InlineData("Query")]
@@ -69,6 +69,21 @@ public sealed partial class SqlTemplateTests
         Assert.Equal("SqlConnectivityConfirmed",result.SafeCode);Assert.False(result.EffectsMayHaveOccurred);
         Assert.Equal(0,await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SqlTemplateTarget"));
         Assert.Equal("{}",result.SafeSummary.GetRawText());
+    }
+    [Trait("Store","Sql")]
+    [Fact]
+    public async Task Dynamic_reference_date_binds_as_sql_date()
+    {
+        await using var fixture=new SqlTemplateTargetFixture();await fixture.CreateAsync();
+        var config=new SqlJobConfiguration(fixture.Profile.ProfileId,fixture.Profile.AllowedCatalogs[0],"Query",
+            "INSERT [workerdock].SqlTemplateTarget(ExecutionKey,ReferenceDate) VALUES(@key,@date)",
+            [new("@key",SqlDbType.NVarChar,SqlTemplateTests.Json("reference-date"),null,false,false,100,null,null),
+             new("@date",SqlDbType.Date,SqlTemplateTests.Json("2026-10-20"),null,false,false,null,null,null)],null,true);
+        var result=await new SqlTemplate("1.1.0").ExecuteAsync(Context(fixture,config,"reference-date",templateVersion:"1.1.0"),default);
+        Assert.Equal("Success",result.Outcome);
+        await using var connection=new SqlConnection(fixture.Database.ConnectionString);await connection.OpenAsync();
+        await using var command=connection.CreateCommand();command.CommandText="SELECT ReferenceDate FROM [workerdock].SqlTemplateTarget WHERE ExecutionKey=N'reference-date'";
+        Assert.Equal(new DateTime(2026,10,20),await command.ExecuteScalarAsync());
     }
     private sealed class LostCommitAcknowledgement : SqlTemplate
     {

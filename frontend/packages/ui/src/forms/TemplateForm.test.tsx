@@ -69,6 +69,7 @@ it("maps missing required array members to their concrete row path", () => {
 it("treats a bound eligible scalar as supplied while preserving other schema errors", () => {
   const schema = { type: "object", required: ["parameters"], properties: { parameters: { type: "object", required: ["referenceDate", "name"], properties: { referenceDate: { type: "string", "x-workerDock-dynamicValue": true }, name: { type: "string" } } } } };
   expect(validateSchema(schema, { parameters: {} }, new Set(["/parameters/referenceDate"]))).toEqual([{ path: "configuration.parameters.name", code: "Required" }]);
+  expect(validateSchema(schema, { parameters: { referenceDate: undefined } }, new Set(["/parameters/referenceDate"]))).toEqual([{ path: "configuration.parameters.name", code: "Required" }]);
   expect(validateSchema({ type: "object", required: ["name"], properties: { name: { type: "string" } } }, {}, new Set(["/name"]))).toEqual([{ path: "configuration.name", code: "Required" }]);
 });
 

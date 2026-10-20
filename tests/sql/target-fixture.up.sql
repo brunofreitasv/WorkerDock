@@ -4,7 +4,8 @@ CREATE TABLE [workerdock].SqlTemplateTarget (
     ExecutionKey nvarchar(100) NOT NULL CONSTRAINT PK_SqlTemplateTarget PRIMARY KEY,
     Amount decimal(10,2) NOT NULL,
     TextValue nvarchar(400) NOT NULL,
-    OptionalValue int NULL
+    OptionalValue int NULL,
+    ReferenceDate date NULL
 );
 GO
 CREATE PROCEDURE [workerdock].InsertSqlTemplateTarget @key nvarchar(100),@amount decimal(10,2),@text nvarchar(400),@optional int AS

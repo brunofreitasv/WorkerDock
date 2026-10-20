@@ -14,6 +14,7 @@ npm.cmd --prefix frontend run build
 dotnet test tests/WorkerDock.UnitTests -c Release
 dotnet test tests/WorkerDock.ProcessTests -c Release
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'Store!=Sql'
+dotnet test tests/WorkerDock.IntegrationTests -c Release --filter FullyQualifiedName~DynamicValuesEndToEndTests
 dotnet build WorkerDock.slnx -c Release
 pwsh -NoProfile -File tests/DeploymentSmoke.ps1
 ~~~
@@ -40,6 +41,8 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release
 ~~~
 
 Do not put credentials in source, command arguments, committed configuration or logs. If the connections are absent, SQL fixtures report SQL_TEST_BLOCKED; that is not a passing SQL result. The [database reference](../reference/database-migrations.md) retains focused SQL fixture commands and rollback constraints.
+
+The dynamic SQL target date-binding check is `dotnet test tests/WorkerDock.IntegrationTests -c Release --filter FullyQualifiedName~SqlTemplateTests.Dynamic_reference_date_binds_as_sql_date`; it requires the three SQL fixture connection variables above. The non-SQL scheduled retry/manual override flow is covered by `DynamicValuesEndToEndTests`.
 
 ## Deployment validation
 

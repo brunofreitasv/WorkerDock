@@ -2,6 +2,8 @@
 
 Tenant releases include versioned migrations and a package manifest. The application will not create or upgrade SQL objects at runtime. Tenant upgrades require a package whose tested schema compatibility window includes the database's current migration version. Center releases use persistent state format 1 and never migrate a database.
 
+The dynamic template-values release adds tenant migration `0009_dynamic_values` and execution IPC protocol version 2. Its nullable revision/context/snapshot columns preserve existing fixed-value jobs; there is no historical date backfill. SQL Server and HTTP template versions 1.0.0 and 1.1.0 are both retained, so already pinned jobs remain on their current version. Dynamic-value jobs require matching upgraded Web, Worker, and Executor packages, and workers must have the reviewed descriptor catalog/digest for the selected template version.
+
 ## Before an upgrade
 
 1. Read the release notes and confirm the tenant or central package kind, target version, and supported schema window.
@@ -35,7 +37,9 @@ pwsh -File .\deploy\Upgrade-Instance.ps1 `
 
 The center site and app pool must be stopped. The script verifies state format 1, archives and checks `registry.journal`, `health.json` when present, `center.json`, and the active release, then switches the web release. It does not connect to SQL or run the migrator. IIS remains stopped for operator review. Keep the state directory outside the release tree with Modify access limited to the center app pool identity and administrators. Uninstall must preserve this directory.
 
-After reviewing the journal, backup, and migration result, start the services and site manually, then verify `/health/ready`, worker heartbeats, upcoming schedules, and recent execution results. Keep the previous release, configuration, and backup until the rollback window ends.
+For this release, coordinate the tenant migration and package rollout: verify the backup, block admission and new dispatch using the existing maintenance controls, review/drain active work, and stop the tenant Web, scheduler, and Worker services. Allow their Executor child processes to exit with the workers. Apply the package migration through `0009_dynamic_values` and confirm its checksum/history entry. Deploy the matching Web, Worker, and Executor release together with the catalog containing the required template versions and updated aggregate digest. Do not admit new dynamic-value work to workers running the older execution protocol. After reviewing the journal, backup, and migration result, start the services and site manually, verify `/health/ready`, worker heartbeats, upcoming schedules, and recent execution results, then resume admission. Keep the previous release, configuration, and backup until the rollback window ends.
+
+Once dynamic plans, execution contexts, or value snapshots have been stored, migration `0009_dynamic_values` refuses rollback while that state is populated. Do not remove those fields or downgrade binaries to force a rollback. Drain/retain the compatible release or restore the verified pre-upgrade database backup and matching application release using the restore procedure below. A database restore replaces later database changes.
 
 An interrupted upgrade may leave a journal and stopped services. The script does not automatically resume an interrupted upgrade. Do not delete the journal or rerun blindly. Compare its `step` and backup paths with SQL migration history, active release metadata, and both verified backups. Reconcile the installation manually or restore the database and previous compatible release; remove the journal only after the installation state is consistent. Use new backup paths if you start a new upgrade attempt. The script refuses to replace an existing release directory with different content.
 

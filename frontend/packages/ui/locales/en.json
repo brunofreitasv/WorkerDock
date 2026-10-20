@@ -284,5 +284,11 @@
   "genericAddItem": "Add item",
   "genericRemoveItem": "Remove item",
   "genericAddEntry": "Add entry",
-  "genericRemoveEntry": "Remove entry"
+  "genericRemoveEntry": "Remove entry",
+  "previewDynamicValues": "Preview example values",
+  "previewDynamicValuesError": "Unable to preview dynamic values.",
+  "previewSampleContext": "Example values for sample occurrence {sampleAtUtc}. Generated execution IDs and idempotency keys are examples only.",
+  "runNowReferenceDatePrompt": "Request date in {timeZoneId}. Leave blank to use today when the request is accepted.",
+  "runNowReferenceDateUnavailable": "This template version does not support a reference date override.",
+  "useScheduleTimeZone": "Use the schedule time zone for dynamic values"
 }

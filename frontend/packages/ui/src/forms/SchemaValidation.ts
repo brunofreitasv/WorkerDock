@@ -13,6 +13,7 @@ function validateSchemaAtDepth(schema: Schema, value: unknown, suppliedPointers:
     if (node === true) return;
     if (node === false) { add(path, "SchemaRejected"); return; }
     if (!node || typeof node !== "object") { add(path, "InvalidSchema"); return; }
+    if (suppliedPointers.has(pointer) && isDynamicEligible(node)) return;
     if (typeof node.$ref === "string") {
       const key = node.$ref.startsWith("#/$defs/") ? node.$ref.slice(8) : "";
       if (!key || !root.$defs?.[key]) { add(path, "RemoteSchemaReference"); return; }

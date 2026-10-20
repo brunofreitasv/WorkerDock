@@ -144,6 +144,20 @@ public sealed class DynamicExecutionTests
         finally { Directory.Delete(path, true); }
     }
 
+    [Fact]
+    public async Task Custom_child_template_receives_the_resolved_scalar()
+    {
+        var path = Directory.CreateTempSubdirectory("WorkerDockResolvedValue_").FullName;
+        try
+        {
+            await using var child = await FixtureProgram.Supervisor().StartAsync(Guid.NewGuid(), 1, DynamicDescriptor(path), default);
+            var result = await child.WaitAsync(default);
+            Assert.Equal("Success", result.Outcome);
+            Assert.Equal("2026-10-20", result.SafeSummary.GetProperty("value").GetString());
+            Assert.True(File.Exists(Path.Combine(path, "entries")));
+        }
+        finally { Directory.Delete(path, true); }
+    }
     private static ExecutionDescriptor DynamicDescriptor(string path)
     {
         var value = JsonSerializer.SerializeToElement("2026-10-20");

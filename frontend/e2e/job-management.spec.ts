@@ -148,8 +148,10 @@ test("guided create, stale edit, lifecycle, duplicate, retry and confirmed force
   await page.getByRole("button", { name: "Enable job" }).click();
   expect(requests.filter(request => request.body?.action === "Enable").at(-1)?.etag).toBe('"current-enable"');
   await page.getByRole("button", { name: "Run now" }).click();
+  const runNowDialog = page.getByRole("dialog");
+  await runNowDialog.getByRole("button", { name: "Run now" }).click();
   await expect(page.getByText(/Unable to complete the request/)).toBeVisible();
-  await page.getByRole("button", { name: "Run now" }).click();
+  await runNowDialog.getByRole("button", { name: "Run now" }).click();
   const runKeys = requests.filter(request => request.path.endsWith("/runs")).map(request => request.body.requestKey);
   expect(runKeys).toHaveLength(2);
   expect(runKeys[0]).toBe(runKeys[1]);
@@ -200,9 +202,9 @@ test("failed schedule DELETE stays truthful and keeps safety actions while block
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Save disabled draft" }).click();
-  await expect(page.getByRole("alert").filter({ hasText: /schedule removal could not be confirmed/i })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: /schedule removal could not be confirmed/i }).last()).toBeVisible();
   await page.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(page.getByRole("alert").filter({ hasText: /schedule removal could not be confirmed/i })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: /schedule removal could not be confirmed/i }).last()).toBeVisible();
   await expect(page.getByRole("button", { name: "Pause schedule" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Disable" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Enable job" })).toBeDisabled();
@@ -216,7 +218,7 @@ test("successful schedule DELETE with failed confirming GET remains unresolved a
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Save disabled draft" }).click();
-  await expect(page.getByRole("alert").filter({ hasText: /schedule removal could not be confirmed/i })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: /schedule removal could not be confirmed/i }).last()).toBeVisible();
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByRole("button", { name: "Pause schedule" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Disable" })).toBeEnabled();

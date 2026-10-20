@@ -23,3 +23,17 @@ Record the exact checkout, tool versions, command, result and artifact location 
 ## Candidate evidence to attach
 
 For a release candidate, append the source commit and package checksums, SQL schema version/checksum, supported Windows/IIS/.NET/SQL versions, test runner identity, sanitized logs, backup/restore artifacts, identity-provider test summary, fault-matrix results and workload report. Keep secrets, customer data, and connection strings out of this file and its attachments.
+
+## Dynamic template values candidate verification (2026-10-20)
+
+- Checkout: `C:\Users\bruno\.codex\worktrees\template-max-properties\WorkerDock 2`, branch `codex/workerdock-final`.
+- `dotnet build WorkerDock.slnx -c Release --no-restore` — PASS; 0 warnings, 0 errors.
+- `dotnet test tests/WorkerDock.UnitTests -c Release --no-build` — PASS; 93 tests.
+- `dotnet test tests/WorkerDock.IntegrationTests -c Release --no-build --filter 'Store!=Sql'` — PASS; 351 tests, including delayed scheduled-date retry, manual override, pre-effect failure and custom schema assertions. A child-process test separately verifies the custom template receives the resolved scalar.
+- `dotnet test tests/WorkerDock.IntegrationTests --no-restore -c Release --filter FullyQualifiedName~DynamicValuesEndToEndTests` — PASS; 3 tests.
+- `dotnet test tests/WorkerDock.ProcessTests -c Release --no-build` — PASS; 48 tests on final run. One initial run timed out waiting for child PIDs; the affected test passed in isolation and the full rerun passed.
+- `npm.cmd --prefix frontend run test -- --run` — PASS; 91 tests.
+- `npm.cmd --prefix frontend run build` — PASS; tenant and Control Center.
+- `npm.cmd --prefix frontend run e2e -- e2e/templates.spec.ts e2e/dynamic-values.spec.ts e2e/job-management.spec.ts e2e/scheduling.spec.ts e2e/accessibility.spec.ts --workers=1` — PASS; 17 tests. Locked frontend dependencies were restored with `npm.cmd --prefix frontend ci` after an incomplete Playwright package tree caused an earlier run to fail; management tests were updated for the Run now confirmation dialog.
+- `git diff --check` — PASS; only line-ending normalization warnings.
+- SQL target fixture test `Dynamic_reference_date_binds_as_sql_date` — NOT RUN. `WORKERDOCK_TEST_SQL`, `WORKERDOCK_TEST_SQL_RUNTIME`, and `WORKERDOCK_TEST_SQL_TARGET_RUNTIME` are unset. SQL-backed validation remains required on a disposable provisioned SQL Server.

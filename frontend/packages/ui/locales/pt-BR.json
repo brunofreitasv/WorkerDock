@@ -284,5 +284,11 @@
   "genericAddItem": "Adicionar item",
   "genericRemoveItem": "Remover item",
   "genericAddEntry": "Adicionar entrada",
-  "genericRemoveEntry": "Remover entrada"
+  "genericRemoveEntry": "Remover entrada",
+  "previewDynamicValues": "Pré-visualizar valores de exemplo",
+  "previewDynamicValuesError": "Não foi possível pré-visualizar os valores dinâmicos.",
+  "previewSampleContext": "Valores de exemplo para a ocorrência de amostra {sampleAtUtc}. IDs de execução e chaves de idempotência gerados são apenas exemplos.",
+  "runNowReferenceDatePrompt": "Data solicitada em {timeZoneId}. Deixe em branco para usar a data de hoje quando a solicitação for aceita.",
+  "runNowReferenceDateUnavailable": "Esta versão do modelo não oferece substituição da data de referência.",
+  "useScheduleTimeZone": "Usar o fuso horário do agendamento para valores dinâmicos"
 }

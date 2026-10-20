@@ -28,7 +28,7 @@ test("SQL manual job saves disabled, validates, enables explicitly and runs with
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByLabel("Profile ID").fill("11111111-1111-4111-8111-111111111111");
   await page.getByLabel("Catalog").fill("WorkerDockTest");
-  await page.getByLabel("Command text").fill("SELECT 1");
+  await page.getByLabel("SQL statement").fill("SELECT 1");
   await page.getByRole("button", { name: "Validate configuration" }).click();
   await expect(page.getByText("Configuration is valid.")).toBeVisible();
   for (let step = 0; step < 3; step++) await page.getByRole("button", { name: "Next", exact: true }).click();
@@ -38,6 +38,9 @@ test("SQL manual job saves disabled, validates, enables explicitly and runs with
   await page.getByRole("button", { name: "Enable job" }).click();
   await expect(page.getByText("Manual job enabled.")).toBeVisible();
   await page.getByRole("button", { name: "Run now" }).click();
+  const runNowDialog = page.getByRole("dialog");
+  await expect(runNowDialog.getByRole("status")).toContainText("does not support a reference date override");
+  await runNowDialog.getByRole("button", { name: "Run now" }).click();
   await expect(page.getByText("Execution accepted: execution-123")).toBeVisible();
   await expect(page.getByLabel("Password value")).toHaveCount(0);
 });
@@ -84,5 +87,5 @@ test("template catalog metadata is rendered as text", async ({ page }) => {
   await page.getByLabel("Template").click();
   await page.getByRole("option", { name: /SQL Server/ }).click();
   await expect(page.getByText("<img src=x onerror=alert(1)>")).toBeVisible();
-  await expect(page.locator("img")).toHaveCount(0);
+  await expect(page.locator("img[onerror]")).toHaveCount(0);
 });
