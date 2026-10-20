@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using WorkerDock.Contracts.Templates;
+using WorkerDock.Contracts.Execution;
 using WorkerDock.Contracts.Values;
 using WorkerDock.Infrastructure.Templates;
 
@@ -9,6 +10,47 @@ namespace WorkerDock.Infrastructure.Values;
 /// <summary>Validates binding declarations against a template's closed schema without resolving values.</summary>
 public static class DynamicValueValidation
 {
+    public static bool ValidateResolvedSnapshot(TemplateDescriptor descriptor, ExecutionDescriptor execution)
+    {
+        var context = execution.ValueContext;
+        var snapshot = execution.ValueSnapshot;
+        if (context is null || snapshot is null || context.ResolverVersion != 1 || snapshot.ResolverVersion != 1 ||
+            context.FirstStartedAtUtc is null || context.FirstStartedAtUtc.Value.Offset != TimeSpan.Zero ||
+            string.IsNullOrWhiteSpace(context.TimeZoneId) || context.TimeZoneId.Length > 100 ||
+            snapshot.InputDigest is not { Length: 64 } digest ||
+            digest.Any(c => c is not (>= '0' and <= '9' or >= 'A' and <= 'F')) ||
+            snapshot.Values is null || snapshot.Values.Count > 128 ||
+            context.TriggerKind switch
+            {
+                "Scheduled" => context.ScheduledForUtc is null || context.ScheduledForUtc.Value.Offset != TimeSpan.Zero ||
+                    context.RequestedAtUtc is not null || context.ReferenceDateOverride is not null,
+                "Manual" => context.RequestedAtUtc is null || context.RequestedAtUtc.Value.Offset != TimeSpan.Zero ||
+                    context.ScheduledForUtc is not null,
+                _ => true
+            }) return false;
+        try { _ = TimeZoneInfo.FindSystemTimeZoneById(context.TimeZoneId); }
+        catch (Exception error) when (error is TimeZoneNotFoundException or InvalidTimeZoneException) { return false; }
+        try
+        {
+            foreach (var (pointer, value) in snapshot.Values)
+            {
+                if (!TryResolve(descriptor.ConfigurationSchema, execution.Configuration, pointer, out var schema, out var missing, out var sensitive) ||
+                    missing || sensitive || !IsEligible(schema) || !DynamicValueTargets.TrySegments(pointer, out var segments)) return false;
+                var actual = execution.Configuration;
+                foreach (var segment in segments)
+                {
+                    if (actual.ValueKind == JsonValueKind.Object && actual.TryGetProperty(segment, out var property)) actual = property;
+                    else if (actual.ValueKind == JsonValueKind.Array && Index(segment, out var index) && index < actual.GetArrayLength()) actual = actual[index];
+                    else return false;
+                }
+                if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Object or JsonValueKind.Array ||
+                    !string.Equals(value.GetRawText(), actual.GetRawText(), StringComparison.Ordinal)) return false;
+            }
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or ArgumentException or KeyNotFoundException) { return false; }
+        return true;
+    }
+
     public static IReadOnlyList<ValidationIssue> Validate(TemplateDescriptor descriptor, JsonElement configuration, DynamicValuePlan plan, string? triggerKind)
     {
         var issues = new List<ValidationIssue>();

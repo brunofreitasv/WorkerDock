@@ -37,7 +37,7 @@ public static class FixtureProgram
         {
             await using var pipe = new NamedPipeClientStream(".", Environment.GetEnvironmentVariable("WORKERDOCK_PIPE")!, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             await pipe.ConnectAsync(5000);
-            await ExecutionProtocol.WriteAsync(pipe, new Handshake(1, Guid.Parse(Environment.GetEnvironmentVariable("WORKERDOCK_ATTEMPT")!), long.Parse(Environment.GetEnvironmentVariable("WORKERDOCK_GENERATION")!, System.Globalization.CultureInfo.InvariantCulture), Environment.GetEnvironmentVariable("WORKERDOCK_NONCE")!, Environment.ProcessId), default);
+            await ExecutionProtocol.WriteAsync(pipe, new Handshake(ExecutionProtocol.CurrentVersion, Guid.Parse(Environment.GetEnvironmentVariable("WORKERDOCK_ATTEMPT")!), long.Parse(Environment.GetEnvironmentVariable("WORKERDOCK_GENERATION")!, System.Globalization.CultureInfo.InvariantCulture), Environment.GetEnvironmentVariable("WORKERDOCK_NONCE")!, Environment.ProcessId), default);
             var request = await ExecutionProtocol.ReadAsync<ExecuteRequest>(pipe, default);
             using var grandchild = Process.Start(StartInfo("grandchild"))!;
             var directory = request.Execution.Configuration.GetProperty("path").GetString()!;
@@ -52,7 +52,7 @@ public static class FixtureProgram
             await pipe.ConnectAsync(5000);
             var attempt = Guid.Parse(Environment.GetEnvironmentVariable("WORKERDOCK_ATTEMPT")!);
             var generation = long.Parse(Environment.GetEnvironmentVariable("WORKERDOCK_GENERATION")!, System.Globalization.CultureInfo.InvariantCulture);
-            await ExecutionProtocol.WriteAsync(pipe, new Handshake(1, attempt, generation, Environment.GetEnvironmentVariable("WORKERDOCK_NONCE")!, Environment.ProcessId), default);
+            await ExecutionProtocol.WriteAsync(pipe, new Handshake(ExecutionProtocol.CurrentVersion, attempt, generation, Environment.GetEnvironmentVariable("WORKERDOCK_NONCE")!, Environment.ProcessId), default);
             _ = await ExecutionProtocol.ReadAsync<ExecuteRequest>(pipe, default);
             await ExecutionProtocol.WriteAsync(pipe, new { Kind = "Diagnostic", Sequence = 1L, EventCode = "UnsafeCode", SafeFields = new Dictionary<string, string> { ["message"] = "SHOULD_BE_DROPPED" } }, default);
             await ExecutionProtocol.WriteAsync(pipe, new TemplateResult("Success", "SyntheticSuccess", false, JsonSerializer.SerializeToElement(new { }), null), default);
@@ -70,10 +70,10 @@ public static class FixtureProgram
             if (args[0] == "bad-attempt") attempt = Guid.NewGuid();
             if (args[0] == "bad-generation") generation++;
             if (args[0] == "bad-pid") pid++;
-            await ExecutionProtocol.WriteAsync(pipe, new Handshake(1, attempt, generation, nonce, pid), default);
+            await ExecutionProtocol.WriteAsync(pipe, new Handshake(args[0] == "bad-version" ? 1 : ExecutionProtocol.CurrentVersion, attempt, generation, nonce, pid), default);
             await Task.Delay(Timeout.InfiniteTimeSpan); return 0;
         }
-        return await ExecutorHost.RunAsync(_ => [new BlockingTemplate(), new SpawningTemplate(() => Process.Start(StartInfo("grandchild"))!), new SecretTemplate(), new DiagnosticTemplate(), new DiagnosticStressTemplate()], execution => new(new TestVault(args[0]=="provider-failure"), new TestLog(execution.Configuration.GetProperty("path").GetString()!)));
+        return await ExecutorHost.RunAsync(_ => [new BlockingTemplate(), new SpawningTemplate(() => Process.Start(StartInfo("grandchild"))!), new SecretTemplate(), new DiagnosticTemplate(), new DiagnosticStressTemplate(), new ResolvedValueTemplate("1.0.0"), new ResolvedValueTemplate()], execution => new(new TestVault(args[0]=="provider-failure", execution.Configuration.GetProperty("path").GetString()!), new TestLog(execution.Configuration.GetProperty("path").GetString()!)));
     }
     public static ProcessStartInfo StartInfo(params string[] args)
     {
@@ -83,11 +83,15 @@ public static class FixtureProgram
         return info;
     }
     public static ExecutionSupervisor Supervisor(IExecutionEvents? events = null) => events is null ? new(Options()) : new(Options(), events);
-    public static ExecutionSupervisorOptions Options(string mode = "executor") => new("dotnet", [typeof(FixtureProgram).Assembly.Location, mode], new Dictionary<string, string> { ["block@1"] = "test-v1", ["spawn@1"] = "test-v1", ["secret@1"] = "test-v1", ["diagnostic@1"] = "test-v1", ["diagnostic-stress@1"] = "test-v1" });
+    public static ExecutionSupervisorOptions Options(string mode = "executor") => new("dotnet", [typeof(FixtureProgram).Assembly.Location, mode], new Dictionary<string, string> { ["block@1"] = "test-v1", ["spawn@1"] = "test-v1", ["secret@1"] = "test-v1", ["diagnostic@1"] = "test-v1", ["diagnostic-stress@1"] = "test-v1", ["resolved@1.0.0"] = "test-resolved-v1", ["resolved@1.1.0"] = "test-resolved-v1" });
     public static ExecutionDescriptor Descriptor(string template, string path) => new(Guid.NewGuid(), 1, template, "1", "stable-idempotency", JsonSerializer.SerializeToElement(new { path }), null, null, JsonSerializer.SerializeToElement(new { version = 1 }), null);
-    private sealed class TestVault(bool fail) : ISecretVault
+    private sealed class TestVault(bool fail, string path) : ISecretVault
     {
-        public ValueTask<SecretValue> ResolveAsync(SecretReference reference, CancellationToken ct) => fail ? throw new Exception(Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SECRET") + Environment.GetEnvironmentVariable("WORKERDOCK_TEST_PREVIOUS_SECRET")) : ValueTask.FromResult(new SecretValue(Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SECRET")!.AsSpan()));
+        public ValueTask<SecretValue> ResolveAsync(SecretReference reference, CancellationToken ct)
+        {
+            File.WriteAllText(Path.Combine(path, "secret-lookups"), "called");
+            return fail ? throw new Exception(Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SECRET") + Environment.GetEnvironmentVariable("WORKERDOCK_TEST_PREVIOUS_SECRET")) : ValueTask.FromResult(new SecretValue(Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SECRET")!.AsSpan()));
+        }
     }
     private sealed class TestLog : ISafeExecutionLog
     {

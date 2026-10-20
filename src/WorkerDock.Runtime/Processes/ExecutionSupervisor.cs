@@ -40,7 +40,9 @@ public sealed class ExecutionSupervisor : IExecutionSupervisor
         if (attemptId == Guid.Empty || generation <= 0 || descriptor.ExecutionId == Guid.Empty || descriptor.AttemptOrdinal <= 0)
             throw new ExecutionProcessException("InvalidExecutionIdentity", true);
         var digest = options.MetadataDigests.GetValueOrDefault(descriptor.TemplateId + "@" + descriptor.TemplateVersion) ?? "";
-        var request = new ExecuteRequest(1, attemptId, generation, digest, descriptor);
+        if (!ExecutionPayloadLimits.FitsPreparedDescriptor(descriptor))
+            throw new ExecutionProcessException("IpcMessageTooLarge", true);
+        var request = new ExecuteRequest(ExecutionProtocol.CurrentVersion, attemptId, generation, digest, descriptor);
         try { _ = ExecutionProtocol.Serialize(request); } // No child has been started.
         catch (ExecutionProcessException error) { throw new ExecutionProcessException(error.SafeCode, true); }
         catch (System.Text.Json.JsonException) { throw new ExecutionProcessException("IpcInvalidMessage", true); }
@@ -77,7 +79,7 @@ public sealed class ExecutionSupervisor : IExecutionSupervisor
             await pipe.WaitForConnectionAsync(startup.Token);
             if (!ExecutionProtocol.ClientIs(pipe, process.Id)) throw new ExecutionProcessException("ExecutorIdentityRejected");
             var hello = await ExecutionProtocol.ReadAsync<Handshake>(pipe, startup.Token);
-            if (hello.Version != 1 || hello.AttemptId != attemptId || hello.Generation != generation || hello.ProcessId != process.Id ||
+            if (hello.Version != ExecutionProtocol.CurrentVersion || hello.AttemptId != attemptId || hello.Generation != generation || hello.ProcessId != process.Id ||
                 hello.Nonce is null || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(hello.Nonce), Encoding.UTF8.GetBytes(nonce)))
                 throw new ExecutionProcessException("ExecutorIdentityRejected");
             // This frame is the sole permission to enter the installed handler composition root.

@@ -29,7 +29,7 @@ public sealed class ExecutionControlTests
             DeadlineUtc = DateTimeOffset.MaxValue
         };
         Assert.True(ExecutionPayloadLimits.FitsJobConfiguration(descriptor.TemplateId, descriptor.TemplateVersion, descriptor.Configuration));
-        var bytes = WorkerDock.Runtime.Ipc.ExecutionProtocol.Serialize(new WorkerDock.Runtime.Ipc.ExecuteRequest(1, Guid.NewGuid(), long.MaxValue, new string('x', 64), descriptor));
+        var bytes = WorkerDock.Runtime.Ipc.ExecutionProtocol.Serialize(new WorkerDock.Runtime.Ipc.ExecuteRequest(WorkerDock.Runtime.Ipc.ExecutionProtocol.CurrentVersion, Guid.NewGuid(), long.MaxValue, new string('x', 64), descriptor));
         Assert.InRange(bytes.Length, 62000, WorkerDock.Runtime.Ipc.ExecutionProtocol.MaximumMessageBytes);
     }
 

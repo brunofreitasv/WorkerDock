@@ -7,6 +7,7 @@ using WorkerDock.Contracts.Execution;
 using WorkerDock.Contracts.Logging;
 using WorkerDock.Contracts.Secrets;
 using WorkerDock.Contracts.Templates;
+using WorkerDock.Infrastructure.Values;
 using WorkerDock.Runtime.Ipc;
 namespace WorkerDock.Executor;
 
@@ -29,9 +30,9 @@ public static class ExecutorHost
             await using var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             await pipe.ConnectAsync(startup.Token);
             if (!ExecutionProtocol.ServerIs(pipe, parent)) return 1;
-            await ExecutionProtocol.WriteAsync(pipe, new Handshake(1, attempt, generation, nonce, Environment.ProcessId), startup.Token);
+            await ExecutionProtocol.WriteAsync(pipe, new Handshake(ExecutionProtocol.CurrentVersion, attempt, generation, nonce, Environment.ProcessId), startup.Token);
             var request = await ExecutionProtocol.ReadAsync<ExecuteRequest>(pipe, startup.Token);
-            if (request.Version != 1 || request.AttemptId != attempt || request.Generation != generation) return 1;
+            if (request.Version != ExecutionProtocol.CurrentVersion || request.AttemptId != attempt || request.Generation != generation) return 1;
             using var writer = new SemaphoreSlim(1, 1);
             var composedAdapters = adapters;
             await using var diagnostics = new IpcDiagnosticRelay(pipe, writer, null);
@@ -68,12 +69,29 @@ public static class ExecutorHost
         using var secrets = new RedactingSecrets();
         try
         {
+            if (!ExecutionPayloadLimits.FitsPreparedDescriptor(request.Execution)) return Failure("IpcMessageTooLarge", false);
+            var resolutionError = request.Execution.ValueResolutionError;
+            if (resolutionError is not null)
+            {
+                if (request.Execution.ValueSnapshot is not null) return Failure("DynamicSnapshotInvalid", false);
+                return Failure(SafeResolutionCode(resolutionError) ? resolutionError : "DynamicSnapshotInvalid", false);
+            }
+            if (request.Execution.ValueContext is null && request.Execution.ValueSnapshot is not null ||
+                request.Execution.ValueContext is not null && request.Execution.ValueSnapshot is null)
+                return Failure("DynamicSnapshotInvalid", false);
             var installed = templates(request.Execution);
             if (installed.GroupBy(x => (x.Descriptor.Id, x.Descriptor.Version)).Any(x => x.Count() > 1)) return Failure("TemplateRegistrationConflict", false);
             var template = installed.SingleOrDefault(x => x.Descriptor.Id == request.Execution.TemplateId && x.Descriptor.Version == request.Execution.TemplateVersion);
             if (template is null) return Failure("TemplateVersionUnavailable", false);
             if (string.IsNullOrEmpty(request.MetadataDigest) || template.Descriptor.MetadataDigest != request.MetadataDigest) return Failure("TemplateMetadataMismatch", false);
-            if (TemplateSchemaValidator.Validate(template.Descriptor,request.Execution.Configuration).Count != 0 || template.Validate(request.Execution.Configuration).Count != 0) return Failure("TemplateConfigurationInvalid", false);
+            if (request.Execution.ValueSnapshot is not null && !DynamicValueValidation.ValidateResolvedSnapshot(template.Descriptor, request.Execution))
+                return Failure("DynamicSnapshotInvalid", false);
+            try
+            {
+                if (TemplateSchemaValidator.Validate(template.Descriptor,request.Execution.Configuration).Count != 0 ||
+                    template.Validate(request.Execution.Configuration).Count != 0) return Failure("TemplateConfigurationInvalid", false);
+            }
+            catch { return Failure("TemplateConfigurationInvalid", false); }
             ct.ThrowIfCancellationRequested();
             var composed = adapters(request.Execution);
             secrets.Provider = composed.Secrets;
@@ -92,6 +110,11 @@ public static class ExecutorHost
         catch { return Failure("TemplateExecutionFailed", true); }
     }
     private static TemplateResult Failure(string code, bool effects) => new("PermanentFailure", code, effects, JsonSerializer.SerializeToElement(new { }), null);
+    private static bool SafeResolutionCode(string code) => code is
+        "DynamicBindingInvalid" or "DynamicResolverUnsupported" or "DynamicTimeZoneInvalid" or
+        "DynamicTypeMismatch" or "DynamicSourceUnavailable" or "DynamicDateOutOfRange" or
+        "DynamicLocalTimeInvalid" or "DynamicSnapshotInvalid" or "DynamicSnapshotTooLarge" or
+        "DynamicTargetInvalid";
     private static bool Code(string? value) => value is { Length: > 0 and <= 80 } && value.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
     private static string Required(string key) => Environment.GetEnvironmentVariable(key) ?? throw new InvalidOperationException();
 

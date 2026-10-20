@@ -2,11 +2,31 @@ using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
 using WorkerDock.DatabaseMigrator;
 using WorkerDock.Infrastructure.Templates;
+using WorkerDock.Templates.SqlServer;
+using WorkerDock.Templates.Http;
 namespace WorkerDock.IntegrationTests;
 
 [Trait("Store","Sql")]
 public sealed class TemplateCatalogSqlTests
 {
+    [Fact]
+    public async Task Built_in_catalog_registers_both_versions_without_changing_legacy_digests()
+    {
+        await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var descriptors = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
+        {
+            SqlTemplateDescriptors.Get("1.0.0"), SqlTemplateDescriptors.Get("1.1.0"),
+            HttpTemplateDescriptors.Get("1.0.0"), HttpTemplateDescriptors.Get("1.1.0")
+        };
+        var catalog = new SqlTemplateCatalog(new(fixture.RuntimeConnectionString, fixture.Database.InstanceId), descriptors);
+        var aggregate = await catalog.RegisterAsync(descriptors, default);
+        Assert.Equal("8A719E8D8B3F5A5D5046ED8299D5D555F924F05B5E6AA64AE53B7F3A91AC2765", aggregate);
+        Assert.Equal("B9E119AAD34E89E0A5A4332F97A757017C2F1D1C208CF5D0FAE4E65B0902717F", (await catalog.GetAsync("workerdock.sql-server", "1.0.0", default))!.MetadataDigest);
+        Assert.Equal("D2D2BF6AC72E90F986BC3347E7B96D831CA9D63789FF600C5072B50F37855956", (await catalog.GetAsync("workerdock.http", "1.0.0", default))!.MetadataDigest);
+        Assert.NotNull(await catalog.GetAsync("workerdock.sql-server", "1.1.0", default));
+        Assert.NotNull(await catalog.GetAsync("workerdock.http", "1.1.0", default));
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

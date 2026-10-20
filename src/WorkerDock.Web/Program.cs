@@ -40,20 +40,22 @@ builder.Services.TryAddSingleton<ISecretVault>(_ => SecretVaultRegistration.Crea
 builder.Services.TryAddSingleton<IScheduleEvaluator, QuartzScheduleEvaluator>();
 var trustedTemplates = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
 {
-    new SqlTemplate().Descriptor,
+    new SqlTemplate("1.0.0").Descriptor,
+    new SqlTemplate("1.1.0").Descriptor,
     HttpTemplateDescriptors.Get("1.0.0"),
     HttpTemplateDescriptors.Get("1.1.0")
 };
+builder.Services.TryAddSingleton<ITemplateAuthoringService>(_ => BuiltInAuthoringValidators.Create());
 builder.Services.TryAddSingleton<IJobCommands>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
     var environment = provider.GetRequiredService<IHostEnvironment>();
     if (!Guid.TryParse(config["Tenant:InstanceId"], out var instanceId)) return new UnavailableJobCommands();
     if (config["Tenant:Adapter"] == "Memory")
-        return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>(),profiles:provider.GetRequiredService<IConnectionProfiles>(),integrationSettings:provider.GetRequiredService<IIntegrationSettings>(),templateCatalog:provider.GetRequiredService<ITemplateCatalog>()) : new UnavailableJobCommands();
+        return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>(),profiles:provider.GetRequiredService<IConnectionProfiles>(),integrationSettings:provider.GetRequiredService<IIntegrationSettings>(),templateCatalog:provider.GetRequiredService<ITemplateCatalog>(),authoring:provider.GetRequiredService<ITemplateAuthoringService>()) : new UnavailableJobCommands();
     var connection = config["Tenant:ConnectionString"];
     return !string.IsNullOrWhiteSpace(connection)
-        ? new SqlJobCommands(new(connection, instanceId),provider.GetRequiredService<ITemplateCatalog>())
+        ? new SqlJobCommands(new(connection, instanceId),provider.GetRequiredService<ITemplateCatalog>(),provider.GetRequiredService<ITemplateAuthoringService>())
         : new UnavailableJobCommands();
 });
 builder.Services.TryAddSingleton<IIntegrationSettings>(provider =>
@@ -133,7 +135,7 @@ builder.Services.TryAddSingleton<SqlJobLifecycle>(provider =>
     var config=provider.GetRequiredService<IConfiguration>();
     if(config["Tenant:Adapter"]=="Memory" || !Guid.TryParse(config["Tenant:InstanceId"],out var id) || string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"]))
         throw new WorkerDockException("PersistenceUnavailable");
-    return new SqlJobLifecycle(new(config["Tenant:ConnectionString"]!,id),provider.GetRequiredService<ITemplateCatalog>(),provider.GetRequiredService<IScheduleEvaluator>(),provider.GetRequiredService<TimeProvider>());
+    return new SqlJobLifecycle(new(config["Tenant:ConnectionString"]!,id),provider.GetRequiredService<ITemplateCatalog>(),provider.GetRequiredService<IScheduleEvaluator>(),provider.GetRequiredService<TimeProvider>(),provider.GetRequiredService<ITemplateAuthoringService>());
 });
 builder.Services.TryAddSingleton<IJobLifecycle>(provider => provider.GetRequiredService<SqlJobLifecycle>());
 builder.Services.TryAddSingleton<IJobDuplicator>(provider => provider.GetRequiredService<SqlJobLifecycle>());

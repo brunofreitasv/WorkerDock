@@ -11,9 +11,10 @@ public sealed record ExecuteRequest(int Version, Guid AttemptId, long Generation
 public sealed record ExecutionControl(string Kind);
 public sealed record ExecutorDiagnosticFrame(string Kind, long Sequence, string EventCode, IReadOnlyDictionary<string, string> SafeFields);
 
-/// <summary>Version 1: bounded little-endian length-prefixed UTF-8 JSON, one attempt per pipe.</summary>
+/// <summary>Version 2: bounded little-endian length-prefixed UTF-8 JSON, one attempt per pipe.</summary>
 public static class ExecutionProtocol
 {
+    public const int CurrentVersion = 2;
     public const int MaximumMessageBytes = ExecutionPayloadLimits.MaximumMessageBytes;
     private static readonly JsonSerializerOptions JsonOptions = new() { MaxDepth = 32 };
     public static byte[] Serialize<T>(T message)

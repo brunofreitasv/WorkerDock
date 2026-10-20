@@ -18,7 +18,7 @@ internal static class Program
                 try { await policy.ResolveAsync(new(uri, "tenant-jobs"), ct); }
                 catch (OutboundPolicyException error) { throw new HttpTemplate.HttpTemplateException(error.SafeCode); }
             }
-            return [new WorkerDock.Templates.SqlServer.SqlTemplate(), new HttpTemplate(client, Approve), new HttpTemplate(client, Approve, "1.1.0")];
+            return [new WorkerDock.Templates.SqlServer.SqlTemplate("1.0.0"), new WorkerDock.Templates.SqlServer.SqlTemplate("1.1.0"), new HttpTemplate(client, Approve, "1.0.0"), new HttpTemplate(client, Approve, "1.1.0")];
         },
         _ => new(SecretVaultRegistration.CreateDevelopment(),new SafeExecutionLog(line => System.Diagnostics.Trace.WriteLine(line))));
 }

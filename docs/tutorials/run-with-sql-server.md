@@ -61,17 +61,16 @@ $env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string
 dotnet run --project src/WorkerDock.Web --urls https://localhost:5001
 ```
 
-Worker (choose a stable unique installation GUID). The digest below is the
-aggregate digest computed from the built-in SQL Server and HTTP descriptors in
-this checkout. Recompute it with `TemplateMetadata.AggregateDigest` when
-changing either descriptor or adding a trusted template; a mismatch prevents
-the worker from starting.
+Worker (choose a stable unique installation GUID). The digest below is
+`TemplateMetadata.AggregateDigest` of the installed SQL Server 1.0.0/1.1.0 and
+HTTP 1.0.0/1.1.0 descriptors. Recompute it when changing a descriptor or
+adding a trusted template; a mismatch prevents the worker from starting.
 
 ```powershell
 $env:Tenant__InstanceId='<stable-tenant-guid>'
 $env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
 $env:Worker__InstallationId='<stable-unique-worker-installation-guid>'
-$env:Worker__CatalogDigest='01C0E4668C9E5DEF4CA97A1B1E2AF21CBA31A9697D34D824D9C9091094B48BB5'
+$env:Worker__CatalogDigest='8A719E8D8B3F5A5D5046ED8299D5D555F924F05B5E6AA64AE53B7F3A91AC2765'
 $env:Worker__HostCeiling='10'
 $env:Worker__DrainSeconds='40'
 $env:Executor__Path=(Resolve-Path 'src/WorkerDock.Executor/bin/Release/net10.0-windows/win-x64/publish/WorkerDock.Executor.exe').Path

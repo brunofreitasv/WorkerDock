@@ -7,6 +7,7 @@ namespace WorkerDock.Contracts.Execution;
 public static class ExecutionPayloadLimits
 {
     public const int MaximumMessageBytes = 64 * 1024;
+    public const int MaximumSnapshotBytes = 16 * 1024;
     public const int EnvelopeReserveBytes = 1024;
     public const int PinnedSettingsReserveBytes = 8 * 1024;
     // IntegrationSettingsValidation bounds the serialized settings to this size.
@@ -16,7 +17,7 @@ public static class ExecutionPayloadLimits
     {
         try
         {
-            if (descriptor.ValueSnapshot is { } snapshot && JsonSerializer.SerializeToUtf8Bytes(snapshot, DescriptorOptions).Length > 16_384)
+            if (descriptor.ValueSnapshot is { } snapshot && JsonSerializer.SerializeToUtf8Bytes(snapshot, DescriptorOptions).Length > MaximumSnapshotBytes)
                 return false;
             var envelope = new { version = 2, attemptId = Guid.Empty, generation = long.MaxValue,
                 metadataDigest = new string('F', 64), execution = descriptor };
@@ -61,7 +62,7 @@ public static class ExecutionPayloadLimits
                 snapshot[binding.Target] = new string('x', maximum);
             }
             var snapshotJson = JsonSerializer.SerializeToElement(new { ResolverVersion = plan.ResolverVersion, InputDigest = new string('F', 64), Values = snapshot });
-            if (Encoding.UTF8.GetByteCount(snapshotJson.GetRawText()) > 16_384) return false;
+            if (Encoding.UTF8.GetByteCount(snapshotJson.GetRawText()) > MaximumSnapshotBytes) return false;
             var descriptor = CreateDescriptor(configuration, templateId, version);
             var envelope = new { descriptor, dynamicValues, valueSnapshot = snapshotJson, valueContext = new { resolverVersion = int.MaxValue, timeZoneId = new string('x', 100), triggerKind = new string('x', 20), scheduledForUtc = DateTimeOffset.MaxValue, requestedAtUtc = DateTimeOffset.MaxValue, referenceDateOverride = "9999-12-31", firstStartedAtUtc = DateTimeOffset.MaxValue } };
             return JsonSerializer.SerializeToUtf8Bytes(envelope, DescriptorOptions).Length <= MaximumMessageBytes - EnvelopeReserveBytes - PinnedSettingsReserveBytes;
