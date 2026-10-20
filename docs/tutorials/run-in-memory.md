@@ -45,6 +45,11 @@ mode does not run the worker or execute jobs.
 
 ## Control Center
 
+For this disposable Development tutorial, Memory is selected explicitly and
+its registry is lost on restart. A fresh persistent Control Center instead
+uses a protected file directory configured with
+`Central:Storage:DataDirectory`; it still needs no central SQL database.
+
 In a second PowerShell window at the repository root:
 
 ```powershell

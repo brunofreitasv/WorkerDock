@@ -1,5 +1,7 @@
 # WorkerDock design specification
 
+> **Supersession:** The approved [database-free Control Center design](2026-10-19-database-free-control-center-design.md) supersedes only this document's Control Center storage and deployment statements; the central SQL database and schema statements below are historical design text. The Control Center is optional and uses protected file state; current fresh setup does not require a central SQL database or central migrations. Its tenant-link, health-probe, authorization, and health-only credential requirements remain. All tenant SQL Server, Quartz.NET, tenant isolation, and tenant migration requirements in this specification remain unchanged. Historical central SQL scripts are retained for legacy restore/import only.
+
 All WorkerDock-owned tables, triggers, keys, indexes and explicit SQL references belong to `[workerdock]` in each database. Each independent tenant database and the separate central registry database owns its own schema; this is not a shared multitenant database or browser-supplied tenant selector. Quartz uses `[workerdock].WDS_QRTZ_` and `[workerdock].WDE_QRTZ_`. System `sys.*` objects and database principals retain their SQL Server names. New objects require paired migrations, checksums and explicit least-privilege grants; runtime startup never creates schema.
 
 Date: 2026-10-17 (America/Sao_Paulo)

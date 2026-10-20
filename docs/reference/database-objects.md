@@ -1,8 +1,8 @@
 # Database objects
 
-WorkerDock owns versioned runtime schema scripts in `database/tenant` and `database/central`. Each migration has an `.up.sql` and `.down.sql` file listed in its manifest with checksums. Apply them with `WorkerDock.DatabaseMigrator`; do not execute an individual runtime script by hand or edit a migration after it has been applied. New schema changes use a new migration pair.
+WorkerDock's current runtime SQL schema is the tenant schema in `database/tenant`. The historical central schema in `database/central` is retained only for legacy restore/import. Tenant migrations have `.up.sql` and `.down.sql` files listed in a checksummed manifest. Apply current tenant migrations with `WorkerDock.DatabaseMigrator`; do not execute an individual runtime script by hand or edit a migration after it has been applied. New schema changes use a new migration pair.
 
-All tenant-owned objects are under `[workerdock]`. The central database also uses `[workerdock]`, but is a separate database. The application connection uses the restricted runtime role created by the migrations. `deploy/permissions.sql` only adds existing database users or groups to these roles; it does not create roles, schemas, tables, procedures, or grants.
+All tenant-owned objects are under `[workerdock]`. Tenant application connections use the restricted runtime role created by tenant migrations. Current Control Center state is held in protected files, not SQL objects. `deploy/permissions.sql` only adds existing database users or groups to roles; it does not create roles, schemas, tables, procedures, or grants.
 
 ## Runtime tenant schema
 
@@ -25,9 +25,9 @@ All tenant-owned objects are under `[workerdock]`. The central database also use
 
 Quartz schema is included in tenant migration `0002_quartz`; the source SQL Server script is preserved with its license and notices in `database/upstream/quartz-4.5.1/`. WorkerDock changes its table prefixes and schema to `[workerdock]`, and creates separate stores for scheduling and execution publishing. Do not install the upstream script independently. The paired down migration refuses to drop populated stores.
 
-## Runtime central schema
+## Legacy central schema (restore/import only)
 
-`database/central/0001_registry.up.sql` creates `SchemaHistory`, `CentralSettings`, `TenantRegistrations`, `TenantHealthObservations`, append-only `AuditEvents`, supporting indexes, and `WorkerDockCentralRuntime`. The role's table grants are scoped to those central objects. The central database stores tenant endpoints, expected IDs and logical health credential references; it does not contain tenant job data.
+`database/central/0001_registry.up.sql` is historical and is not applied by fresh Control Center setup or center startup. It created `SchemaHistory`, `CentralSettings`, `TenantRegistrations`, `TenantHealthObservations`, append-only `AuditEvents`, supporting indexes, and `WorkerDockCentralRuntime` for older SQL-backed centers. Keep the scripts for legacy restore/import only; see [Control Center](../control-center.md).
 
 ## Test-only SQL objects
 
@@ -38,7 +38,7 @@ These SQL files exist only to support disposable integration fixtures and are no
 | `tests/sql/target-fixture.up.sql` and `.down.sql` | Creates/drops the `[workerdock].SqlTemplateTarget` table, test procedures, and `WorkerDockSqlTarget` role in the fixture database. |
 | `tests/WorkerDock.IntegrationTests/Sql/quartz-probe.up.sql` and `.down.sql` | Creates/drops a Quartz process test probe's state/event tables and its restricted runtime user in a generated test database. |
 
-`SqlDatabaseFixture` chooses a generated `WorkerDock_Test_<32 hex digits>` database, sets compatibility level 160, and drops that database at disposal. Target fixture scripts and Quartz probe scripts run only inside that generated database. Do not copy these scripts into a tenant or central installation.
+`SqlDatabaseFixture` chooses a generated `WorkerDock_Test_<32 hex digits>` database, sets compatibility level 160, and drops that database at disposal. Target fixture scripts and Quartz probe scripts run only inside that generated database. Do not copy these scripts into a tenant installation.
 
 `database/upstream/quartz-4.5.1/sql-server.sql` is attributed upstream source retained for reference. It is neither a deployment migration nor a test fixture; do not run it in addition to `0002_quartz`.
 

@@ -1,6 +1,6 @@
 # Set up SQL Server
 
-WorkerDock supports SQL Server 2022 or newer with database compatibility level 160. Provision a separate database for each tenant and a separate central database if using Control Center. Do not combine central and tenant data.
+WorkerDock tenant databases require SQL Server 2022 or newer with database compatibility level 160. Provision one separate database for each tenant. A fresh Control Center uses protected files and does not require a central SQL database; existing SQL-backed centers may retain their database for legacy import or restore.
 
 ## Runtime and test databases
 
@@ -9,20 +9,20 @@ flowchart LR
     subgraph Runtime["Runtime installation"]
         Manifest["Versioned migration manifests"] --> Migrator["Deployment-only migrator"]
         Migrator --> TenantDb[("Tenant database<br/>[workerdock] + Quartz tables")]
-        Migrator --> CenterDb[("Optional central database<br/>[workerdock] registry")]
         TenantApps["Tenant web, scheduler, workers"] -->|"restricted WorkerDockRuntime role"| TenantDb
-        CenterApp["Control Center"] -->|"restricted WorkerDockCentralRuntime role"| CenterDb
+        CenterApp["Optional Control Center"] --> CenterFiles[("Protected state directory")]
     end
     subgraph Tests["Disposable SQL integration tests only"]
         Fixtures["tests/sql + integration fixture scripts"] --> TestDb[("Generated WorkerDock_Test_* database")]
     end
 ```
 
-The runtime manifests under `database/tenant` and `database/central` create
-application objects and include paired rollback scripts. The `tests/sql`
+The tenant runtime manifest under `database/tenant` creates application objects
+and includes paired rollback scripts. Historical central SQL scripts are for
+legacy restore/import only. The `tests/sql`
 scripts create only fixture objects in generated disposable databases; never
-apply them to a runtime tenant or central database. The in-memory tutorial
-needs none of these SQL objects.
+apply them to a runtime tenant. The in-memory tutorial needs none of these SQL
+objects.
 
 ## Provision a tenant database
 
@@ -63,7 +63,7 @@ sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
   -i .\deploy\permissions.sql
 ```
 
-`deploy/permissions.sql` only adds a supplied principal to `WorkerDockRuntime` or `WorkerDockCentralRuntime`; versioned migrations define the grants. The tenant role contains the application's required data access, including DML for both Quartz stores. It does not grant schema changes. To remove an explicit role membership:
+`deploy/permissions.sql` adds a supplied tenant principal to `WorkerDockRuntime`; the tenant migration defines the grants. The tenant role contains the application's required data access, including DML for both Quartz stores. It does not grant schema changes. To remove an explicit role membership:
 
 ```powershell
 sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
@@ -73,32 +73,16 @@ sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
 
 Configure `Tenant__Adapter=Sql`, `Tenant__InstanceId` with the same GUID, and `Tenant__ConnectionString` with the application identity. The deployment package installer configures services and IIS; it does not create databases or run migrations.
 
-## Provision the optional central database
+## Optional current Control Center
 
-Create a different empty database at compatibility level 160:
-
-```sql
-CREATE DATABASE [WorkerDockCentral];
-ALTER DATABASE [WorkerDockCentral] SET COMPATIBILITY_LEVEL = 160;
-```
-
-Map temporary migrator and long-lived application identities to database users. Apply the central migration with its own stable instance GUID:
-
-```powershell
-$env:WORKERDOCK_INSTANCE_ID='<stable-central-guid>'
-$env:WORKERDOCK_SQL='<central-migrator-connection-string>'
-dotnet run --project src/WorkerDock.DatabaseMigrator -- apply central 0001_registry
-```
-
-Add the existing central application database principal to the role:
-
-```powershell
-sqlcmd -S '<SQL_SERVER>' -d WorkerDockCentral -E -b `
-  -v TenantRuntimePrincipal="" CentralRuntimePrincipal="<CENTER_DB_USER>" `
-  -i .\deploy\permissions.sql
-```
-
-Configure the central application with the same GUID and its restricted runtime connection string. `WorkerDockCentralRuntime` grants only the central database access defined by the migration. The central identity must not have access to tenant databases.
+The current center uses `Central:InstanceId` and an absolute
+`Central:Storage:DataDirectory` outside release and web directories. Protect
+the directory so only the center IIS application-pool identity and
+administrators can modify it, and keep it outside web serving. No central SQL
+database, migration, SQL identity, or SQL connection string is required. See
+[Control Center setup](../control-center.md) for persistent storage and
+health-probe configuration. Tenant SQL setup above remains required for each
+tenant.
 
 ## Roll back a database
 
@@ -110,7 +94,7 @@ $env:WORKERDOCK_SQL='<tenant-migrator-connection-string>'
 dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0008_retention
 ```
 
-Continue with preceding IDs only when their down scripts' empty-state requirements are satisfied. For a populated database, restore a backup or perform a separately planned data migration; do not bypass a rollback guard. To remove the central registry, its rollback refuses registered tenants or audit data:
+Continue with preceding IDs only when their down scripts' empty-state requirements are satisfied. For a populated database, restore a backup or perform a separately planned data migration; do not bypass a rollback guard. The following historical central rollback applies only when deliberately removing a legacy SQL-backed center; current file-backed centers do not use it, and its down script refuses registered tenants or audit data:
 
 ```powershell
 $env:WORKERDOCK_INSTANCE_ID='<same-central-guid>'

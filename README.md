@@ -18,7 +18,7 @@ For a quick visual tour, see the [tenant and process map](docs/architecture.md#d
 
 ## Database scripts
 
-Runtime migrations and their rollbacks are in [`database/tenant`](database/tenant) and [`database/central`](database/central). The migrator applies them from checksummed manifests. SQL fixtures under [`tests/sql`](tests/sql) and [`tests/WorkerDock.IntegrationTests/Sql`](tests/WorkerDock.IntegrationTests/Sql) are for disposable integration-test databases only; they are not part of production setup. See [database object reference](docs/reference/database-objects.md) and the [SQL setup guide](docs/how-to/setup-sql-server.md) for exact commands and permissions.
+Tenant runtime migrations and their rollbacks are in [`database/tenant`](database/tenant) and are applied from a checksummed manifest. A fresh optional Control Center stores its state in protected files and needs no central SQL database or migration; historical scripts under [`database/central`](database/central) are retained for legacy restore/import only. SQL fixtures under [`tests/sql`](tests/sql) and [`tests/WorkerDock.IntegrationTests/Sql`](tests/WorkerDock.IntegrationTests/Sql) are for disposable integration-test databases only; they are not part of production setup. See [database object reference](docs/reference/database-objects.md) and the [SQL setup guide](docs/how-to/setup-sql-server.md) for exact tenant commands and permissions.
 
 ## Project status
 

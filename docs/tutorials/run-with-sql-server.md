@@ -1,9 +1,10 @@
 # Run WorkerDock with SQL Server
 
 This local setup runs the Tenant UI, Worker and Scheduler against one tenant
-database. The Control Center runs with its Development memory registry; a
-SQL-backed central registry needs separate central database provisioning.
-Keep all hosts bound to localhost.
+database. The Control Center uses its Development memory registry for this
+disposable run. A fresh persistent Control Center uses
+`Central:Storage:DataDirectory` and needs no central SQL database. Keep all
+hosts bound to localhost.
 
 ## Prerequisites
 
@@ -85,7 +86,8 @@ $env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string
 dotnet run --project src/WorkerDock.Scheduler -c Release
 ```
 
-Control Center, using a local memory registry:
+Optional Control Center, using a local memory registry for this Development
+session:
 
 ```powershell
 $env:ASPNETCORE_ENVIRONMENT='Development'
@@ -104,6 +106,13 @@ console logs. The web process serves the frontend assets; Node is not a runtime
 dependency. The Control Center's tenant health probe accepts only HTTPS port
 443, so the tenant on port 5001 cannot be registered as a probe target in this
 local tutorial.
+
+For a persistent center, remove the Memory adapter setting and configure an
+absolute `Central__Storage__DataDirectory` outside the release and web
+directories. Keep it protected for the center identity and administrators.
+The center instance ID must remain stable across restarts and restores. Tenant
+SQL setup above is unchanged; no central SQL provisioning or migration is
+needed. See [Control Center setup](../control-center.md).
 
 Workers begin with zero acquisition limits. To allow one HTTP attempt, set
 both the template and this worker's limit after it has registered. In another
