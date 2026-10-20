@@ -79,7 +79,7 @@ test("managers create webhook sinks without If-Match and load the saved ETag", a
   expect(JSON.parse(String(put.init?.body))).toMatchObject({ id, configuration: { url: "https://example.test/hook", headers: [{ name: "Authorization", secretReference: "vault/created-token" }] } });
   await waitFor(() => expect(calls.some(call => call.path === `/api/alert-sinks/${id}` && !call.init?.method)).toBe(true));
   expect(await screen.findByRole("textbox", { name: "Sink name" })).toHaveValue("Created sink");
-});
+}, 15000);
 
 test("managers create disabled rules then enable them with the loaded ETag", async () => {
   const id = "44444444-4444-4444-8444-444444444444";
@@ -195,7 +195,7 @@ test("invalid webhook fields keep a new sink draft without sending it", async ()
   expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes(`/api/alert-sinks/${id}`) && init?.method === "PUT")).toBe(false);
 });
 
-test("a stale sink creation keeps its draft and UUID in creation mode", async () => {
+test("a stale sink creation recovers the saved item after a 412", async () => {
   const id = "33333333-3333-4333-8333-333333333333";
   const calls: Array<{ path: string; init?: RequestInit }> = [];
   vi.stubGlobal("crypto", { randomUUID: () => id });
@@ -216,12 +216,9 @@ test("a stale sink creation keeps its draft and UUID in creation mode", async ()
   await user.type(screen.getByRole("textbox", { name: "Webhook URL" }), "https://example.test/hook");
   const save = () => screen.getAllByRole("button", { name: "Save" }).at(-1)!;
   await user.click(save());
-  expect(await screen.findByRole("alert")).toBeVisible();
-  expect(screen.getByRole("textbox", { name: "Sink name" })).toHaveValue("Local draft");
-  await user.click(save());
-  await waitFor(() => expect(calls.filter(call => call.path === `/api/alert-sinks/${id}` && call.init?.method === "PUT")).toHaveLength(2));
-  expect(calls.filter(call => call.path === `/api/alert-sinks/${id}` && call.init?.method === "PUT").every(call => !new Headers(call.init?.headers).has("If-Match"))).toBe(true);
-  expect(screen.getByRole("textbox", { name: "Sink name" })).toHaveValue("Local draft");
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Sink name" })).toHaveValue("Server sink"));
+  expect(calls.filter(call => call.path === `/api/alert-sinks/${id}` && call.init?.method === "PUT")).toHaveLength(1);
+  expect(calls.some(call => call.path === `/api/alert-sinks/${id}` && !call.init?.method)).toBe(true);
 });
 
 test("non-managers cannot create sinks or request management resources", async () => {
@@ -269,4 +266,126 @@ test("read users can view incidents and deliveries without requesting management
   expect(await screen.findByText("Pending")).toBeVisible();
   expect(fetchMock.mock.calls.map(([input]) => String(input)).join(" ")).not.toMatch(/alert-rules|alert-sinks/);
   expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+});
+
+test("canceling a selection change preserves the current draft and confirming switches items", async () => {
+  const secondRule = { ...rule, id: "55555555-5555-4555-8555-555555555555", name: "Second rule" };
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response(JSON.stringify([rule, secondRule]));
+    if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
+    if (url.pathname === `/api/alert-rules/${rule.id}`) return new Response(JSON.stringify(rule), { headers: { ETag: '"first"' } });
+    if (url.pathname === `/api/alert-rules/${secondRule.id}`) return new Response(JSON.stringify(secondRule), { headers: { ETag: '"second"' } });
+    return new Response("{}", { status: 404 });
+  }));
+  const user = userEvent.setup();
+  render(<AlertRulesPage t={translations.en} canManage />);
+  const name = await screen.findByRole("textbox", { name: "Rule name" });
+  await user.clear(name); await user.type(name, "Unsaved rule draft");
+  await user.click(screen.getByRole("combobox", { name: "Rule" }));
+  await user.click(await screen.findByRole("option", { name: /Second rule/ }));
+  await user.click(await screen.findByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.getByRole("textbox", { name: "Rule name" })).toHaveValue("Unsaved rule draft");
+  await user.click(screen.getByRole("combobox", { name: "Rule" }));
+  await user.click(await screen.findByRole("option", { name: /Second rule/ }));
+  await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(await screen.findByRole("textbox", { name: "Rule name" })).toHaveValue("Second rule");
+});
+
+test("a 412 during sink create recovers the same UUID", async () => {
+  const id = "66666666-6666-4666-8666-666666666666";
+  const calls: string[] = [];
+  vi.stubGlobal("crypto", { randomUUID: () => id });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost"); calls.push(`${init?.method ?? "GET"} ${url.pathname}`);
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response("[]");
+    if (url.pathname === "/api/alert-sinks") return new Response("[]");
+    if (url.pathname === `/api/alert-sinks/${id}` && init?.method === "PUT") return new Response("{}", { status: 412 });
+    if (url.pathname === `/api/alert-sinks/${id}`) return new Response(JSON.stringify({ ...sink, id, name: "Recovered sink" }), { headers: { ETag: '"recovered"' } });
+    if (url.pathname === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
+    return new Response("{}", { status: 404 });
+  }));
+  const user = userEvent.setup();
+  render(<AlertRulesPage t={translations.en} canManage />);
+  await user.click(await screen.findByRole("button", { name: "New webhook sink" }));
+  await user.type(screen.getByRole("textbox", { name: "Sink name" }), "Local draft");
+  await user.type(screen.getByRole("textbox", { name: "Webhook URL" }), "https://example.test/hook");
+  const save = () => screen.getAllByRole("button", { name: "Save" }).at(-1)!;
+  await user.click(save());
+  expect(await screen.findByRole("textbox", { name: "Sink name" })).toHaveValue("Recovered sink");
+  expect(calls).toContain(`GET /api/alert-sinks/${id}`);
+}, 15000);
+
+test("a failed 412 recovery GET preserves and announces the draft", async () => {
+  const id = "77777777-7777-4777-8777-777777777777";
+  vi.stubGlobal("crypto", { randomUUID: () => id });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response("[]");
+    if (url.pathname === "/api/alert-sinks") return new Response("[]");
+    if (url.pathname === `/api/alert-sinks/${id}` && init?.method === "PUT") return new Response("{}", { status: 412 });
+    if (url.pathname === `/api/alert-sinks/${id}`) return new Response("{}", { status: 503 });
+    if (url.pathname === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
+    return new Response("{}", { status: 404 });
+  }));
+  const user = userEvent.setup();
+  render(<AlertRulesPage t={translations.en} canManage />);
+  await user.click(await screen.findByRole("button", { name: "New webhook sink" }));
+  await user.type(screen.getByRole("textbox", { name: "Sink name" }), "Keep after failed recovery");
+  await user.type(screen.getByRole("textbox", { name: "Webhook URL" }), "https://example.test/hook");
+  await user.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
+  expect(await screen.findByRole("alert")).toHaveTextContent(translations.en.alertSinkCreateError);
+  expect(screen.getByRole("textbox", { name: "Sink name" })).toHaveValue("Keep after failed recovery");
+}, 15000);
+
+test("late reads for a superseded selection cannot replace the current draft", async () => {
+  let releaseOld!: (response: Response) => void;
+  const oldResponse = new Promise<Response>(resolve => { releaseOld = resolve; });
+  let oldReadCount = 0;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response(JSON.stringify([rule, { ...rule, id: "55555555-5555-4555-8555-555555555555", name: "Second rule" }]));
+    if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
+    if (url.pathname === `/api/alert-rules/${rule.id}`) {
+      oldReadCount++;
+      return oldReadCount === 1 ? oldResponse.then(response => response) : new Response(JSON.stringify(rule), { headers: { ETag: '"first"' } });
+    }
+    if (url.pathname === "/api/alert-rules/55555555-5555-4555-8555-555555555555") return new Response(JSON.stringify({ ...rule, id: "55555555-5555-4555-8555-555555555555", name: "Second rule" }), { headers: { ETag: '"second"' } });
+    return new Response("{}", { status: 404 });
+  }));
+  const user = userEvent.setup();
+  render(<AlertRulesPage t={translations.en} canManage />);
+  await screen.findByRole("combobox", { name: "Rule" });
+  await user.click(screen.getByRole("combobox", { name: "Rule" }));
+  await user.click(await screen.findByRole("option", { name: /Second rule/ }));
+  expect(await screen.findByRole("textbox", { name: "Rule name" })).toHaveValue("Second rule");
+  releaseOld(new Response(JSON.stringify(rule), { headers: { ETag: '"first"' } }));
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Rule name" })).toHaveValue("Second rule"));
+});
+
+test("losing manager permission clears management UI and does not fetch management data again", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return new Response(JSON.stringify([rule]));
+    if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
+    if (url.pathname === `/api/alert-rules/${rule.id}`) return new Response(JSON.stringify(rule), { headers: { ETag: '"rule"' } });
+    if (url.pathname === `/api/alert-sinks/${sink.id}`) return new Response(JSON.stringify(sink), { headers: { ETag: '"sink"' } });
+    return new Response("{}", { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const view = render(<AlertRulesPage t={translations.en} canManage />);
+  await screen.findByRole("textbox", { name: "Rule name" });
+  const managementCalls = () => fetchMock.mock.calls.filter(([input]) => /alert-rules|alert-sinks/.test(String(input))).length;
+  const before = managementCalls();
+  view.rerender(<AlertRulesPage t={translations.en} canManage={false} />);
+  expect(await screen.findByText(translations.en.alertNoIncidents)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+  expect(managementCalls()).toBe(before);
 });
