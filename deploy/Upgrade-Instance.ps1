@@ -14,7 +14,6 @@ Assert-DeploymentHost
 $root = Resolve-DeploymentPath $InstallRoot 'InstallRoot'
 $config = Read-DeploymentConfig $ConfigPath
 $kind = if ($config.Contains('Tenant')) { 'tenant' } elseif ($config.Contains('Central')) { 'center' } else { throw 'Configuration must contain Tenant or Central settings.' }
-$migrationKind = if ($kind -eq 'center') { 'central' } else { 'tenant' }
 $instanceSection = if ($kind -eq 'tenant') { 'Tenant' } else { 'Central' }
 $instanceId = [string](Get-ConfigValue $config $instanceSection 'InstanceId')
 if (-not [guid]::TryParse($instanceId, [ref]([guid]::Empty))) { throw "$instanceSection.InstanceId must be a GUID." }
@@ -110,7 +109,7 @@ try {
     } finally { $zip.Dispose() }
     [void](Assert-DirectoryArchive $releaseBackupPath $oldRelease)
 
-    $schemaManifestPath = Join-Path $migratorRoot "database/$migrationKind/manifest.json"
+    $schemaManifestPath = Join-Path $migratorRoot 'database/tenant/manifest.json'
     if (-not (Test-Path -LiteralPath $schemaManifestPath -PathType Leaf)) { throw 'Package migration manifest is missing.' }
     $schemaEntries = @(Get-Content -LiteralPath $schemaManifestPath -Raw | ConvertFrom-Json)
     if ($schemaEntries.Count -eq 0) { throw 'Package migration manifest contains no target migration.' }
@@ -176,7 +175,7 @@ try {
     $env:WORKERDOCK_SQL = $connection
     $env:WORKERDOCK_INSTANCE_ID = $instanceId
     try {
-        & dotnet $migrator apply $migrationKind $targetMigration
+        & dotnet $migrator apply tenant $targetMigration
         if ($LASTEXITCODE -ne 0) { throw "Database migration failed with exit code $LASTEXITCODE. Backup retained at $backupFullPath." }
     } finally { Remove-Item Env:WORKERDOCK_SQL -ErrorAction SilentlyContinue; Remove-Item Env:WORKERDOCK_INSTANCE_ID -ErrorAction SilentlyContinue }
 

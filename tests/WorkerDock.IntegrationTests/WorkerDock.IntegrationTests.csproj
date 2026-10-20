@@ -14,7 +14,7 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="../../database/**/*" Link="database/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../database/tenant/**/*" Link="database/tenant/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../fixtures/template-schemas.json" Link="fixtures/template-schemas.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../sql/*.sql" Link="target-sql/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" /><Content Include="Sql/*.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
