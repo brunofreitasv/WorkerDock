@@ -1,7 +1,7 @@
 # Dynamic template values and SQL parameter authoring
 
 Date: 2026-10-20
-Status: Initial draft; brainstorming remains open. Not approved for implementation.
+Status: Approved by the user for implementation planning on 2026-10-20. Implementation awaits plan review.
 Workspace: C:\Users\bruno\.codex\worktrees\template-max-properties\WorkerDock 2
 
 ## Purpose and agreed outcomes
@@ -17,7 +17,7 @@ The user approved the following direction for this initial spec:
 - Allow Run now to override the reference date for reprocessing earlier periods.
 - Preserve existing fixed configurations and version changed template metadata.
 
-The technical details below are the initial proposed design. The user has requested further brainstorming before final spec review and implementation planning.
+The user approved this written design, including the SQL authoring refinements, after commit 0f7a8f1 and requested a complete implementation plan. Concrete interfaces and task sequencing are specified in the linked plan.
 
 ## Current behavior and evidence
 
@@ -184,6 +184,6 @@ New dynamic contexts are required only for jobs using the new capability. Previo
 
 Use focused frontend tests, shared resolver fixtures, execution-store tests, and template integration tests. SQL persistence checks require an available test SQL database. Documentation-only drafting does not require running application tests.
 
-## Brainstorming continuation
+## Approval and next stage
 
-This document captures the initial agreed direction and proposed technical details. Additional user requests will be incorporated through further brainstorming. Final written-spec review and approval, implementation planning, and execution-method selection remain separate later stages. No product implementation is authorized by the creation of this initial draft alone.
+This spec is approved for planning. The implementation plan is [2026-10-20-dynamic-template-values.md](../plans/2026-10-20-dynamic-template-values.md). The user will review the complete plan before implementation; the previously selected subagent-driven execution method remains the intended handoff.
