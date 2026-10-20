@@ -70,7 +70,7 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
     if (canManage) {
       tasks.push(read<AlertRule[]>("/api/alert-rules").then(x => { if (generation !== permissionGeneration.current || !canManage) return; setRules(x.data); setRuleId(id => id || x.data[0]?.id || ""); }), read<AlertSink[]>("/api/alert-sinks").then(x => { if (generation !== permissionGeneration.current || !canManage) return; const data = x.data.map(safeSink); setSinks(data); setSinksLoaded(true); setSinkId(id => id || data[0]?.id || ""); }));
     }
-    void Promise.all(tasks).catch(() => setError(t.requestError));
+    void Promise.all(tasks).catch(() => { if (!canManage || generation === permissionGeneration.current) setError(t.requestError); });
   };
   useEffect(() => { void load(); }, [canManage, t.requestError]);
   useEffect(() => {

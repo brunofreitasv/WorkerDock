@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { translations } from "@workerdock/ui";
@@ -428,4 +428,27 @@ test("a sink recovery response after manager permission is lost cannot repopulat
   await waitFor(() => expect(sinkListCount).toBe(2));
   expect(screen.getByRole("combobox", { name: "Webhook sink" })).toHaveAttribute("aria-disabled", "true");
   releaseSecondSinkList(new Response("[]"));
+}, 15000);
+
+test("a failed management list request after permission loss does not show a stale error", async () => {
+  let rejectRules!: (error: Error) => void;
+  const pendingRules = new Promise<Response>((_, reject) => { rejectRules = reject; });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alert-rules") return pendingRules;
+    if (url.pathname === "/api/alert-sinks") return new Response("[]");
+    return new Response("{}", { status: 404 });
+  }));
+  const view = render(<AlertRulesPage t={translations.en} canManage />);
+  await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining("/api/alert-rules"), expect.anything()));
+  view.rerender(<AlertRulesPage t={translations.en} canManage={false} />);
+
+  await act(async () => {
+    rejectRules(new Error("management request failed"));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(screen.queryByText(translations.en.requestError)).not.toBeInTheDocument();
 }, 15000);
