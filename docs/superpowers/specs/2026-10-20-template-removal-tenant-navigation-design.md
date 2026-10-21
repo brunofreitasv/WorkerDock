@@ -1,7 +1,7 @@
 # Template 1.0.0 removal and tenant navigation
 
 Date: 2026-10-20
-Status: Chat design approved; written spec awaiting user review.
+Status: Approved design; implementation plans awaiting user review.
 Workspace: C:\Users\bruno\.codex\worktrees\template-max-properties\WorkerDock 2
 
 ## Purpose and agreed outcomes
@@ -20,7 +20,7 @@ In Development with Tenant:Adapter=Memory, monitoring, scheduling, and alert ser
 
 Add a new tenant migration; do not modify prior migration files. The upgrade follows the existing stopped-service, verified-backup process. Before writing, preflight must establish that:
 
-- Both built-in 1.1.0 catalog entries exist with their trusted metadata.
+- For tenants with legacy job revisions, both built-in 1.1.0 catalog entries exist with their trusted metadata. A fresh install with no legacy revisions may remove the 1.0.0 bootstrap rows before the worker registers 1.1.0.
 - No execution references an HTTP or SQL Server 1.0.0 job revision. The user reports no past executions; the preflight enforces that assumption for each database.
 - Every stored 1.0.0 job configuration validates against the corresponding 1.1.0 schema and semantic authoring rules.
 - There are no other database references that would prevent removal of 1.0.0 catalog rows.
