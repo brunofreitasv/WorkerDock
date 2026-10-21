@@ -18,3 +18,19 @@ Readers can read this guide. Creating the profile, running diagnostics, and crea
 ## Result
 
 The job stores its profile reference, catalog, command, and typed parameter metadata. A profile revision is pinned when an execution is accepted. Development memory mode can store profile settings but does not execute SQL or establish target connectivity; diagnostic acceptance in memory mode is not proof of a successful SQL connection. See [job creation](#/help:jobs) and `docs/reference/sql-template.md` in the source repository.
+
+## Worked example
+
+In **Query** mode, use `SELECT * FROM dbo.Orders WHERE ReferenceDate = @Dt_Ref;` and add a matching `Dt_Ref` parameter of type `Date`. Select **Dynamic value** and bind it to **Reference date** with ISO date format. The parameter is bound separately; never concatenate a user value into SQL text.
+
+## Verify
+
+Validate the configuration, save a disabled draft, and check that the selected profile and catalog are available. After activation, inspect an execution's outcome. A UI save or memory-mode result does not prove the SQL target ran successfully.
+
+## Recover
+
+For validation errors, match parameter names, SQL types, and one chosen value source per row. Check catalog access and the profile diagnostic when connectivity is in question. The diagnostic checks connectivity only; it does not execute the job command.
+
+## Related guides
+
+See [SQL profiles](#/help:sql-profiles), [job inputs](#/help:job-inputs), [job creation](#/help:jobs), and [manual runs](#/help:manual-runs).

@@ -19,3 +19,19 @@ Creating, editing, enabling, disabling, duplicating, archiving, and stopping job
 ## Result
 
 The job is saved with its selected template, configuration, schedule, and policy. Enabling is a separate action after the draft is saved; disabling or archiving a job does not cancel accepted or running work. See [schedules](#/help:schedules), [SQL Server jobs](#/help:sql-jobs), and [HTTP jobs](#/help:http-jobs) for configuration details.
+
+## Worked example
+
+Create a manual HTTP job named **Daily status check**, choose **HTTP request**, enter an allowlisted HTTPS endpoint, and validate its configuration. Leave **Use a schedule** off, review **Policy**, save the disabled draft, then enable it after verifying the destination and secret references.
+
+## Verify
+
+Confirm the job details show **Enabled** only after activation. Use **Run now** and record the returned execution ID; inspect its status and event timeline to verify the run reached a terminal state.
+
+## Recover
+
+Keep a draft disabled while correcting validation issues. If the revision is stale, load the current revision and review the retained edits before saving. A failed or uncertain run request can be retried with its same request key; do not create duplicate runs with a new key until checking execution history.
+
+## Related guides
+
+See [installed templates](#/help:templates), [job inputs](#/help:job-inputs), [manual runs](#/help:manual-runs), [schedules](#/help:schedules), and [execution policies](#/help:execution-policies).

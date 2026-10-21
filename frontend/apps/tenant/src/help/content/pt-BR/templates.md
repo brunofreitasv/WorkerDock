@@ -17,3 +17,19 @@ Leitura para consultar descrições e versões dos modelos. Gerenciar para selec
 ## Resultado
 
 Você identifica o modelo instalado e a versão disponível para uma tarefa e entende por que uma versão aposentada não pode ser selecionada em uma tarefa nova.
+
+## Exemplo prático
+
+Para uma tarefa SQL agendada, selecione **SQL Server** e informe um perfil aprovado, o catálogo, o comando e os parâmetros tipados. Selecionar o modelo apenas inicia a configuração; não conecta ao SQL Server.
+
+## Verificação
+
+Confirme o nome e a versão do modelo na revisão ou nos detalhes da tarefa. Depois da ativação, consulte o status e o histórico de execuções separadamente para confirmar o comportamento em execução.
+
+## Recuperação
+
+Se o modelo não aparecer, peça a um gerente para confirmar se ele está instalado para o tenant. Se um campo não estiver disponível, escolha uma versão compatível ou solicite ao autor do modelo uma atualização de esquema e implantação. Usuários do tenant não podem adicionar modelos pelo catálogo.
+
+## Guias relacionados
+
+Consulte [criação de tarefas](#/help:jobs), [tarefas do SQL Server](#/help:sql-jobs) e [tarefas HTTP](#/help:http-jobs).

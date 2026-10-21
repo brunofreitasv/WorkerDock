@@ -16,6 +16,22 @@ Criar, editar, ativar, desativar, duplicar, arquivar e interromper tarefas exige
 6. Revise a configuração salva e escolha **Ativar tarefa** na etapa final quando estiver pronta. Use **Executar agora** para solicitar uma execução manual.
 7. Nos detalhes da tarefa, use **Pausar agendamento** ou **Retomar agendamento**, **Desativar tarefa**, **Duplicar** ou **Arquivar** conforme necessário. Uma cópia duplicada fica desativada e precisa ser revisada. Use **Interromper execução** para solicitar a interrupção de uma execução em andamento.
 
+## Exemplo prático
+
+Crie uma tarefa HTTP manual chamada **Verificação diária**, escolha **Requisição HTTP**, informe um endpoint HTTPS permitido e valide a configuração. Deixe **Usar um agendamento** desativado, revise **Política**, salve o rascunho desativado e ative-o depois de verificar o destino e as referências de segredo.
+
+## Verificação
+
+Confirme nos detalhes que o status aparece como ativado somente após a ativação. Use **Executar agora**, anote o ID da execução e consulte o status e a linha do tempo de eventos até chegar a um estado final.
+
+## Recuperação
+
+Mantenha o rascunho desativado enquanto corrige erros de validação. Se a revisão estiver desatualizada, carregue a revisão atual e confira as alterações mantidas antes de salvar. Se a resposta de uma solicitação de execução for incerta, repita com a mesma chave; consulte o histórico antes de criar outra execução com uma nova chave.
+
+## Guias relacionados
+
+Consulte [modelos instalados](#/help:templates), [entradas de tarefas](#/help:job-inputs), [execuções manuais](#/help:manual-runs), [agendamentos](#/help:schedules) e [políticas de execução](#/help:execution-policies).
+
 ## Resultado
 
 A tarefa fica salva com o modelo, a configuração, o agendamento e a política escolhidos. A ativação ocorre separadamente depois de salvar o rascunho; o trabalho aceito ou em andamento mantém seu próprio ciclo de vida quando uma tarefa é desativada ou arquivada. Consulte [agendamentos](#/help:schedules), [tarefas do SQL Server](#/help:sql-jobs) e [tarefas HTTP](#/help:http-jobs) para detalhes de configuração.

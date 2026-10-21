@@ -18,3 +18,19 @@ Readers can view this guide. Creating or changing a schedule and previewing its 
 ## Result
 
 The schedule is saved with its time zone and execution policy. Deleting it requires confirmation and leaves the job available for manual runs. Accepted executions keep their accepted lifecycle after later schedule edits or removal. See [job lifecycle](#/help:jobs) and `docs/reference/scheduling.md` in the source repository.
+
+## Worked example
+
+To run at 09:00 in São Paulo, select **Recurring (cron)**, enter `0 9 * * *`, and choose `America/Sao_Paulo`. Review **Preview next runs** in UTC and compare the displayed offset with the intended local time before saving.
+
+## Verify
+
+Confirm the saved time zone, cron expression, and next UTC instants. After enabling the job, use execution history to verify occurrences; previewing predicts times but does not run the job.
+
+## Recover
+
+For an ambiguous one-time local time, choose the intended UTC offset. For a daylight-saving gap, choose a valid local time and preview again. If runs were missed, review the configured **Skip**, **Coalesce**, or **Catch up** policy; pausing does not replay the paused interval.
+
+## Related guides
+
+See [execution policies](#/help:execution-policies), [manual runs](#/help:manual-runs), [job creation](#/help:jobs), and `docs/reference/scheduling.md` in the source repository.
