@@ -2,21 +2,31 @@
 
 ## Pré-requisitos
 
-É necessária a permissão Gerenciar. Tenha o nome do SQL Server e os nomes dos catálogos que devem ser permitidos. Para autenticação por senha do cofre, configure uma referência lógica de senha no provedor de segredos do tenant.
+Você precisa de acesso **Gerenciar**, do host SQL Server e dos catálogos que as tarefas poderão usar. Confirme que o serviço SQL do tenant consegue acessar o servidor. Para autenticação por senha do cofre, solicite ao provedor de segredos a referência lógica; o formulário nunca recebe a senha em si.
 
 ## Permissão
 
-Gerenciar. Os perfis contêm configurações de conexão e revisões; usuários de Leitura não podem abrir o gerenciamento de perfis.
+Usuários com acesso Gerenciar podem criar, revisar, diagnosticar e aposentar perfis. Usuários com acesso de Leitura não podem abrir o gerenciamento. Revisões permanecem disponíveis para tarefas e execuções que já as referenciam.
 
 ## Etapas
 
-1. Abra [Configurações](#/settings), selecione a aba **Perfis** e depois **Novo perfil**. Informe o nome do perfil, o servidor e um catálogo permitido por linha.
-2. Escolha autenticação **Integrada** ou **Senha do cofre**. Na segunda opção, informe o nome de usuário e uma referência lógica de segredo; nunca cole a senha. Mantenha **Criptografar conexão** ativado e use **Confiar no certificado do servidor** somente se o ambiente exigir.
-3. Salve o perfil. Ao editar, o salvamento cria uma nova revisão. A aposentadoria impede que novas tarefas selecionem o perfil, mas preserva as revisões já referenciadas por tarefas ou execuções.
-4. Selecione um perfil ativo salvo e um catálogo permitido, depois use **Executar diagnóstico seguro**. O diagnóstico verifica a conectividade por uma consulta interna fixa; ele não executa uma consulta ou procedimento informado por você. Consulte o estado do comando e o histórico da execução para ver o resultado.
+1. Abra [Configurações](#/settings), escolha **Perfis** e depois **Novo perfil**. Informe nome, servidor e um catálogo permitido por linha. As tarefas só podem selecionar catálogos desta lista.
+2. Escolha autenticação **Integrada** ou **Senha do cofre**. Para a senha do cofre, informe o usuário SQL e a referência lógica do segredo. Mantenha **Criptografar conexão** ativado. Ative **Confiar no certificado do servidor** somente se necessário e se o risco for conhecido.
+3. Escolha **Salvar perfil**. Editar cria uma nova revisão. A aposentadoria impede a seleção por novas tarefas, mas preserva revisões já referenciadas.
+4. Selecione um perfil ativo e catálogo permitido, depois escolha **Executar diagnóstico seguro**. Ele usa uma consulta interna fixa de conectividade; não executa a consulta da tarefa nem um procedimento informado por você. Consulte o estado do comando e o registro da execução.
 
-O modo de memória permite gerenciar perfis e listas de permissão, mas não se conecta ao SQL; um diagnóstico pode informar que a persistência está indisponível. Isso não representa um teste de conectividade bem-sucedido. Um diagnóstico real exige o serviço configurado com SQL e o banco de destino. As configurações SQL de tarefas estão documentadas no guia de criação de tarefas.
+## Exemplo
 
-## Resultado
+Para um banco de relatórios, crie **SQL de relatórios**, use o host SQL aprovado pelo tenant e liste `Reporting` como catálogo permitido. Escolha autenticação Integrada se aprovada; caso contrário, selecione Senha do cofre e informe a referência fornecida pelo administrador. Execute o diagnóstico seguro em `Reporting` antes de escolher o perfil em uma tarefa.
 
-O tenant armazena um perfil versionado com uma lista explícita de catálogos permitidos e uma referência de segredo. O diagnóstico informa somente se a verificação limitada de conectividade foi aceita ou falhou de forma segura.
+## Verificação
+
+Confirme se o perfil aparece com o servidor e estado ativo esperados. Um diagnóstico bem-sucedido comprova conectividade somente para aquele perfil e catálogo naquele momento. O modo de memória armazena perfis, mas não se conecta ao SQL; persistência indisponível não comprova conectividade.
+
+## Recuperação
+
+Se o salvamento indicar revisão desatualizada, recarregue o perfil atual e revise suas alterações. Se o diagnóstico não iniciar, confira servidor, lista de catálogos, autenticação, referência e serviço SQL. Um perfil aposentado não pode ser selecionado por uma nova tarefa; escolha um perfil ativo.
+
+## Guias relacionados
+
+Consulte [tarefas do SQL Server](#/help:sql-jobs), [armazene e referencie segredos](#/help:secrets) e [configurações do tenant](#/help:settings).
