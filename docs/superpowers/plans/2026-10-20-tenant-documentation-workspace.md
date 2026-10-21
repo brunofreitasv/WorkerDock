@@ -23,7 +23,7 @@
 
 ## Review Focus
 
-1. Multiword and accent-varied searches must return all-term matches, with title matches ranked before body matches; pin in Task 1 tests.
+1. Multiword and accent-varied searches must return all-term matches, ranked title > keywords > summary > body > category, with matching text highlighted safely as React text nodes; pin in Task 1 tests.
 2. Old aliases, malformed slugs, and language changes must preserve useful navigation; pin in Tasks 1 and 4 tests.
 3. Unknown image paths and unsafe Markdown URLs must never fetch or navigate externally; pin in Task 2 tests.
 4. A Read user may open the read-only Alerts screen but cannot follow manager-only Jobs or Settings actions; pin in Tasks 2 and 4 tests.
@@ -54,9 +54,9 @@
 **Interfaces:** Export HelpGroupId, HelpTopic, helpGroups, helpTopics, resolveHelpTopic(slug: string | undefined): HelpTopic | undefined from topics.ts. HelpTopic has slug, group, localized title/summary/keywords, route, requiredRole, and related slugs. Export SearchResult with topic, excerpt, and matchField; export searchHelpTopics(language: Language, query: string): SearchResult[] from search.ts. getHelpArticle(language, slug) resolves aliases before loading the Markdown.
 
 - [ ] **Step 1: Write failing manifest tests.** Assert the 24 exact canonical slugs and five group orders from the spec, unique IDs, complete bilingual metadata, valid related slugs, old workers-audit -> workers and alerts -> alert-rules aliases, and undefined for malformed slugs.
-- [ ] **Step 2: Write failing search tests.** Assert a two-term query spanning title/body matches both terms, Portuguese accent-insensitive matching, title before body ranking, plain-text excerpt without Markdown syntax, and empty query returning no search results.
+- [ ] **Step 2: Write failing search tests.** Assert a two-term query spanning title/body matches both terms, Portuguese accent-insensitive matching, title > keywords > summary > body > category ranking, plain-text excerpts without Markdown syntax, safe matching-text highlighting, and empty query returning no search results.
 - [ ] **Step 3: Run focused tests.** From frontend run npx vitest run apps/tenant/src/help/topics.test.ts apps/tenant/src/help/search.test.ts; expect red failures for the new contracts.
-- [ ] **Step 4: Implement the manifest, resolver, localized content lookup, and search.** Use normalization with Unicode NFD and combining-mark removal, all-term matching, deterministic field weights title > keywords > summary > body, then manifest order. Excerpt length is at most 160 characters around the strongest body match, otherwise the summary.
+- [ ] **Step 4: Implement the manifest, resolver, localized content lookup, and search.** Use normalization with Unicode NFD and combining-mark removal, all-term matching, deterministic field weights title > keywords > summary > body > category, then manifest order. Excerpt length is at most 160 characters around the strongest body match, otherwise the summary. Render match highlights as text nodes, never injected HTML.
 - [ ] **Step 5: Rerun the focused tests; expect pass. Commit only Task 1 files.**
 
 ### Task 2: Safe article rendering and outline data

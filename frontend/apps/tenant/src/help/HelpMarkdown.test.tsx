@@ -50,6 +50,27 @@ describe("HelpMarkdown", () => {
     expect(image).toHaveStyle({ width: "100%", maxWidth: "100%", height: "auto" });
   });
 
+  it("selects a reflowed SVG variant for narrow screens", () => {
+    const { container } = render(<HelpMarkdown source={'![workflow](./media/first-job.svg)'} headings={[]} canManage onNavigate={vi.fn()} />);
+    const source = container.querySelector("picture source");
+    expect(source?.getAttribute("media")).toBe("(max-width: 600px)");
+    const mobileSvg = atob(source?.getAttribute("srcset")?.split(",")[1] ?? "");
+    expect(mobileSvg).toContain('viewBox="0 0 400 660"');
+  });
+
+  it("offers a keyboard-accessible full-size scroll view for workflow diagrams", () => {
+    const { container } = render(<HelpMarkdown source={'![workflow](./media/first-job.svg)'} headings={[]} canManage onNavigate={vi.fn()} />);
+    const summary = container.querySelector("details > summary");
+    expect(summary?.textContent).toBe("View full-size diagram");
+    fireEvent.click(summary!);
+    const details = container.querySelector("details");
+    expect(details).toHaveAttribute("open");
+    expect(container.querySelector("details img")).toHaveStyle({ width: "820px", maxWidth: "none" });
+    const region = screen.getByRole("region", { name: "Full-size diagram, scroll horizontally if needed" });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toHaveStyle({ maxWidth: "100%", overflowX: "auto" });
+  });
+
   it("allows readers to follow alerts but blocks manager routes", () => {
     const navigate = vi.fn();
     render(<HelpMarkdown source="[Alerts](#/alerts) [Jobs](#/jobs) [Settings](#/settings)" headings={[]} canManage={false} onNavigate={navigate} />);

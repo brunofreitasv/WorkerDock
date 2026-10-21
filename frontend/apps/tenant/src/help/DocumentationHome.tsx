@@ -4,6 +4,7 @@ import type { Language } from "@workerdock/ui";
 import { helpGroups, helpTopics } from "./topics";
 import { searchHelpTopics } from "./search";
 import { documentationCopy } from "./documentationCopy";
+import { SearchResultText } from "./SearchResultText";
 
 type Props = {
   language: Language;
@@ -70,12 +71,12 @@ export function DocumentationHome({ language, canManage, onNavigate }: Props): R
           <Paper variant="outlined" sx={{ p: 2 }}>
             <Stack spacing={0.75}>
               <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
-                <a href={`#/help:${topic.slug}`} onClick={event => { event.preventDefault(); onNavigate(`help:${topic.slug}`); }} style={{ fontWeight: 650 }}>{topic.title[language]}</a>
-                <Typography variant="caption" color="text.secondary">{groupTitle(topic.group, language)}</Typography>
+                <a href={`#/help:${topic.slug}`} onClick={event => { event.preventDefault(); onNavigate(`help:${topic.slug}`); }} style={{ fontWeight: 650 }}><SearchResultText text={topic.title[language]} query={query} /></a>
+                <Typography variant="caption" color="text.secondary"><SearchResultText text={groupTitle(topic.group, language)} query={query} /></Typography>
                 <Chip size="small" variant="outlined" label={topic.requiredRole === "Manage" ? copy.manage : copy.read} />
               </Box>
-              <Typography variant="body2" sx={{ fontWeight: 500 }}>{topic.summary[language]}</Typography>
-              <Typography variant="body2" color="text.secondary">{excerpt}</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 500 }}><SearchResultText text={topic.summary[language]} query={query} /></Typography>
+              <Typography variant="body2" color="text.secondary"><SearchResultText text={excerpt} query={query} /></Typography>
             </Stack>
           </Paper>
         </Box>)}</Stack> : <Paper variant="outlined" sx={{ p: 3 }}>

@@ -31,10 +31,20 @@ describe("tenant Documentation home", () => {
     expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
     const results = screen.getByRole("region", { name: "Search results" });
     expect(within(results).getAllByRole("link")[0].textContent).toMatch(/SQL Server job/i);
-    expect(within(results).getByText(helpTopics.find(topic => topic.slug === "sql-jobs")!.summary.en)).toBeTruthy();
+    const sqlSummary = helpTopics.find(topic => topic.slug === "sql-jobs")!.summary.en;
+    expect(within(results).getByText((_content, element) => element?.tagName === "P" && element.textContent === sqlSummary)).toBeTruthy();
     expect(within(results).getAllByText(/Create|configure|SQL Server/i).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
     expect(search).toHaveProperty("value", "");
+  });
+
+  it("indexes and safely highlights the topic group in search results", () => {
+    const { container } = render(<HelpPage language="en" canManage onNavigate={navigate} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search documentation" }), { target: { value: "operate" } });
+    const results = screen.getByRole("region", { name: "Search results" });
+    expect(within(results).getAllByRole("link")[0].textContent).toBe("Understand the dashboard");
+    expect(within(results).getAllByText("Operate", { selector: "mark" }).length).toBeGreaterThan(0);
+    expect(container.querySelector("script, img[onerror]")).toBeNull();
   });
 
   it.each([["en", "No documentation matched your search."], ["pt-BR", "Nenhum documento corresponde à sua pesquisa."]] as const)("offers a useful empty search state in %s", (language, message) => {

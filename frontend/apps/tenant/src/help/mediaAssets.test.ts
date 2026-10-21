@@ -12,6 +12,7 @@ describe("documentation media", () => {
     const names = ["first-job", "execution-lifecycle", "input-choice", "schedule-flow", "alert-delivery"];
     for (const name of names) {
       expect(images.some(image => image.src === `./media/${name}.svg`), `${name} is referenced by a guide`).toBe(true);
+      expect(localMedia[`./media/${name}-mobile.svg`], `${name} has a narrow reflow`).toBeDefined();
     }
   });
 

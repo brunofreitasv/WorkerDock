@@ -5,7 +5,7 @@ import { helpTopics, type HelpTopic } from "./topics";
 export type SearchResult = {
   topic: HelpTopic;
   excerpt: string;
-  matchField: "title" | "keywords" | "summary" | "body";
+  matchField: "title" | "keywords" | "summary" | "body" | "category";
 };
 
 const weights: Record<SearchResult["matchField"], number> = {
@@ -13,6 +13,7 @@ const weights: Record<SearchResult["matchField"], number> = {
   keywords: 4,
   summary: 3,
   body: 1,
+  category: 0.5,
 };
 
 function normalize(value: string): string {
@@ -61,6 +62,7 @@ export function searchHelpTopics(
       keywords: normalize(topic.keywords[language].join(" ")),
       summary: normalize(topic.summary[language]),
       body: normalize(body),
+      category: normalize(topic.category[language]),
     };
     const termFields = terms.map((term) =>
       (Object.keys(weights) as SearchResult["matchField"][])

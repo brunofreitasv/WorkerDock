@@ -22,9 +22,11 @@ describe("documentation search", () => {
     expect(searchHelpTopics("en", "dashboard missingword")).toEqual([]);
   });
 
-  it("does not search group labels as a match field", () => {
-    expect(searchHelpTopics("en", "operate")).toEqual([]);
-    expect(searchLegacyHelpTopics("en", "operate")).toEqual([]);
+  it("matches group labels at a lower rank than article content", () => {
+    const categoryResults = searchHelpTopics("en", "operate");
+    expect(categoryResults[0]?.topic.slug).toBe("dashboard");
+    expect(categoryResults[0]?.matchField).toBe("category");
+    expect(searchLegacyHelpTopics("en", "operate").map(topic => topic.slug)).toContain("dashboard");
   });
 
   it("matches Portuguese terms without accents", () => {

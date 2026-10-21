@@ -218,7 +218,7 @@ export default function App() {
     : active === "monitoring" || active.startsWith("execution:") ? "monitoring"
     : active === "workers" ? "workers"
     : active === "audit" ? "audit"
-    : active === "alerts" ? "alerts"
+    : active === "alerts" ? "alert-rules"
     : active === "templates" ? "templates"
     : active === "jobs" ? "jobs"
     : active === "settings" && settingsTab === "profiles" ? "sql-profiles"

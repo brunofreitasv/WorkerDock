@@ -2,6 +2,17 @@ import { expect, test } from "@playwright/test";
 
 test.describe.configure({ mode: "serial" });
 
+async function recordScrollBehavior(page: import("@playwright/test").Page) {
+  await page.evaluate(() => {
+    const scrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (options?: ScrollIntoViewOptions) {
+      document.documentElement.dataset.lastScrollBehavior = typeof options === "object" ? options.behavior ?? "auto" : "auto";
+      document.documentElement.dataset.lastScrollTarget = this.id;
+      return scrollIntoView.call(this, options);
+    };
+  });
+}
+
 async function openApp(page: import("@playwright/test").Page, hash: string, canManage = false) {
   const documentationRequests: string[] = [];
   page.on("request", request => {
@@ -11,7 +22,8 @@ async function openApp(page: import("@playwright/test").Page, hash: string, canM
     }
   });
   await page.route("**/api/**", route => {
-    if (new URL(route.request().url()).pathname === "/api/session") {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/session") {
       return route.fulfill({ json: {
         authenticated: false,
         canRead: true,
@@ -20,6 +32,9 @@ async function openApp(page: import("@playwright/test").Page, hash: string, canM
         language: "en",
         timeZone: "UTC",
       } });
+    }
+    if (["/api/alerts/incidents", "/api/alerts/deliveries", "/api/alert-rules", "/api/alert-sinks"].includes(pathname)) {
+      return route.fulfill({ json: [] });
     }
     return route.fulfill({ json: {} });
   });
@@ -43,6 +58,14 @@ test("English readers can search, follow guides, use the outline, and recover fr
 
   await page.goto("/#/help:monitoring");
   await expect(page.getByRole("heading", { name: "Monitor executions" })).toBeVisible();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await recordScrollBehavior(page);
+  await page.getByRole("link", { name: "Operate and monitor" }).click();
+  await expect(page).toHaveURL(/#\/help:monitoring$/);
+  await expect(page.locator("#topic-rail")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-last-scroll-behavior", "auto");
+  await expect(page.locator("html")).toHaveAttribute("data-last-scroll-target", "topic-rail");
+  await expect(page.getByRole("heading", { name: "Monitor executions" })).toBeVisible();
   const outline = page.getByRole("navigation", { name: "On this page" });
   const firstOutlineLink = outline.getByRole("link").first();
   await expect(firstOutlineLink).toBeVisible();
@@ -61,6 +84,12 @@ test("English readers can search, follow guides, use the outline, and recover fr
   await page.getByRole("button", { name: "Documentation for this page" }).click();
   await expect(page).toHaveURL(/#\/help:dashboard$/);
   await expect(page.getByRole("heading", { name: "Understand the dashboard" })).toBeVisible();
+  await page.getByRole("link", { name: "Alerts", exact: true }).click();
+  await expect(page).toHaveURL(/#\/alerts$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Alerts" })).toBeVisible();
+  await page.getByRole("button", { name: "Documentation for this page" }).click();
+  await expect(page).toHaveURL(/#\/help:alert-rules$/);
+  await expect(page.getByRole("heading", { name: "Create alert rules" })).toBeVisible();
   expect(documentationRequests).toEqual([]);
 });
 
@@ -82,11 +111,21 @@ test("Portuguese deep links, keyboard navigation, and long labels fit a narrow v
   await expect(page).toHaveURL(/#\/help:settings$/);
   await expect(page.getByRole("heading", { name: "Gerencie as configurações do tenant" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "pt-BR");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await recordScrollBehavior(page);
+  await page.getByRole("link", { name: "Administração" }).last().click();
+  const topicDetails = page.locator("details#mobile-topic-rail");
+  await expect(topicDetails).toHaveAttribute("open", "");
+  await expect(topicDetails.getByRole("navigation", { name: "Explorar tópicos" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-last-scroll-behavior", "auto");
+  await expect(page.locator("html")).toHaveAttribute("data-last-scroll-target", "mobile-topic-rail");
   await page.getByRole("link", { name: "Documentação" }).last().click();
   await expect(page.getByRole("heading", { level: 1, name: "Documentação" })).toBeVisible();
   await page.goto("/#/help:settings");
-  const topicSummary = page.locator("summary").filter({ hasText: "Explorar tópicos" });
-  await topicSummary.focus();
+  await page.locator("summary").filter({ hasText: "Nesta página" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("navigation", { name: "Nesta página" })).toBeVisible();
+  await page.locator("summary").filter({ hasText: "Explorar tópicos" }).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("navigation", { name: "Explorar tópicos" })).toBeVisible();
 

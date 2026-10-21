@@ -562,6 +562,7 @@ export function searchHelpTopics(
     const text = normalize(
       [
         topic.title[language],
+        topic.category[language],
         topic.summary[language],
         ...topic.keywords[language],
         body,
