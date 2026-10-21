@@ -54,9 +54,17 @@ describe("tenant Documentation home", () => {
     }
   });
 
-  it.each([["en", "Unknown documentation topic", "All documentation topics"], ["pt-BR", "Tópico de documentação não encontrado", "Todos os tópicos de documentação"]] as const)("shows localized recovery for an invalid topic in %s", (language, missing, index) => {
+  it.each([["en", "Unknown documentation topic", "Search documentation"], ["pt-BR", "Tópico de documentação não encontrado", "Pesquisar documentação"]] as const)("shows localized grouped recovery and search for an invalid topic in %s", (language, missing, search) => {
     render(<HelpPage language={language} slug="bad:slug" canManage={false} onNavigate={navigate} />);
     expect(screen.getByText(missing)).toBeTruthy();
-    expect(screen.getByRole("button", { name: index })).toBeTruthy();
+    expect(screen.getByRole("searchbox", { name: search })).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: /Get oriented|Conheça o WorkerDock/ }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /All help topics|Todos os tópicos de ajuda/i })).toBeNull();
+  });
+
+  it.each([["workers-audit", "Check worker health"], ["alerts", "Create alert rules"]] as const)("resolves legacy alias %s to canonical article %s", (slug, title) => {
+    render(<HelpPage language="en" slug={slug} canManage onNavigate={navigate} />);
+    expect(screen.getByRole("heading", { name: title, level: 1 })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toBeTruthy();
   });
 });
