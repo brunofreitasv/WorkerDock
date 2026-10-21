@@ -216,7 +216,8 @@ export default function App() {
       (active === "settings" ? t.settings : active.startsWith("execution:") ? "Execution details" : t.dashboard);
   const contextualHelp = active === "dashboard" ? "dashboard"
     : active === "monitoring" || active.startsWith("execution:") ? "monitoring"
-    : active === "workers" || active === "audit" ? "workers-audit"
+    : active === "workers" ? "workers"
+    : active === "audit" ? "audit"
     : active === "alerts" ? "alerts"
     : active === "templates" ? "templates"
     : active === "jobs" ? "jobs"
