@@ -563,7 +563,6 @@ export function searchHelpTopics(
       [
         topic.title[language],
         topic.summary[language],
-        topic.category[language],
         ...topic.keywords[language],
         body,
       ].join(" "),

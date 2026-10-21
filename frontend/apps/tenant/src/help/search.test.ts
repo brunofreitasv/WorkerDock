@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { searchHelpTopics } from "./search";
-import { helpTopics } from "./topics";
+import {
+  helpTopics,
+  searchHelpTopics as searchLegacyHelpTopics,
+} from "./topics";
 
 describe("documentation search", () => {
   it("requires all terms even when they match the title and body separately", () => {
@@ -21,6 +24,7 @@ describe("documentation search", () => {
 
   it("does not search group labels as a match field", () => {
     expect(searchHelpTopics("en", "operate")).toEqual([]);
+    expect(searchLegacyHelpTopics("en", "operate")).toEqual([]);
   });
 
   it("matches Portuguese terms without accents", () => {
