@@ -4,6 +4,10 @@
 
 Usar um modelo instalado para salvar um rascunho, validá-lo, ativar a tarefa e solicitar uma execução manual.
 
+![Cinco etapas: escolha um modelo, salve o rascunho desativado, valide e revise, ative quando estiver pronto e execute para monitorar.](./media/first-job.svg)
+
+*Figura: Um caminho seguro para criar a primeira tarefa.* Mantenha o rascunho desativado até revisar a configuração e seus possíveis efeitos externos.
+
 ## Antes de começar
 
 Você precisa de acesso de Gerenciar e de um modelo selecionável neste tenant. Escolha uma configuração de exemplo inofensiva e confirme se qualquer destino externo está autorizado antes de ativar o trabalho.
@@ -17,6 +21,10 @@ Você precisa de acesso de Gerenciar e de um modelo selecionável neste tenant. 
 5. Escolha **Executar agora**, confirme a janela e anote o identificador de execução aceito. Use o [Painel](#/dashboard) para localizar a execução.
 
 ## Exemplo
+
+![Assistente de tarefas aberto na seleção do modelo, com uma indicação numerada do ponto inicial.](./media/wizard-job.png)
+
+*Figura: Comece pela etapa de modelo.* A indicação numerada mostra a primeira escolha; as próximas etapas validam, revisam e ativam o rascunho.
 
 Crie `demo-guia` usando um modelo de exemplo selecionável e uma entrada sintética, como `região = demo`. Salve e valide o rascunho antes de ativá-lo. Execute-o uma vez somente se o modelo escolhido não tiver efeitos externos indesejados.
 

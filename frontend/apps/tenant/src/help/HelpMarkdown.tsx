@@ -25,7 +25,7 @@ export function HelpMarkdown({ source, headings = parseArticleHeadings(source), 
     },
     img: ({ src, alt }) => {
       const safeSrc = src ? getHelpMedia(src) : undefined;
-      return safeSrc ? <img src={safeSrc} alt={alt ?? ""} loading="lazy" /> : <span>{alt}</span>;
+      return safeSrc ? <img src={safeSrc} alt={alt ?? ""} loading="lazy" style={{ display: "block", width: "100%", maxWidth: "100%", height: "auto", marginInline: "auto" }} /> : <span>{alt}</span>;
     },
   }}>{safeSource}</ReactMarkdown></div>;
 }

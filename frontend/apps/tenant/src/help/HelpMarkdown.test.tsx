@@ -43,6 +43,13 @@ describe("HelpMarkdown", () => {
     expect(container.textContent).toContain("remote");
   });
 
+  it("scales bundled documentation diagrams to the article width", () => {
+    const { container } = render(<HelpMarkdown source={'![workflow](./media/first-job.svg)'} headings={[]} canManage onNavigate={vi.fn()} />);
+    const image = container.querySelector("img");
+    expect(image).not.toBeNull();
+    expect(image).toHaveStyle({ width: "100%", maxWidth: "100%", height: "auto" });
+  });
+
   it("allows readers to follow alerts but blocks manager routes", () => {
     const navigate = vi.fn();
     render(<HelpMarkdown source="[Alerts](#/alerts) [Jobs](#/jobs) [Settings](#/settings)" headings={[]} canManage={false} onNavigate={navigate} />);

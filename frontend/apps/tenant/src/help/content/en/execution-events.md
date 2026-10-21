@@ -4,6 +4,10 @@
 
 Trace an execution through its attempts and status timeline using the safe details shown by the tenant UI.
 
+![Execution lifecycle from accepted to queued to running and a terminal state, with attempts and timeline providing evidence.](./media/execution-lifecycle.svg)
+
+*Figure: Follow recorded execution states.* Attempts describe work tried; the timeline lists state changes recorded by the service.
+
 ## Before you start
 
 Read access is sufficient. Start from a recent execution on the [Dashboard](#/dashboard). The panel exposes summaries, not raw error text, request bodies, SQL, configuration, or secrets.
@@ -16,6 +20,10 @@ Read access is sufficient. Start from a recent execution on the [Dashboard](#/da
 4. If the result is uncertain or stop was requested, use the correlation ID when asking an administrator to trace the operation.
 
 ## Example
+
+![Execution details with a numbered marker beside the timeline, showing synthetic queued, running, and succeeded events.](./media/execution-timeline.png)
+
+*Figure: Read the timeline with attempt details.* The sample uses synthetic execution data; a recorded success does not prove an external side effect.
 
 A synthetic run may show `Queued → Running → Failed`, attempt 1 with safe code `Timeout`, and certainty `Unknown`. This means the UI cannot confirm the remote outcome; check the destination system before retrying work that could repeat side effects.
 

@@ -8,6 +8,10 @@
 
 Usuários com acesso de leitura podem consultar este guia. Gerentes configuram entradas, visualizam valores dinâmicos e salvam a tarefa.
 
+![Selecione um modelo SQL ou HTTP, declare uma entrada, escolha uma origem compatível, valide, visualize e salve o rascunho.](./media/input-choice.svg)
+
+*Figura: Associe uma origem compatível a cada entrada declarada.* O esquema do modelo define as opções disponíveis; parâmetros SQL permanecem separados do texto da consulta.
+
 ## Etapas
 
 1. Abra [Tarefas](#/jobs), selecione um modelo e confira os campos declarados em **Configuração**.

@@ -8,6 +8,10 @@ Manage access and a template with declared inputs are required to configure a jo
 
 Read users can review this guide. Managers configure inputs, preview dynamic values, and save the job.
 
+![Select a SQL or HTTP template, declare an input, choose one supported source, validate and preview, then save a draft.](./media/input-choice.svg)
+
+*Figure: Bind one supported source to each declared input.* The template schema determines which choices are available, and SQL parameters remain separate from query source text.
+
 ## Steps
 
 1. Open [Jobs](#/jobs), select a template, and inspect **Configuration** for declared fields.

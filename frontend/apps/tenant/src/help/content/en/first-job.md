@@ -4,6 +4,10 @@
 
 Use an installed template to save a draft, validate it, enable the job, and request one manual run.
 
+![Five steps: choose a template, save a disabled draft, validate and review, enable when ready, then run and monitor.](./media/first-job.svg)
+
+*Figure: A safe first-job path.* Keep the draft disabled until its configuration and possible external effects have been reviewed.
+
 ## Before you start
 
 You need Manage access and a template that is selectable in this tenant. Choose a harmless example configuration and confirm that any external destination is approved before enabling work.
@@ -17,6 +21,10 @@ You need Manage access and a template that is selectable in this tenant. Choose 
 5. Choose **Run now**, confirm the dialog, and note the accepted execution identifier. Use the [Dashboard](#/dashboard) to locate the execution.
 
 ## Example
+
+![The job wizard opened at the template selection step, with a numbered note identifying where to begin.](./media/wizard-job.png)
+
+*Figure: Start in the template step.* The numbered marker identifies the first choice; the remaining wizard steps validate, review, and activate the draft.
 
 Create `guide-demo` from a selectable sample template with a synthetic input such as `region = demo`. Save and validate the draft before enabling it. Run it once only if the selected template has no unintended external effects.
 

@@ -6,6 +6,10 @@ Você precisa de acesso de gerenciamento e de um rascunho de tarefa. Abra [Taref
 
 Leitores podem consultar este guia. Criar ou alterar um agendamento e visualizar suas ocorrências exige acesso de gerenciamento.
 
+![Escolha cron ou uma única execução, defina o fuso, visualize horários UTC, configure a política e salve, revise e ative.](./media/schedule-flow.svg)
+
+*Figura: Confira os horários antes de ativar.* A pré-visualização mostra instantes e deslocamentos previstos; ela não inicia uma execução.
+
 ## Etapas
 
 1. Escolha **Recorrente (cron)** para um agendamento recorrente ou **Uma vez** para uma data e hora local.

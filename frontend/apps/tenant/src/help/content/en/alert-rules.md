@@ -8,6 +8,10 @@ You need **Manage** access, a webhook sink, and an approved destination. Review 
 
 Manage users create, edit, and enable rules. Read users can review incidents and deliveries. A new rule is saved disabled so it can be reviewed before opening incidents.
 
+![An enabled webhook sink is selected for a disabled rule; after review, matching events open incidents and the outbox worker attempts delivery.](./media/alert-delivery.svg)
+
+*Figure: Rule activation starts the alert delivery path.* Evaluation and delivery depend on the SQL service and outbox worker being available.
+
 ## Steps
 
 1. Open [Alerts](#/alerts) and choose **New rule**. Enter a name, select an enabled sink, and choose repeated failure, retry exhausted, timeout, long running, missed execution, or worker unavailable.
@@ -16,6 +20,10 @@ Manage users create, edit, and enable rules. Read users can review incidents and
 4. Choose **Enable rule** only when ready. Activation is a separate explicit action. Incident processing depends on the SQL service and outbox worker.
 
 ## Example
+
+![The alert rule form with a numbered marker at the rule name field and a synthetic operations sink.](./media/alert-rule.png)
+
+*Figure: Begin with a disabled rule.* Review the condition and delivery destination before explicitly enabling it.
 
 To detect three repeated failures within 15 minutes, choose **Repeated failure**, threshold `3`, window `900` seconds, an enabled operations sink, and a grace period suited to your response process. Save, inspect the disabled rule, then enable it. For **Long running**, use threshold `1` and choose the window as the age limit.
 

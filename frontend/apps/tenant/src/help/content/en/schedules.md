@@ -6,6 +6,10 @@ You need Manage access and a job draft. Open [Jobs](#/jobs) and turn on **Use a 
 
 Readers can view this guide. Creating or changing a schedule and previewing its occurrences require Manage access.
 
+![Choose cron or one-time scheduling, set a time zone, preview UTC occurrences, set policy, then save, review, and enable.](./media/schedule-flow.svg)
+
+*Figure: Verify schedule times before enabling.* The preview shows predicted instants and offsets; it never starts an execution.
+
 ## Steps
 
 1. Choose **Recurring (cron)** for a recurring schedule or **One time** for a single local date and time.
