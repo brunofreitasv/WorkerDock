@@ -1,20 +1,38 @@
 ## Prerequisites
 
-You need Manage access to change tenant settings. Open [Settings](#/settings); its tabs are **Settings**, **Secret provider**, **Outbound policy**, **SQL profiles**, and **Retention**. The app header also has **Language** and **Time zone** preferences for your own display.
+Sign in to the tenant panel. You need **Manage** access to save tenant settings. Open [Settings](#/settings) and select **General**, **Secret provider**, **Outbound policy**, **SQL profiles**, or **Retention**. Your own **Language** and **Time zone** display preferences are in the app header.
 
 ## Role
 
-Readers can read this guide. Saving tenant settings, changing outbound policy, managing SQL profiles, and editing retention require Manage access. Deployment administrators configure the vault provider and archive storage location.
+Read users can open Documentation and review this guide. Settings pages require Manage access; deployment administrators own provider credentials and archive storage configuration. A Read user may see a permission message if they open a settings route directly.
 
 ## Steps
 
-1. In the **Settings** tab, update **Display name** or **Default display time zone**, then save. Use the app header's **Language** and **Time zone** preferences for your own display.
-2. In **Secret provider**, review the configured provider and its public settings. This page does not reveal or accept secret values; configure credentials through the deployment's secret provider.
-3. In **Outbound policy**, select **tenant-jobs** or **tenant-alerts**, then review allowed hosts, ports, private CIDRs, and whether HTTP is allowed. Save only the destinations required by your workflows. Loopback, metadata, and link-local destinations remain blocked.
-4. In **SQL profiles**, create or update a named profile, select allowed catalogs and authentication settings, and use the diagnostic when needed. Profile credentials use logical secret references.
-5. In **Retention and archive**, set the number of days to keep execution logs, execution history, and audit history. You may enable archiving before deletion and set archive retention. The storage location is administrator-configured and is not available in this page.
-6. Save changes in the relevant area. If the page reports a stale version, reload and review the current values before editing again.
+1. In **General**, set the tenant's display name and default display time zone, then save. This time zone is a tenant default; each person can choose a display time zone in the header.
+2. In **Secret provider**, review the installed provider and public options. The page never displays resolved credentials. Provider implementation, credential mappings, and service identity are configured by deployment administrators.
+3. In **Outbound policy**, select **tenant-jobs** or **tenant-alerts**. Review allowed hosts, ports, private CIDRs, and whether HTTP is permitted. Add only destinations the corresponding workflow needs. Hard-denied loopback, metadata, and link-local addresses remain blocked.
+4. In **SQL profiles**, review named profiles and allowed catalogs. Configure profile credentials through logical secret references; use the diagnostic to check connectivity when the installed adapter supports it. See [SQL Server profiles](#/help:sql-profiles).
+5. In **Retention**, set record and archive retention. The archive path and service identity are deployment configuration, not browser settings. See [Retention and archives](#/help:retention) before enabling archive-before-delete.
+6. Save in the section you changed. Check for a success message before leaving the page.
 
-## Result
+## Worked example
 
-Tenant preferences and operational policies are saved as versioned settings. Changing them does not turn development memory-mode behavior into proof of live database, secret-provider, outbound delivery, or archive storage readiness. See [SQL Server jobs](#/help:sql-jobs), [HTTP jobs](#/help:http-jobs), and [alert setup](#/help:alerts) for related workflows.
+Suppose a job calls `reports.example.test` over HTTPS and sends alerts to `notify.example.test`. In **Outbound policy**, select **tenant-jobs**, add only the reports host and required port, then save. Select **tenant-alerts** separately and allow only the notification host. This keeps job execution and alert delivery policies independently reviewable. Configure each job's secret reference in its own integration workflow; do not enter secret values into public settings.
+
+## Verify
+
+Return to each settings section and confirm the saved value is displayed. The **General** section reports its current tenant values; policy and profile pages reload the server's saved revision. A successful form save confirms that the API accepted the setting, but it does not prove a downstream service or production secret provider is reachable.
+
+## Recover
+
+- If saving reports that settings changed elsewhere or a stale version, reload the section, compare the latest values, reapply only your intended changes, and save again. The API uses version checks to prevent silently overwriting another user's update.
+- If a settings page shows a permission error, ask a tenant administrator to grant the appropriate Manage role through the identity provider. Documentation access does not grant configuration access.
+- If a provider or SQL diagnostic is unavailable, check whether the required adapter and deployment configuration are installed. Development memory mode is not evidence of production database, vault, egress, or archive readiness.
+- If a destination is rejected, review the selected policy and exact host/port. Private destinations require explicit policy configuration; hard-denied addresses cannot be enabled in the tenant UI.
+
+## Related guides
+
+- [Manage SQL Server profiles](#/help:sql-profiles)
+- [Configure outbound destinations](#/help:outbound-policy)
+- [Manage retention and archives](#/help:retention)
+- [Review audit history](#/help:audit)
