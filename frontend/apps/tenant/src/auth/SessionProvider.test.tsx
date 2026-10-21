@@ -42,7 +42,7 @@ test("viewer can navigate dashboard monitoring and audit while management is hid
   session();
   expect(await screen.findByRole("link", { name: "Dashboard" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Monitoring" })).toBeVisible();
-  expect(screen.getByRole("link", { name: "Help" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Documentation" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Audit" })).toBeVisible();
   expect(
     screen.queryByRole("link", { name: "Settings" }),
@@ -55,11 +55,11 @@ test("viewer can navigate dashboard monitoring and audit while management is hid
   expect(await screen.findByRole("heading", { name: "Audit" })).toBeVisible();
 });
 
-test("viewer opens a deep-linked help topic with Help selected and contextual dashboard help", async () => {
+test("viewer opens a deep-linked documentation topic with Documentation selected and contextual help", async () => {
   window.history.replaceState(null, "", "#/help:dashboard");
   session();
   expect(await screen.findByRole("heading", { name: "Understand the dashboard" })).toBeVisible();
-  expect(screen.getByRole("link", { name: "Help" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getAllByRole("link", { name: "Documentation" }).find(link => link.getAttribute("aria-current") === "page")).toBeDefined();
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "Language" }), "pt-BR");
   expect(await screen.findByRole("heading", { name: "Entenda o painel" })).toBeVisible();
   expect(window.location.hash).toBe("#/help:dashboard");
@@ -68,7 +68,7 @@ test("viewer opens a deep-linked help topic with Help selected and contextual da
 test("dashboard contextual help opens its registered guide", async () => {
   window.history.replaceState(null, "", "#/dashboard");
   session();
-  await userEvent.click(await screen.findByRole("button", { name: "Help for this page" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Documentation for this page" }));
   expect(await screen.findByRole("heading", { name: "Understand the dashboard" })).toBeVisible();
   expect(window.location.hash).toBe("#/help:dashboard");
 });
@@ -82,8 +82,8 @@ test("execution contextual help opens the monitoring guide", async () => {
     return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
   }));
   render(<SessionProvider><App /></SessionProvider>);
-  await userEvent.click(await screen.findByRole("button", { name: "Help for this page" }));
-  expect(screen.getAllByRole("heading", { name: "Monitor jobs and executions" }).length).toBeGreaterThan(0);
+  await userEvent.click(await screen.findByRole("button", { name: "Documentation for this page" }));
+  expect(screen.getByRole("heading", { name: "Monitor executions", level: 1 })).toBeVisible();
   expect(window.location.hash).toBe("#/help:monitoring");
 });
 
@@ -101,17 +101,17 @@ test("Profiles-tab contextual help opens the SQL profiles guide", async () => {
   }));
   render(<SessionProvider><App /></SessionProvider>);
   await userEvent.click(await screen.findByRole("button", { name: "SQL profiles" }));
-  await userEvent.click(await screen.findByRole("button", { name: "Help for this page" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Documentation for this page" }));
   expect(screen.getAllByRole("heading", { name: "Manage SQL Server profiles" }).length).toBeGreaterThan(0);
   expect(window.location.hash).toBe("#/help:sql-profiles");
 });
 
-test.each(["#/help:unknown", "#/help:", "#/help:bad%ZZslug"])("recovers from malformed help route %s", async hash => {
+test.each(["#/help:unknown", "#/help:", "#/help:bad%ZZslug"])("recovers from malformed documentation route %s", async hash => {
   localStorage.setItem("workerdock.language", "en");
   window.history.replaceState(null, "", hash);
   session();
-  expect(await screen.findByText("Unknown help topic")).toBeVisible();
-  expect(screen.getByRole("link", { name: "Help" })).toHaveAttribute("aria-current", "page");
+  expect(await screen.findByText("Unknown documentation topic")).toBeVisible();
+  expect(screen.getAllByRole("link", { name: "Documentation" }).find(link => link.getAttribute("aria-current") === "page")).toBeDefined();
 });
 test("anonymous mode shows management and a translated public-access status", async () => {
   session(true, "Anonymous", false);
