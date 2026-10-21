@@ -115,7 +115,13 @@ public sealed class DynamicValuePersistenceTests
     [Theory]
     [InlineData("error")]
     [InlineData("first-start")]
-    public async Task Execution_value_state_trigger_rejects_nulling_populated_sentinel_values(string stateKind)
+    [InlineData("context-case")]
+    [InlineData("context-trailing-space")]
+    [InlineData("snapshot-case")]
+    [InlineData("snapshot-trailing-space")]
+    [InlineData("error-case")]
+    [InlineData("error-trailing-space")]
+    public async Task Execution_value_state_trigger_rejects_rewriting_populated_values(string stateKind)
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
@@ -123,16 +129,31 @@ public sealed class DynamicValuePersistenceTests
         await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = Guid.NewGuid();
         var executionId = Guid.NewGuid();
+        var context = stateKind.StartsWith("context", StringComparison.Ordinal) ? "N'{\"triggerKind\":\"Manual\"}'" : "NULL";
+        var snapshot = stateKind.StartsWith("snapshot", StringComparison.Ordinal) ? "N'{\"value\":\"A\"}'" : "NULL";
+        var resolutionError = stateKind == "error" ? "N''" : stateKind.StartsWith("error-", StringComparison.Ordinal) ? "N'Error'" : "NULL";
         await database.ExecuteAsync($$"""
             INSERT [workerdock].Jobs(JobId,CurrentRevision,Enabled,Archived,ConcurrencyLimit) VALUES('{{jobId}}',NULL,0,0,1);
             INSERT [workerdock].JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc)
             VALUES('{{jobId}}',1,N'immutable',N'workerdock.http',N'1.0.0',N'{}',NULL,N'{}',SYSUTCDATETIME());
             UPDATE [workerdock].Jobs SET CurrentRevision=1 WHERE JobId='{{jobId}}';
-            INSERT [workerdock].Executions(ExecutionId,JobId,JobRevision,TriggerKind,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc,ValueResolutionError,FirstStartedAtUtc)
-            VALUES('{{executionId}}','{{jobId}}',1,N'Manual',N'immutability-key',N'Queued',N'Known',SYSUTCDATETIME(),NEWID(),SYSUTCDATETIME(),{{(stateKind == "error" ? "N''" : "NULL")}},{{(stateKind == "first-start" ? "CONVERT(datetime2(7),'0001-01-01T00:00:00')" : "NULL")}});
+            INSERT [workerdock].Executions(ExecutionId,JobId,JobRevision,TriggerKind,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc,ValueContextJson,FirstStartedAtUtc,ValueSnapshotJson,ValueResolutionError)
+            VALUES('{{executionId}}','{{jobId}}',1,N'Manual',N'immutability-key',N'Queued',N'Known',SYSUTCDATETIME(),NEWID(),SYSUTCDATETIME(),{{context}},{{(stateKind == "first-start" ? "CONVERT(datetime2(7),'0001-01-01T00:00:00')" : "NULL")}},{{snapshot}},{{resolutionError}});
             """);
 
-        var error = await Assert.ThrowsAsync<SqlException>(() => database.ExecuteAsync($"UPDATE [workerdock].Executions SET {(stateKind == "error" ? "ValueResolutionError=NULL" : "FirstStartedAtUtc=NULL")} WHERE ExecutionId='{executionId}'"));
+        var (column, replacement) = stateKind switch
+        {
+            "error" => ("ValueResolutionError", "NULL"),
+            "first-start" => ("FirstStartedAtUtc", "NULL"),
+            "context-case" => ("ValueContextJson", "N'{\"triggerKind\":\"manual\"}'"),
+            "context-trailing-space" => ("ValueContextJson", "N'{\"triggerKind\":\"Manual\"} '"),
+            "snapshot-case" => ("ValueSnapshotJson", "N'{\"value\":\"a\"}'"),
+            "snapshot-trailing-space" => ("ValueSnapshotJson", "N'{\"value\":\"A\"} '"),
+            "error-case" => ("ValueResolutionError", "N'error'"),
+            "error-trailing-space" => ("ValueResolutionError", "N'Error '"),
+            _ => throw new ArgumentOutOfRangeException(nameof(stateKind))
+        };
+        var error = await Assert.ThrowsAsync<SqlException>(() => database.ExecuteAsync($"UPDATE [workerdock].Executions SET {column}={replacement} WHERE ExecutionId='{executionId}'"));
 
         Assert.Equal(51061, error.Number);
     }

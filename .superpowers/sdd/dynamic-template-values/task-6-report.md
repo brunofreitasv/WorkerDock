@@ -2,31 +2,25 @@
 
 ## Result
 
-Implemented nullable dynamic plan persistence on immutable job revisions, binding-plan validation, dynamic payload reservation, execution value-state migration constraints and immutability, archive inclusion, and SQL fixture upgrades to migration 0009. Legacy fixed revisions remain null. No historical rows are backfilled.
+Dynamic plans are persisted as nullable sidecars on immutable job revisions. Execution context, first-start time, resolved snapshots, and resolution errors are persisted with immutability checks. Legacy records remain null; migration 0009 does not backfill historical values. Archive output retains execution context and snapshots without secrets.
 
-## RED / GREEN
+The Task 6 review follow-up was committed as `6ae7de9`. It fixed SQL trigger comparisons for populated empty-string and sentinel values, and validates job enablement using the active schedule state. An unscheduled job is validated as `Manual`; a scheduled job is validated as `Scheduled`.
 
-- RED: the new freeze regression initially failed to compile because `JobRevision.DynamicValues` did not exist yet.
-- GREEN: `dotnet test tests/WorkerDock.IntegrationTests --filter 'FullyQualifiedName~Freeze_clones_dynamic_value_plan|FullyQualifiedName~Dynamic_payload_reserves_snapshot_space'` passed (2/2).
-- GREEN: `dotnet test tests/WorkerDock.IntegrationTests --filter FullyQualifiedName~JobCommandTests` passed (22/22).
-- GREEN: `dotnet build WorkerDock.slnx` passed with 0 warnings and 0 errors.
+The later review found that SQL text equality can ignore case and trailing spaces. The trigger now compares the UTF-16 bytes of populated context, snapshot, and error text. Regression cases cover case-only and trailing-space rewrites as well as attempts to clear populated values.
 
-## SQL verification blocker
+## Verification
 
-The requested filters were run, but SQL fixture execution is unavailable in this environment:
+- Initial implementation: the freeze regression first failed to compile because `JobRevision.DynamicValues` was missing; after implementation, the freeze and dynamic payload tests passed (2/2), and `JobCommandTests` passed (22/22).
+- Current verification: `dotnet build WorkerDock.slnx -c Release --no-restore` passed with zero warnings and errors; `dotnet test tests/WorkerDock.IntegrationTests -c Release --no-build --filter 'Store!=Sql'` passed (351/351).
+- The SQL trigger regression cases compile, but SQL-backed persistence, migration, rollback, archive, lifecycle, and trigger tests could not execute. `WORKERDOCK_TEST_SQL` is unset; the local SQL service could not be used because integrated authentication failed with `Failed to generate SSPI context`. No SQL fixture was weakened.
+- The resolved snapshot cap and full execution-envelope checks were completed in Tasks 8 and 9 before dispatch, as recorded in their task reports. Their SQL restart/concurrency cases remain subject to the same SQL test prerequisite.
 
-- `dotnet test tests/WorkerDock.IntegrationTests --filter 'FullyQualifiedName~DynamicValuePersistenceTests|FullyQualifiedName~JobCommandTests|FullyQualifiedName~JobLifecycleTests'` compiled; 22 passed and 20 SQL tests were blocked at fixture setup.
-- `dotnet test tests/WorkerDock.IntegrationTests --filter 'FullyQualifiedName~MigrationTests|FullyQualifiedName~JobSqlIntegrationTests'` compiled; 3 passed and 13 SQL tests were blocked at fixture setup.
-- Blocker from `SqlDatabaseFixture`: `SQL_TEST_BLOCKED: configure WORKERDOCK_TEST_SQL for a disposable SQL Server 2022+ test instance.` No fixture was weakened.
+## Migration checksums
 
-SQL test coverage now includes save/load/duplicate preservation, null legacy rows after upgrade, refusal to roll back populated plans/context/snapshots, and archive JSON context/snapshot retention without secrets. These assertions compiled but could not execute without the SQL fixture prerequisite.
-
-Migration checksum verification:
-
-- `0009_dynamic_values.up.sql`: `BA69116D9F74F839666A7C2A9FFA274E144D6F5CAF070406B2ED36EBE845662F`
+- `0009_dynamic_values.up.sql`: `A2B10404556787FAEF7E54E6F883E48D735DEA3FD4B4676A37B4E79F71FB940A`
 - `0009_dynamic_values.down.sql`: `BC4F28E9212C2EDB56CA6F57627BC49F2E6F2929484C58D054381112F7D8B0F4`
-- Both manifest hashes match `Get-FileHash -Algorithm SHA256`. No migration files or hashes before 0009 changed.
+- The manifest contains these hashes; migration files and hashes before 0009 are unchanged.
 
 ## Remaining prerequisite
 
-Run the SQL-backed persistence, upgrade, rollback, retention archive, and lifecycle tests with `WORKERDOCK_TEST_SQL` configured before release.
+Run the SQL-backed Task 6 and related Tasks 8/9 suites with `WORKERDOCK_TEST_SQL` configured for a disposable SQL Server 2022+ instance.
