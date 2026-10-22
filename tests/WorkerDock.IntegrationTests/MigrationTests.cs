@@ -1,9 +1,92 @@
 using WorkerDock.Application.Common;
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 using WorkerDock.Infrastructure.Persistence;
 namespace WorkerDock.IntegrationTests;
 public sealed class MigrationTests
 {
+    [Theory]
+    [InlineData("DELETE FROM [workerdock].SchemaHistory WHERE MigrationId='0001_bootstrap'", "InvalidMigrationHistory")]
+    [InlineData("UPDATE [workerdock].SchemaHistory SET MigrationId='9999_unknown' WHERE MigrationId='0002_quartz'", "InvalidMigrationHistory")]
+    [InlineData("DELETE FROM [workerdock].SchemaHistory", "InvalidMigrationHistory")]
+    [InlineData("UPDATE [workerdock].SchemaHistory SET UpChecksum=REPLICATE('0',64) WHERE MigrationId='0002_quartz'", "MigrationChecksumMismatch")]
+    [InlineData("UPDATE [workerdock].SchemaHistory SET DownChecksum=REPLICATE('0',64) WHERE MigrationId='0002_quartz'", "MigrationChecksumMismatch")]
+    [Trait("Store", "Sql")]
+    public async Task History_hole_or_unknown_row_blocks_next_migration_before_write(string sql, string expectedCode)
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        await runner.ApplyAsync("tenant", "0002_quartz", default);
+        await database.ExecuteAsync(sql);
+        var before = await ReadHistoryAsync(database);
+
+        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "0003_execution", default));
+
+        Assert.Equal(expectedCode, error.Code);
+        Assert.Equal(before, await ReadHistoryAsync(database));
+        Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE object_id=OBJECT_ID(N'[workerdock].Executions')"));
+    }
+
+    [Fact]
+    [Trait("Store", "Sql")]
+    public async Task Wrong_instance_blocks_next_migration_before_write()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        await runner.ApplyAsync("tenant", "0001_bootstrap", default);
+        var before = await ReadHistoryAsync(database);
+        var wrong = new MigrationRunner(database.ConnectionString, Guid.NewGuid(), database.ScriptsRoot);
+
+        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await wrong.ApplyAsync("tenant", "0002_quartz", default));
+
+        Assert.Equal("TenantInstanceMismatch", error.Code);
+        Assert.Equal(before, await ReadHistoryAsync(database));
+    }
+
+    [Fact]
+    [Trait("Store", "Sql")]
+    public async Task Target_behind_installed_history_is_rejected()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        await runner.ApplyAsync("tenant", "0002_quartz", default);
+        var before = await ReadHistoryAsync(database);
+
+        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "0001_bootstrap", default));
+
+        Assert.Equal("MigrationTargetBehindCurrent", error.Code);
+        Assert.Equal(before, await ReadHistoryAsync(database));
+    }
+
+    [Theory]
+    [InlineData("CREATE SCHEMA [workerdock]")]
+    [InlineData("EXEC(N'CREATE SCHEMA [workerdock]'); EXEC(N'CREATE TABLE [workerdock].SchemaHistory(MigrationId nvarchar(100))')")]
+    [InlineData("EXEC(N'CREATE SCHEMA [workerdock]'); EXEC(N'CREATE TABLE [workerdock].TenantSettings(InstanceId uniqueidentifier)')")]
+    [Trait("Store", "Sql")]
+    public async Task Partial_schema_is_rejected_before_bootstrap_writes(string sql)
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        await database.ExecuteAsync(sql);
+        var before = await database.ScalarAsync("SELECT COUNT(*) FROM sys.objects WHERE schema_id=SCHEMA_ID(N'workerdock')");
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+
+        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "0001_bootstrap", default));
+
+        Assert.Equal("InvalidMigrationHistory", error.Code);
+        Assert.Equal(before, await database.ScalarAsync("SELECT COUNT(*) FROM sys.objects WHERE schema_id=SCHEMA_ID(N'workerdock')"));
+    }
+
+    private static async Task<string> ReadHistoryAsync(SqlDatabaseFixture database)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT MigrationId, UpChecksum, DownChecksum, AppliedAtUtc FROM [workerdock].SchemaHistory ORDER BY MigrationId FOR JSON PATH";
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -81,69 +164,4 @@ public sealed class MigrationTests
         Assert.Equal("InvalidDatabaseKind", error.Code);
     }
 
-    [Fact]
-    [Trait("Store", "Sql")]
-    public async Task Upgrade_creates_copy_only_backup_and_verifies_it()
-    {
-        var backupDirectory = Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SQL_BACKUP_UNC");
-        if (string.IsNullOrWhiteSpace(backupDirectory))
-            throw new InvalidOperationException("SQL_TEST_BLOCKED: configure WORKERDOCK_TEST_SQL_BACKUP_UNC for a new backup on a UNC share accessible to the disposable SQL Server and test process.");
-        await using var database = new SqlDatabaseFixture();
-        await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0001_bootstrap", default);
-        var packageRoot = CreateUpgradePackage(database.ScriptsRoot, 1, 10);
-        var backup = Path.Combine(backupDirectory, "WorkerDock_Test_" + Guid.NewGuid().ToString("N") + ".bak");
-        try
-        {
-            var upgrade = new MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(packageRoot, "tools", "database-migrator", "database"));
-            await upgrade.PrepareUpgradeAsync("tenant", "0004_templates", backup, default);
-            Assert.True(new FileInfo(backup).Length > 0);
-            var escaped = backup.Replace("'", "''");
-            await database.ExecuteAsync($"RESTORE VERIFYONLY FROM DISK=N'{escaped}' WITH CHECKSUM");
-            Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM msdb.dbo.backupset s JOIN msdb.dbo.backupmediafamily m ON s.media_set_id=m.media_set_id WHERE m.physical_device_name=N'{escaped}' AND s.is_copy_only=1 AND s.has_backup_checksums=1"));
-            Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory"));
-        }
-        finally
-        {
-            if (File.Exists(backup)) File.Delete(backup);
-            Directory.Delete(packageRoot, true);
-        }
-    }
-
-    [Theory]
-    [InlineData("DELETE FROM [workerdock].SchemaHistory WHERE MigrationId='0001_bootstrap'", 1, 10, "InvalidMigrationHistory")]
-    [InlineData("UPDATE [workerdock].SchemaHistory SET MigrationId='9999_unknown' WHERE MigrationId='0002_quartz'", 1, 10, "InvalidMigrationHistory")]
-    [InlineData("UPDATE [workerdock].SchemaHistory SET UpChecksum=REPLICATE('0',64)", 1, 10, "MigrationChecksumMismatch")]
-    [InlineData("UPDATE [workerdock].SchemaHistory SET DownChecksum=REPLICATE('0',64)", 1, 10, "MigrationChecksumMismatch")]
-    [InlineData("DELETE FROM [workerdock].SchemaHistory", 1, 10, "InvalidMigrationHistory")]
-    [InlineData("", 3, 10, "UnsupportedSchemaVersion")]
-    [Trait("Store", "Sql")]
-    public async Task Upgrade_refuses_invalid_history_or_current_schema_before_backup(string sql, int minimum, int maximum, string code)
-    {
-        await using var database = new SqlDatabaseFixture();
-        await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0002_quartz", default);
-        if (sql.Length > 0) await database.ExecuteAsync(sql);
-        var packageRoot = CreateUpgradePackage(database.ScriptsRoot, minimum, maximum);
-        try
-        {
-            var upgrade = new MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(packageRoot, "tools", "database-migrator", "database"));
-            var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await upgrade.PrepareUpgradeAsync("tenant", "0004_templates", @"\\localhost\WorkerDockMissingShare\test.bak", default));
-            Assert.Equal(code, error.Code);
-        }
-        finally { Directory.Delete(packageRoot, true); }
-    }
-
-    internal static string CreateUpgradePackage(string scriptsRoot, int minimum, int maximum)
-    {
-        var root = Path.Combine(Path.GetTempPath(), "WorkerDock_Upgrade_" + Guid.NewGuid().ToString("N"));
-        var scripts = Path.Combine(root, "tools", "database-migrator", "database", "tenant");
-        Directory.CreateDirectory(scripts);
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(scriptsRoot, "tenant")))
-            File.Copy(file, Path.Combine(scripts, Path.GetFileName(file)));
-        File.WriteAllText(Path.Combine(root, "manifest.json"), System.Text.Json.JsonSerializer.Serialize(new { schemaCompatibility = new { minimum, maximum } }));
-        return root;
-    }
 }

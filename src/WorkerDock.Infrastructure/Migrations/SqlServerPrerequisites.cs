@@ -1,6 +1,6 @@
 using WorkerDock.Application.Common;
 
-namespace WorkerDock.DatabaseMigrator;
+namespace WorkerDock.Infrastructure.Migrations;
 
 public static class SqlServerPrerequisites
 {

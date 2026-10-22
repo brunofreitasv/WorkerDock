@@ -3,7 +3,7 @@ using System.IO.Compression;
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Jobs;
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Jobs;
 using WorkerDock.Infrastructure.Persistence;

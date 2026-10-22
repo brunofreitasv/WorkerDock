@@ -1,6 +1,6 @@
 using WorkerDock.Application.Alerts;
 using WorkerDock.Contracts.Alerts;
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 using WorkerDock.Infrastructure.Alerts;
 using WorkerDock.Infrastructure.Persistence;
 

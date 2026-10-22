@@ -1,6 +1,6 @@
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 using WorkerDock.Infrastructure.Templates;
 using WorkerDock.Templates.SqlServer;
 using WorkerDock.Templates.Http;

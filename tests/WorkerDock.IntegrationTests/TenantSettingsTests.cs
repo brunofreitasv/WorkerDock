@@ -1,6 +1,6 @@
 using WorkerDock.Application.Common;
 using WorkerDock.Domain.Tenants;
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 using WorkerDock.Infrastructure.Persistence;
 namespace WorkerDock.IntegrationTests;
 public sealed class TenantSettingsTests

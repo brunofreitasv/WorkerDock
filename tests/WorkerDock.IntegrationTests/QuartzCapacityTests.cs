@@ -1,4 +1,4 @@
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 using WorkerDock.Quartz.Hosting;
 using Quartz;
 

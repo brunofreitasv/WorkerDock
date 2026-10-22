@@ -1,7 +1,7 @@
 using System.Text.Json;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Workers;
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Dispatch;
 using WorkerDock.Infrastructure.Executions;

@@ -1,5 +1,5 @@
 using WorkerDock.Application.Common;
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 
 namespace WorkerDock.IntegrationTests;
 

@@ -2,7 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
 using WorkerDock.Contracts.Values;
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Dispatch;
 using WorkerDock.Infrastructure.Executions;

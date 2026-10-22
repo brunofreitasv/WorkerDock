@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Data;
 using System.Threading.Channels;
 using Microsoft.Data.SqlClient;
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 
 namespace WorkerDock.IntegrationTests;
 

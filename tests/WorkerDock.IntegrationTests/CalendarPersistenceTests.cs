@@ -6,7 +6,7 @@ using Quartz.Serialization.SystemTextJson;
 using WorkerDock.Domain.Scheduling;
 using WorkerDock.Quartz.Hosting;
 using WorkerDock.Quartz.Scheduling;
-using WorkerDock.DatabaseMigrator;
+using WorkerDock.Infrastructure.Migrations;
 namespace WorkerDock.IntegrationTests;
 public sealed class CalendarPersistenceTests
 {

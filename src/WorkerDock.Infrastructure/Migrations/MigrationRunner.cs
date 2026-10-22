@@ -5,9 +5,9 @@ using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
 
-namespace WorkerDock.DatabaseMigrator;
+namespace WorkerDock.Infrastructure.Migrations;
 
-public sealed partial class MigrationRunner(string connectionString, Guid instanceId, string scriptsRoot)
+public sealed class MigrationRunner(string connectionString, Guid instanceId, string scriptsRoot)
 {
     public ValueTask ApplyAsync(string databaseKind, string targetMigration, CancellationToken ct) =>
         RunAsync(databaseKind, targetMigration, false, ct);
@@ -24,10 +24,35 @@ public sealed partial class MigrationRunner(string connectionString, Guid instan
             await using var connection = new SqlConnection(connectionString);
             await connection.OpenAsync(ct);
             await CheckPrerequisitesAsync(connection, ct);
-            if (rollback)
-                await RollbackOneAsync(connection, directory, entries[index], index == 0, ct);
-            else
-                for (var i = 0; i <= index; i++) await ApplyOneAsync(connection, directory, entries[i], i == 0, ct);
+            // Keep validation and every target migration under the same session lock.
+            // Individual migrations still commit independently.
+            await LockAsync(connection, ct);
+            try
+            {
+                var appliedCount = await ValidateAppliedHistoryAsync(connection, entries, ct);
+                if (rollback)
+                {
+                    if (index >= appliedCount) throw new WorkerDockException("UnknownMigration");
+                    if (index != appliedCount - 1) throw new WorkerDockException("UnsafeRollback");
+                    await RollbackOneAsync(connection, directory, entries[index], index == 0, ct);
+                }
+                else
+                {
+                    if (appliedCount > index + 1) throw new WorkerDockException("MigrationTargetBehindCurrent");
+                    for (var i = appliedCount; i <= index; i++)
+                        await ApplyOneAsync(connection, directory, entries[i], ct);
+                }
+            }
+            finally
+            {
+                // Session locks must be released explicitly before a connection returns to its pool.
+                if (connection.State == ConnectionState.Open)
+                {
+                    await using var release = connection.CreateCommand();
+                    release.CommandText = "EXEC sys.sp_releaseapplock @Resource=N'WorkerDock.Schema', @LockOwner=N'Session';";
+                    await release.ExecuteNonQueryAsync(CancellationToken.None);
+                }
+            }
         }
         catch (SqlException error) when (error.Number == 51002) { throw new WorkerDockException("UnsafeRollback"); }
         catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
@@ -63,10 +88,53 @@ public sealed partial class MigrationRunner(string connectionString, Guid instan
         SqlServerPrerequisites.Validate(reader.GetInt32(0), reader.GetInt32(1));
     }
 
-    private async Task ApplyOneAsync(SqlConnection connection, string directory, MigrationEntry entry, bool bootstrap, CancellationToken ct)
+    private async Task<int> ValidateAppliedHistoryAsync(SqlConnection connection, IReadOnlyList<MigrationEntry> entries, CancellationToken ct)
     {
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        await LockAsync(connection, transaction, ct);
+        await using (var schema = connection.CreateCommand())
+        {
+            schema.Transaction = transaction;
+            schema.CommandText = "SELECT SCHEMA_ID(N'workerdock'), OBJECT_ID(N'[workerdock].TenantSettings', N'U'), OBJECT_ID(N'[workerdock].SchemaHistory', N'U')";
+            await using var reader = await schema.ExecuteReaderAsync(ct);
+            await reader.ReadAsync(ct);
+            if (reader.IsDBNull(0))
+            {
+                await reader.DisposeAsync();
+                await transaction.CommitAsync(ct);
+                return 0;
+            }
+            if (reader.IsDBNull(1) || reader.IsDBNull(2))
+                throw new WorkerDockException("InvalidMigrationHistory");
+        }
+
+        await CheckInstanceAsync(connection, transaction, ct);
+        var applied = new Dictionary<string, (string Up, string Down)>(StringComparer.Ordinal);
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "SELECT MigrationId, UpChecksum, DownChecksum FROM [workerdock].SchemaHistory";
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                if (!applied.TryAdd(reader.GetString(0), (reader.GetString(1), reader.GetString(2))))
+                    throw new WorkerDockException("InvalidMigrationHistory");
+        }
+        if (applied.Count == 0 || applied.Count > entries.Count)
+            throw new WorkerDockException("InvalidMigrationHistory");
+        for (var index = 0; index < applied.Count; index++)
+        {
+            var entry = entries[index];
+            if (!applied.TryGetValue(entry.Id, out var history))
+                throw new WorkerDockException("InvalidMigrationHistory");
+            if (history.Up != entry.UpSha256 || history.Down != entry.DownSha256)
+                throw new WorkerDockException("MigrationChecksumMismatch");
+        }
+        await transaction.CommitAsync(ct);
+        return applied.Count;
+    }
+
+    private async Task ApplyOneAsync(SqlConnection connection, string directory, MigrationEntry entry, CancellationToken ct)
+    {
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var installed = await CheckInstanceAsync(connection, transaction, ct);
         if (installed)
         {
@@ -93,7 +161,6 @@ public sealed partial class MigrationRunner(string connectionString, Guid instan
     private async Task RollbackOneAsync(SqlConnection connection, string directory, MigrationEntry entry, bool bootstrap, CancellationToken ct)
     {
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        await LockAsync(connection, transaction, ct);
         if (!await CheckInstanceAsync(connection, transaction, ct)) throw new WorkerDockException("UnknownMigration");
         var history = await ReadHistoryAsync(connection, transaction, entry.Id, ct);
         if (history is null) throw new WorkerDockException("UnknownMigration");
@@ -121,7 +188,8 @@ public sealed partial class MigrationRunner(string connectionString, Guid instan
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT InstanceId FROM [workerdock].TenantSettings";
-        if ((Guid?)await command.ExecuteScalarAsync(ct) != instanceId)
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct) || reader.IsDBNull(0) || reader.GetGuid(0) != instanceId || await reader.ReadAsync(ct))
             throw new WorkerDockException("TenantInstanceMismatch");
         return true;
     }
@@ -136,11 +204,10 @@ public sealed partial class MigrationRunner(string connectionString, Guid instan
         return await reader.ReadAsync(ct) ? (reader.GetString(0), reader.GetString(1)) : null;
     }
 
-    private static async Task LockAsync(SqlConnection connection, SqlTransaction transaction, CancellationToken ct)
+    private static async Task LockAsync(SqlConnection connection, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "DECLARE @result int; EXEC @result = sys.sp_getapplock @Resource=N'WorkerDock.Schema', @LockMode=N'Exclusive', @LockOwner=N'Transaction', @LockTimeout=10000; SELECT @result;";
+        command.CommandText = "DECLARE @result int; EXEC @result = sys.sp_getapplock @Resource=N'WorkerDock.Schema', @LockMode=N'Exclusive', @LockOwner=N'Session', @LockTimeout=10000; SELECT @result;";
         if (Convert.ToInt32(await command.ExecuteScalarAsync(ct)) < 0) throw new WorkerDockException("MigrationLockUnavailable");
     }
 
