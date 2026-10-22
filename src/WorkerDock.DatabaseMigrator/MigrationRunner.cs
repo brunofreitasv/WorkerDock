@@ -7,7 +7,7 @@ using WorkerDock.Application.Common;
 
 namespace WorkerDock.DatabaseMigrator;
 
-public sealed class MigrationRunner(string connectionString, Guid instanceId, string scriptsRoot)
+public sealed partial class MigrationRunner(string connectionString, Guid instanceId, string scriptsRoot)
 {
     public ValueTask ApplyAsync(string databaseKind, string targetMigration, CancellationToken ct) =>
         RunAsync(databaseKind, targetMigration, false, ct);
@@ -16,6 +16,24 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
         RunAsync(databaseKind, targetMigration, true, ct);
 
     private async ValueTask RunAsync(string kind, string target, bool rollback, CancellationToken ct)
+    {
+        var (directory, entries, index) = await ReadManifestAsync(kind, target, ct);
+
+        try
+        {
+            await using var connection = new SqlConnection(connectionString);
+            await connection.OpenAsync(ct);
+            await CheckPrerequisitesAsync(connection, ct);
+            if (rollback)
+                await RollbackOneAsync(connection, directory, entries[index], index == 0, ct);
+            else
+                for (var i = 0; i <= index; i++) await ApplyOneAsync(connection, directory, entries[i], i == 0, ct);
+        }
+        catch (SqlException error) when (error.Number == 51002) { throw new WorkerDockException("UnsafeRollback"); }
+        catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
+    }
+
+    private async Task<(string Directory, List<MigrationEntry> Entries, int Index)> ReadManifestAsync(string kind, string target, CancellationToken ct)
     {
         if (kind != "tenant") throw new WorkerDockException("InvalidDatabaseKind");
         var directory = Path.Combine(scriptsRoot, "tenant");
@@ -33,18 +51,7 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
                 throw new WorkerDockException("MigrationChecksumMismatch");
         }
 
-        try
-        {
-            await using var connection = new SqlConnection(connectionString);
-            await connection.OpenAsync(ct);
-            await CheckPrerequisitesAsync(connection, ct);
-            if (rollback)
-                await RollbackOneAsync(connection, directory, entries[index], index == 0, ct);
-            else
-                for (var i = 0; i <= index; i++) await ApplyOneAsync(connection, directory, entries[i], i == 0, ct);
-        }
-        catch (SqlException error) when (error.Number == 51002) { throw new WorkerDockException("UnsafeRollback"); }
-        catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
+        return (directory, entries, index);
     }
 
     private static async Task CheckPrerequisitesAsync(SqlConnection connection, CancellationToken ct)
