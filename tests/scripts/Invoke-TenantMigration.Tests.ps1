@@ -22,15 +22,18 @@ $common = @{
 }
 switch ($Case) {
     'host' { $common.SqlHost = 'bad;host' }
-    'port' { $common.Port = 0 }
+    'port' { $common.Port = 'not-a-port' }
     'assembly' { $common.AssemblyDirectory = Join-Path $PSScriptRoot 'missing-assemblies' }
     'credential' { $common.Credential = [pscredential]::Empty }
+    'action' { $common.Action = 'Deploy' }
+    'instance' { $common.InstanceId = 'not-a-guid' }
+    'missing' { $common.Remove('Port') }
 }
 & $ScriptPath @common
 '@
 Set-Content -LiteralPath $harness -Value $source -Encoding utf8
 try {
-    foreach ($case in 'host', 'port', 'assembly', 'credential') {
+    foreach ($case in 'host', 'port', 'assembly', 'credential', 'action', 'instance', 'missing') {
         $start = [System.Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
         $start.ArgumentList.Add('-NoProfile')
         $start.ArgumentList.Add('-File')
@@ -48,9 +51,11 @@ try {
         $output = $stdout + $stderr
         if ($process.ExitCode -eq 0) { throw "Case '$case' unexpectedly succeeded. Output: $output" }
         if ($output.Contains('SENTINEL-password')) { throw "Case '$case' exposed a password." }
-        if ($case -in 'host', 'port' -and -not $output.Contains('SqlConfigurationInvalid')) {
+        if ($case -in 'host', 'port', 'missing' -and -not $output.Contains('SqlConfigurationInvalid')) {
             throw "Case '$case' did not report SqlConfigurationInvalid."
         }
+        if ($case -eq 'action' -and -not $output.Contains('ActionInvalid')) { throw 'Invalid action did not report ActionInvalid.' }
+        if ($case -eq 'instance' -and -not $output.Contains('InstanceIdInvalid')) { throw 'Invalid instance ID did not report InstanceIdInvalid.' }
         if ($case -eq 'credential' -and -not $output.Contains('CredentialInvalid')) {
             throw 'Empty credentials did not report CredentialInvalid.'
         }

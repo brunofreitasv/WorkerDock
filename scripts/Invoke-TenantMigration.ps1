@@ -1,14 +1,14 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Apply', 'Rollback')][string]$Action,
-    [Parameter(Mandatory)][string]$SqlHost,
-    [Parameter(Mandatory)][int]$Port,
-    [Parameter(Mandatory)][string]$Database,
-    [Parameter(Mandatory)][System.Management.Automation.PSCredential]$Credential,
-    [Parameter(Mandatory)][guid]$InstanceId,
-    [Parameter(Mandatory)][string]$TargetMigration,
-    [Parameter(Mandatory)][string]$ScriptsRoot,
-    [Parameter(Mandatory)][string]$AssemblyDirectory
+    [string]$Action,
+    [string]$SqlHost,
+    [string]$Port,
+    [string]$Database,
+    [object]$Credential,
+    [string]$InstanceId,
+    [string]$TargetMigration,
+    [string]$ScriptsRoot,
+    [string]$AssemblyDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,7 +19,17 @@ function Stop-WithCode([string]$Code) {
 }
 
 try {
-    if ($null -eq $Credential -or [string]::IsNullOrEmpty($Credential.UserName) -or
+    if ($Action -notin 'Apply', 'Rollback') { Stop-WithCode 'ActionInvalid' }
+    $parsedPort = 0
+    if (-not [int]::TryParse($Port, [Globalization.NumberStyles]::None, [Globalization.CultureInfo]::InvariantCulture, [ref]$parsedPort)) {
+        Stop-WithCode 'SqlConfigurationInvalid'
+    }
+    $Port = $parsedPort
+    $parsedInstanceId = [guid]::Empty
+    if (-not [guid]::TryParse($InstanceId, [ref]$parsedInstanceId)) { Stop-WithCode 'InstanceIdInvalid' }
+    $InstanceId = $parsedInstanceId
+    if ($null -eq $Credential -or $Credential -isnot [System.Management.Automation.PSCredential] -or
+        [string]::IsNullOrEmpty($Credential.UserName) -or
         $null -eq $Credential.Password -or $Credential.Password.Length -eq 0) {
         Stop-WithCode 'CredentialInvalid'
     }
@@ -113,7 +123,7 @@ catch {
         $candidate = $codeProperty.GetValue($exception)
         if ($candidate -is [string] -and $candidate -match '^[A-Za-z][A-Za-z0-9]{0,79}$') { $code = $candidate }
     }
-    elseif ($exception.Message -in 'SqlConfigurationInvalid', 'ScriptsRootInvalid', 'AssemblyDirectoryInvalid', 'CredentialInvalid', 'UnknownMigration') {
+    elseif ($exception.Message -in 'ActionInvalid', 'SqlConfigurationInvalid', 'InstanceIdInvalid', 'ScriptsRootInvalid', 'AssemblyDirectoryInvalid', 'CredentialInvalid', 'UnknownMigration') {
         $code = $exception.Message
     }
     [Console]::Error.WriteLine($code)
