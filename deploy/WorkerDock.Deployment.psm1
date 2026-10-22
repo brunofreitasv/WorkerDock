@@ -45,14 +45,33 @@ function Get-ConfigValue($Config, [string] $Section, [string] $Name) {
     return $null
 }
 
+function Assert-TenantSqlConfig($Config, [string] $Section = 'Tenant') {
+    $settings = $Config[$Section]
+    if ($settings -isnot [System.Collections.IDictionary]) { throw "$Section SQL configuration is required." }
+    if ($settings.Contains('ConnectionString')) { throw "$Section.ConnectionString is not supported; configure SQL fields and a password reference." }
+    $sql = $settings['Sql']
+    if ($sql -isnot [System.Collections.IDictionary]) { throw "$Section.Sql is required." }
+    foreach ($name in @('Host','Port','Database','User','PasswordReference')) {
+        if (-not $sql.Contains($name) -or [string]::IsNullOrWhiteSpace([string]$sql[$name])) { throw "$Section.Sql.$name is required." }
+    }
+    $hostName = [string]$sql['Host']
+    if ($hostName -match '[\s,;=\\/\[\]]' -or [Uri]::CheckHostName($hostName) -eq [UriHostNameType]::Unknown) { throw "$Section.Sql.Host must be a bare DNS name or IP address." }
+    $port = 0
+    if ([string]$sql['Port'] -notmatch '\A[0-9]+\z' -or -not [int]::TryParse([string]$sql['Port'], [ref]$port) -or $port -lt 1 -or $port -gt 65535) { throw "$Section.Sql.Port must be an integer from 1 to 65535." }
+    foreach ($name in @('Database','User')) {
+        $value = [string]$sql[$name]
+        if ($value.Length -gt 128 -or $value -match '\p{Cc}') { throw "$Section.Sql.$name must contain 1 to 128 characters without control characters." }
+    }
+    if ([string]$sql['PasswordReference'] -notmatch '\A[A-Za-z0-9_.-]{1,128}\z') { throw "$Section.Sql.PasswordReference must be a logical password reference." }
+}
+
 function Assert-ConfigIdentity($Config, [ValidateSet('tenant','center')] [string] $Kind, [string] $InstanceId) {
     $section = if ($Kind -eq 'tenant') { 'Tenant' } else { 'Central' }
     $configuredId = Get-ConfigValue $Config $section 'InstanceId'
-    $configuredConnection = Get-ConfigValue $Config $section 'ConnectionString'
     $parsedId = [guid]::Empty
     if (-not [guid]::TryParse([string]$configuredId, [ref]$parsedId)) { throw "$section.InstanceId must be a GUID." }
     if ([string]$configuredId -ne $InstanceId) { throw "Configuration instance identity does not match requested instance $InstanceId." }
-    if ($Kind -eq 'tenant' -and [string]::IsNullOrWhiteSpace([string]$configuredConnection)) { throw "$section.ConnectionString is required." }
+    if ($Kind -eq 'tenant') { Assert-TenantSqlConfig $Config $section }
     if ($Kind -eq 'center') {
         $central = $Config['Central']
         $dataDirectory = if ($central -is [System.Collections.IDictionary] -and $central['Storage'] -is [System.Collections.IDictionary]) { $central['Storage']['DataDirectory'] } else { $null }
@@ -319,14 +338,16 @@ function Save-WorkerConfig([string] $SourcePath, [string] $DestinationPath, [str
     $fullSource = Resolve-DeploymentPath $SourcePath 'WorkerConfigPath'
     $incoming = Get-Content -LiteralPath $fullSource -Raw | ConvertFrom-Json -AsHashtable
     if ($ExecutorPath) { $incoming.Executor.Path = $ExecutorPath }
+    Assert-TenantSqlConfig $incoming 'Tenant'
     $installationId = [guid]::Empty
     if ([string]$incoming.Tenant.InstanceId -ne $InstanceId -or -not [guid]::TryParse([string]$incoming.Worker.InstallationId, [ref]$installationId) -or
         [string]$incoming.Worker.CatalogDigest -notmatch '^[a-fA-F0-9]{64}$' -or [int]$incoming.Worker.HostCeiling -lt 1 -or
-        [int]$incoming.Worker.DrainSeconds -lt 1 -or [string]::IsNullOrWhiteSpace([string]$incoming.Tenant.ConnectionString)) {
-        throw 'Worker configuration must contain matching tenant identity, installation identity, catalog digest, positive limits, and connection string.'
+        [int]$incoming.Worker.DrainSeconds -lt 1) {
+        throw 'Worker configuration must contain matching tenant identity, installation identity, catalog digest, positive limits, and vault SQL settings.'
     }
     if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
         $existing = Read-DeploymentConfig $DestinationPath
+        Assert-TenantSqlConfig $existing 'Tenant'
         if ([string]$existing.Tenant.InstanceId -ne $InstanceId -or [string]$existing.Worker.InstallationId -ne [string]$incoming.Worker.InstallationId) {
             throw 'Existing worker configuration has a different tenant or installation identity; it was preserved.'
         }
@@ -513,7 +534,7 @@ function Read-DeploymentMetadata([string] $InstallRoot, [string] $InstanceId) {
     return $metadata
 }
 
-Export-ModuleMember -Function Assert-DeploymentHost, Resolve-DeploymentPath, Read-DeploymentConfig, Get-ConfigValue, Assert-ConfigIdentity,
+Export-ModuleMember -Function Assert-DeploymentHost, Resolve-DeploymentPath, Read-DeploymentConfig, Get-ConfigValue, Assert-ConfigIdentity, Assert-TenantSqlConfig,
     Assert-CenterDataDirectory, Get-VerifiedPackage, Close-VerifiedPackage, Assert-DirectoryArchive, New-CenterBackupArchive, Assert-CenterBackupArchive, Restore-CenterBackupArchive, Install-VerifiedRelease, Save-PersistentConfig, Save-WorkerConfig, Set-ReleaseConfig,
     Assert-IisAvailable, Assert-HttpsCertificate, Set-ServiceEnvironment, Protect-ConfigDirectory, Grant-DirectoryAccess,
     Protect-SensitiveDirectory, Ensure-Service, Assert-OwnedService, Test-ServiceExecutableOwned,

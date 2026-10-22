@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][string] $InstallRoot,
     [Parameter(Mandatory)][string] $ConfigPath,
     [Parameter(Mandatory)][string] $PackagePath,
-    [Parameter(Mandatory)][string] $BackupPath
+    [Parameter(Mandatory)][string] $BackupPath,
+    [string] $MigratorConfigPath
 )
 
 Set-StrictMode -Version Latest
@@ -17,13 +18,27 @@ $kind = if ($config.Contains('Tenant')) { 'tenant' } elseif ($config.Contains('C
 $instanceSection = if ($kind -eq 'tenant') { 'Tenant' } else { 'Central' }
 $instanceId = [string](Get-ConfigValue $config $instanceSection 'InstanceId')
 if (-not [guid]::TryParse($instanceId, [ref]([guid]::Empty))) { throw "$instanceSection.InstanceId must be a GUID." }
+if ($kind -eq 'tenant') {
+    if ([Environment]::GetEnvironmentVariables().Contains('WORKERDOCK_SQL')) { throw 'WORKERDOCK_SQL is not supported; configure migrator vault SQL settings.' }
+    if ([string]::IsNullOrWhiteSpace($MigratorConfigPath)) { throw 'MigratorConfigPath is required for tenant upgrades.' }
+    $MigratorConfigPath = Resolve-DeploymentPath $MigratorConfigPath 'MigratorConfigPath'
+    $migratorConfig = Read-DeploymentConfig $MigratorConfigPath
+    Assert-TenantSqlConfig $migratorConfig 'Migrator'
+}
 $metadata = Read-DeploymentMetadata $root $instanceId
 if ($metadata.kind -ne $kind) { throw 'Package kind and installed instance kind do not match.' }
 $storedConfig = Join-Path $root $(if ($kind -eq 'tenant') { 'config/tenant.json' } else { 'config/center.json' })
 $existingConfig = Read-DeploymentConfig $storedConfig
 [void](Assert-ConfigIdentity $existingConfig $kind $instanceId)
+if ($kind -eq 'tenant') {
+    foreach ($workerRecord in @($metadata.workerInstallations)) {
+        $workerConfig = Read-DeploymentConfig ([string]$workerRecord.configPath)
+        [void](Assert-ConfigIdentity $workerConfig 'tenant' $instanceId)
+    }
+}
 $package = Get-VerifiedPackage $PackagePath $kind
 $backupFullPath = Resolve-DeploymentPath $BackupPath 'BackupPath'
+$migratorEnvironment = $null
 try {
     $statePath = Join-Path $root 'config/upgrade-state.json'
     if (Test-Path -LiteralPath $statePath -PathType Leaf) { throw "An incomplete upgrade journal exists at $statePath; inspect backups and restore/reconcile it before retrying." }
@@ -77,28 +92,6 @@ try {
     $releaseBackupPath = Join-Path (Split-Path -Parent $backupFullPath) ([IO.Path]::GetFileNameWithoutExtension($backupFullPath) + '-application.zip')
     if (Test-Path -LiteralPath $releaseBackupPath) { throw "Application backup already exists: $releaseBackupPath" }
 
-    $connection = [string](Get-ConfigValue $existingConfig $instanceSection 'ConnectionString')
-    $migratorRoot = Join-Path $package.Root 'tools/database-migrator'
-    $sqlClient = Join-Path $migratorRoot 'Microsoft.Data.SqlClient.dll'
-    $migrator = Join-Path $migratorRoot 'WorkerDock.DatabaseMigrator.dll'
-    if (-not (Test-Path -LiteralPath $sqlClient -PathType Leaf) -or -not (Test-Path -LiteralPath $migrator -PathType Leaf)) { throw 'Package database migrator or SQL client is missing.' }
-    Add-Type -Path $sqlClient
-    $builder = [Microsoft.Data.SqlClient.SqlConnectionStringBuilder]::new($connection)
-    if ([string]::IsNullOrWhiteSpace($builder.InitialCatalog)) { throw 'Configured connection string must name a database.' }
-    $escapedDatabase = '[' + $builder.InitialCatalog.Replace(']', ']]') + ']'
-    $sqlConnection = [Microsoft.Data.SqlClient.SqlConnection]::new($connection)
-    try {
-        $sqlConnection.Open()
-        $backupCommand = $sqlConnection.CreateCommand()
-        $backupCommand.CommandTimeout = 0
-        $backupCommand.CommandText = "BACKUP DATABASE $escapedDatabase TO DISK = @backup WITH COPY_ONLY, CHECKSUM; RESTORE VERIFYONLY FROM DISK = @backup WITH CHECKSUM;"
-        $null = $backupCommand.Parameters.Add('@backup', [Microsoft.Data.SqlClient.SqlDbType]::NVarChar, 4000)
-        $backupCommand.Parameters['@backup'].Value = $backupFullPath
-        $null = $backupCommand.ExecuteNonQuery()
-    } finally { if ($sqlConnection.State -ne [Data.ConnectionState]::Closed) { $sqlConnection.Close() }; $sqlConnection.Dispose() }
-    if (-not (Test-Path -LiteralPath $backupFullPath -PathType Leaf) -or (Get-Item -LiteralPath $backupFullPath).Length -le 0) {
-        throw 'SQL Server did not produce a verifiable backup at BackupPath.'
-    }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::Open($releaseBackupPath, [IO.Compression.ZipArchiveMode]::Create)
     try {
@@ -109,6 +102,7 @@ try {
     } finally { $zip.Dispose() }
     [void](Assert-DirectoryArchive $releaseBackupPath $oldRelease)
 
+    $migratorRoot = Join-Path $package.Root 'tools/database-migrator'
     $schemaManifestPath = Join-Path $migratorRoot 'database/tenant/manifest.json'
     if (-not (Test-Path -LiteralPath $schemaManifestPath -PathType Leaf)) { throw 'Package migration manifest is missing.' }
     $schemaEntries = @(Get-Content -LiteralPath $schemaManifestPath -Raw | ConvertFrom-Json)
@@ -119,36 +113,19 @@ try {
         $latestSchemaVersion -gt [int]$package.Manifest.schemaCompatibility.maximum) {
         throw "Latest package migration schema $latestSchemaVersion is outside the package compatibility range."
     }
-    $applied = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-    $sqlConnection = [Microsoft.Data.SqlClient.SqlConnection]::new($connection)
-    try {
-        $sqlConnection.Open()
-        $historyCommand = $sqlConnection.CreateCommand()
-        $historyCommand.CommandText = 'SELECT MigrationId, UpChecksum FROM [workerdock].SchemaHistory'
-        $reader = $historyCommand.ExecuteReader()
-        try { while ($reader.Read()) { $applied[[string]$reader.GetString(0)] = [string]$reader.GetString(1) } }
-        finally { $reader.Dispose() }
-    } finally { if ($sqlConnection.State -ne [Data.ConnectionState]::Closed) { $sqlConnection.Close() }; $sqlConnection.Dispose() }
-    $sawGap = $false
-    $lastApplied = $null
-    foreach ($entry in $schemaEntries) {
-        $migrationId = [string]$entry.id
-        if ($applied.ContainsKey($migrationId)) {
-            if ($sawGap) { throw 'Database migration history is not a contiguous prefix of this package manifest.' }
-            if ($applied[$migrationId] -ne [string]$entry.upSha256) { throw "Applied migration checksum differs from this package: $migrationId" }
-            $lastApplied = $migrationId
-        } else { $sawGap = $true }
+    $migrator = Join-Path $migratorRoot 'WorkerDock.DatabaseMigrator.dll'
+    if (-not (Test-Path -LiteralPath $migrator -PathType Leaf)) { throw 'Package database migrator is missing.' }
+    $migratorEnvironment = @{
+        WORKERDOCK_MIGRATOR_CONFIG_PATH = [Environment]::GetEnvironmentVariable('WORKERDOCK_MIGRATOR_CONFIG_PATH')
+        WORKERDOCK_INSTANCE_ID = [Environment]::GetEnvironmentVariable('WORKERDOCK_INSTANCE_ID')
     }
-    if (-not $lastApplied) { throw 'No known migration is applied to the configured database.' }
-    foreach ($migrationId in $applied.Keys) {
-        if (-not ($schemaEntries | Where-Object id -CEQ $migrationId)) { throw "Database contains migration absent from this package manifest: $migrationId" }
+    $env:WORKERDOCK_MIGRATOR_CONFIG_PATH = $MigratorConfigPath
+    $env:WORKERDOCK_INSTANCE_ID = $instanceId
+    & dotnet $migrator prepare-upgrade tenant $latestMigrationId $backupFullPath
+    if ($LASTEXITCODE -ne 0) { throw "Database upgrade preparation failed with exit code $LASTEXITCODE. Active release was preserved." }
+    if (-not (Test-Path -LiteralPath $backupFullPath -PathType Leaf) -or (Get-Item -LiteralPath $backupFullPath).Length -le 0) {
+        throw 'SQL Server did not produce a verifiable backup at BackupPath.'
     }
-    $currentSchemaVersion = [int]([regex]::Match($lastApplied, '^\d+').Value)
-    if ($currentSchemaVersion -lt [int]$package.Manifest.schemaCompatibility.minimum -or
-        $currentSchemaVersion -gt [int]$package.Manifest.schemaCompatibility.maximum) {
-        throw "Database schema version $currentSchemaVersion is outside package compatibility range $($package.Manifest.schemaCompatibility.minimum)-$($package.Manifest.schemaCompatibility.maximum)."
-    }
-
     $release = Install-VerifiedRelease $package $root
     if ($kind -eq 'tenant') {
         Set-ReleaseConfig $storedConfig (Join-Path $release 'web/appsettings.Production.json')
@@ -172,13 +149,8 @@ try {
         startedUtc = [DateTimeOffset]::UtcNow.ToString('O'); step = 'migrating'; kind = $kind }
     $journal | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding utf8
     $targetMigration = $latestMigrationId
-    $env:WORKERDOCK_SQL = $connection
-    $env:WORKERDOCK_INSTANCE_ID = $instanceId
-    try {
-        & dotnet $migrator apply tenant $targetMigration
-        if ($LASTEXITCODE -ne 0) { throw "Database migration failed with exit code $LASTEXITCODE. Backup retained at $backupFullPath." }
-    } finally { Remove-Item Env:WORKERDOCK_SQL -ErrorAction SilentlyContinue; Remove-Item Env:WORKERDOCK_INSTANCE_ID -ErrorAction SilentlyContinue }
-
+    & dotnet $migrator apply tenant $targetMigration
+    if ($LASTEXITCODE -ne 0) { throw "Database migration failed with exit code $LASTEXITCODE. Backup retained at $backupFullPath." }
     $journal.step = 'switching-release'
     $journal | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding utf8
     if ($kind -eq 'tenant') {
@@ -208,4 +180,9 @@ try {
     $metadata | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $root 'config/deployment.json') -Encoding utf8
     Remove-Item -LiteralPath $statePath -Force
     Write-Output "Upgrade staged to version $($package.Manifest.version). Services and IIS remain stopped. Database backup: $backupFullPath. Application backup: $releaseBackupPath. Review both backups and start the application manually; readiness is not claimed."
-} finally { Close-VerifiedPackage $package }
+} finally {
+    if ($null -ne $migratorEnvironment) {
+        foreach ($name in $migratorEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $migratorEnvironment[$name]) }
+    }
+    Close-VerifiedPackage $package
+}
