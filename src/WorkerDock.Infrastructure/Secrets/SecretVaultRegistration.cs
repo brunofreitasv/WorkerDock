@@ -9,6 +9,9 @@ public static class SecretVaultRegistration
         "workerdock.environment","1.0.0","Development environment","Approved mappings are protected deployment configuration.",
         JsonSerializer.SerializeToElement(new { type="object",properties=new { },additionalProperties=false }),
         JsonSerializer.SerializeToElement(new { labelKey="providers.environment",descriptionKey="providers.environment.description" }));
+    public static ISecretVault CreateTenantSql(bool isDevelopment) =>
+        isDevelopment ? CreateDevelopment() : new UnavailableVault();
+
     public static ISecretVault CreateDevelopment()
     {
         if (Environment.GetEnvironmentVariable("WORKERDOCK_DEVELOPMENT_VAULT") != "1") return new UnavailableVault();
