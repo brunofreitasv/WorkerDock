@@ -20,4 +20,4 @@ Start by checking the tenant's `/health/ready` endpoint, Windows service states,
 
 ## Diagnostic boundaries
 
-The portable `tests/DeploymentSmoke.ps1` checks script parsing, configuration shape, and package-manifest integrity handling. It does not provision IIS or prove live SQL Server, OIDC, upgrade/restore, or workload behavior. The in-memory adapter is not evidence of SQL behavior. See [release checklist](../validation/release-checklist.md) for required environment-specific evidence.
+The portable `tests/DeploymentSmoke.ps1` checks script parsing, configuration shape, and runtime secret-reference examples. It does not provision IIS or prove live SQL Server, OIDC, upgrade/restore, or workload behavior. The in-memory adapter is not evidence of SQL behavior. See [release checklist](../validation/release-checklist.md) for required environment-specific evidence.

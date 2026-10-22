@@ -24,10 +24,8 @@ try {
     if (-not [int]::TryParse($Port, [Globalization.NumberStyles]::None, [Globalization.CultureInfo]::InvariantCulture, [ref]$parsedPort)) {
         Stop-WithCode 'SqlConfigurationInvalid'
     }
-    $Port = $parsedPort
     $parsedInstanceId = [guid]::Empty
     if (-not [guid]::TryParse($InstanceId, [ref]$parsedInstanceId)) { Stop-WithCode 'InstanceIdInvalid' }
-    $InstanceId = $parsedInstanceId
     if ($null -eq $Credential -or $Credential -isnot [System.Management.Automation.PSCredential] -or
         [string]::IsNullOrEmpty($Credential.UserName) -or
         $null -eq $Credential.Password -or $Credential.Password.Length -eq 0) {
@@ -48,7 +46,7 @@ try {
             }).Count -eq 0
         }
     }
-    if (-not $validHost -or $Port -lt 1 -or $Port -gt 65535 -or
+    if (-not $validHost -or $parsedPort -lt 1 -or $parsedPort -gt 65535 -or
         [string]::IsNullOrEmpty($Database) -or $Database.Length -gt 128 -or [regex]::IsMatch($Database, '[\x00-\x1f]') -or
         $Credential.UserName.Length -gt 128 -or [regex]::IsMatch($Credential.UserName, '[\x00-\x1f]')) {
         Stop-WithCode 'SqlConfigurationInvalid'
@@ -106,10 +104,10 @@ public sealed class WorkerDockMigrationAssemblyLoadContext : AssemblyLoadContext
     $builderType = $infrastructure.GetType('WorkerDock.Infrastructure.Persistence.TenantSqlConnectionBuilder', $true)
     $password = $Credential.GetNetworkCredential().Password
     $connectionString = $builderType.GetMethod('BuildWithPassword').Invoke($null, [object[]]@(
-        $SqlHost, $Port, $Database, $Credential.UserName, $password))
+        $SqlHost, $parsedPort, $Database, $Credential.UserName, $password))
 
     $runnerType = $infrastructure.GetType('WorkerDock.Infrastructure.Migrations.MigrationRunner', $true)
-    $runner = [Activator]::CreateInstance($runnerType, [object[]]@($connectionString, $InstanceId, $ScriptsRoot))
+    $runner = [Activator]::CreateInstance($runnerType, [object[]]@($connectionString, $parsedInstanceId, $ScriptsRoot))
     $methodName = if ($Action -eq 'Apply') { 'ApplyAsync' } else { 'RollbackAsync' }
     $operation = $runnerType.GetMethod($methodName).Invoke($runner, [object[]]@('tenant', $TargetMigration, [Threading.CancellationToken]::None))
     $operation.AsTask().GetAwaiter().GetResult()

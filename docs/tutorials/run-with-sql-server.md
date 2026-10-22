@@ -32,7 +32,7 @@ The runtime SQL login must remain separate and restricted.
 $env:DOTNET_ENVIRONMENT='Development'
 $credential = Get-Credential '<OPERATOR_SQL_LOGIN>'
 dotnet publish src/WorkerDock.Web -c Release -o artifacts/web
-pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1 `
+& scripts/Invoke-TenantMigration.ps1 `
   -Action Apply -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 `
   -Database '<TENANT_DATABASE>' -Credential $credential `
   -InstanceId '<stable-tenant-guid>' -TargetMigration '0010_remove_builtin_v1' `
@@ -47,6 +47,10 @@ dotnet dev-certs https --trust
 ```
 
 Choose and review the explicit target from `database/tenant/manifest.json`. The sample publishes the Web assembly first because the migration script loads the reviewed migration implementation from that output directory.
+
+Run the migration script with the PowerShell call operator in the same session
+that created `$credential`. A `PSCredential` object cannot be passed through a
+new `pwsh -File` process.
 
 Set the tenant runtime settings and explicit Development vault mapping in each
 service window. Replace the placeholders, and trust the SQL Server issuing CA

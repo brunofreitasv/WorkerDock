@@ -26,12 +26,37 @@ public sealed class MigrationInputTests
         Assert.Contains("Operator chooses a preparation path", setup, StringComparison.Ordinal);
         Assert.Contains("database/tenant/current-state.sql", setup, StringComparison.Ordinal);
         Assert.Contains("fresh-install-only", setup, StringComparison.Ordinal);
+        Assert.Contains("__WORKERDOCK_INSTANCE_ID__", setup, StringComparison.Ordinal);
+        Assert.Contains("same snapshot action", setup, StringComparison.Ordinal);
+        Assert.Contains("one SQL batch", setup, StringComparison.Ordinal);
+        Assert.Contains("equivalent satisfied state", setup, StringComparison.Ordinal);
+        Assert.Contains("& scripts/Invoke-TenantMigration.ps1", setup, StringComparison.Ordinal);
+        Assert.DoesNotContain("pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1", setup, StringComparison.Ordinal);
+        Assert.Contains("PowerShell host must run on .NET 10 or later", setup, StringComparison.Ordinal);
         Assert.DoesNotContain("Deployment-only migrator", setup, StringComparison.Ordinal);
         Assert.Contains("database/tenant/current-state.sql", tutorial, StringComparison.Ordinal);
+        Assert.Contains("& scripts/Invoke-TenantMigration.ps1", tutorial, StringComparison.Ordinal);
+        Assert.DoesNotContain("pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1", tutorial, StringComparison.Ordinal);
         Assert.Contains("operator-managed SQL Server backup", upgrade, StringComparison.Ordinal);
+        Assert.DoesNotContain("package manifest", upgrade, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("schema compatibility window", upgrade, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("release compatibility evidence", upgrade, StringComparison.Ordinal);
         Assert.Contains("scripts/Invoke-TenantMigration.ps1", upgrade, StringComparison.Ordinal);
         Assert.True(upgrade.IndexOf("operator-managed SQL Server backup", StringComparison.Ordinal) <
                     upgrade.IndexOf("scripts/Invoke-TenantMigration.ps1", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Deployment_reference_does_not_claim_optional_windows_or_package_hash_smoke_checks()
+    {
+        var reference = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "docs", "reference", "deployment-model.md"));
+        var normalized = string.Join(" ", reference.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("Worker and Executor currently require Windows", normalized, StringComparison.Ordinal);
+        Assert.DoesNotContain("Windows/IIS hosting is an optional deployment example", reference, StringComparison.Ordinal);
+        Assert.DoesNotContain("package-manifest hash handling", reference, StringComparison.Ordinal);
+        var troubleshooting = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "docs", "how-to", "troubleshooting.md"));
+        Assert.DoesNotContain("package-manifest integrity handling", troubleshooting, StringComparison.Ordinal);
+        Assert.Contains("runtime secret-reference examples", troubleshooting, StringComparison.Ordinal);
     }
 
     [Fact]

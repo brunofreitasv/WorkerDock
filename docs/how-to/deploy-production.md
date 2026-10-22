@@ -1,6 +1,6 @@
 # Deploy WorkerDock
 
-This guide describes the operator-managed deployment sequence for one tenant and, optionally, a separate Control Center. Windows Server, IIS, and Windows services are optional examples; another host and service manager can implement the same requirements. A tenant has a Web process, Scheduler process, one or more Worker processes, and one tenant database. The Control Center is separate, stores its state in protected files, and does not host tenant work or provision tenants.
+This guide describes operator-managed deployment for one tenant and, optionally, a separate Control Center. Worker and Executor currently require Windows because their process containment and IPC use Windows APIs. IIS and Windows Services are optional hosting choices; operators select their build, packaging, and process-management tools. A tenant has a Web process, Scheduler process, one or more Worker processes, and one tenant database. The Control Center is separate, stores its state in protected files, and does not host tenant work or provision tenants.
 
 Production readiness is still under validation. The repository does not include
 a production `ISecretVault` integration for the Control Center; its production

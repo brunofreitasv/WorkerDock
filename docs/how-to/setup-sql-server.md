@@ -31,6 +31,24 @@ disposable databases; never apply them to a runtime tenant. Quartz's attributed
 upstream source is retained for provenance and is not installed independently.
 The in-memory tutorial needs none of these SQL objects.
 
+### Fresh database snapshot
+
+Use `database/tenant/current-state.sql` only for a newly created, empty tenant
+database at compatibility level 160 or later. Generate the stable tenant GUID
+that Web, Scheduler, and Worker will share. In a working copy of the snapshot,
+replace every `__WORKERDOCK_INSTANCE_ID__` token with that GUID. If the runtime
+SQL login already exists on the server, edit the marked `CREATE USER` and
+`ALTER ROLE WorkerDockRuntime ADD MEMBER` statements to bind its database user.
+These statements belong in the same snapshot action so its role membership is
+committed or rolled back with the schema.
+
+Send the complete rendered file to the selected database as one SQL batch. Do
+not split it at `GO` separators or execute it in SQLCMD mode; the file contains
+its own transaction and rejects an ambient transaction. Its history rows are
+an equivalent satisfied state baseline, not a record that each earlier
+migration script ran. The snapshot represents the final state only and cannot
+upgrade an existing database. Live SQL parity remains unverified.
+
 ## Provision a tenant database
 
 As a SQL Server administrator, create an empty database and set its compatibility level:
@@ -49,17 +67,21 @@ must not be a database owner or receive DDL rights. Use your organization's
 approved SQL or Windows identity process; deployment scripts do not create
 server logins or database users.
 
-Apply migrations from the repository root with an explicit target from
+From a PowerShell session at the repository root, apply migrations with an explicit target from
 `database/tenant/manifest.json`. Build or publish the Web application so the
 assembly directory contains `WorkerDock.Web.dll`, its dependency manifest, and
 `WorkerDock.Infrastructure.dll`; for example, use `dotnet publish` with your
 selected configuration. Supply a newly generated stable tenant GUID and the
 separate deployment migration credential:
 
+The PowerShell host must run on .NET 10 or later; PowerShell 7 alone is not
+sufficient when its host is bound to an earlier .NET runtime. Check
+`[System.Environment]::Version` in the session before invoking the script.
+
 ```powershell
 $credential = Get-Credential '<TENANT_MIGRATION_LOGIN>'
 $assemblyDirectory = (Resolve-Path 'src/WorkerDock.Web/bin/Release/net10.0').Path
-pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1 `
+& scripts/Invoke-TenantMigration.ps1 `
   -Action Apply `
   -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 -Database '<TENANT_DATABASE>' `
   -Credential $credential -InstanceId '<stable-tenant-guid>' `
@@ -117,7 +139,7 @@ Take and verify a backup first. Rollbacks run one migration at a time and are gu
 
 ```powershell
 $credential = Get-Credential '<TENANT_MIGRATION_LOGIN>'
-pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1 `
+& scripts/Invoke-TenantMigration.ps1 `
   -Action Rollback -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 `
   -Database '<TENANT_DATABASE>' -Credential $credential `
   -InstanceId '<same-tenant-guid>' -TargetMigration '<explicit-migration-id>' `
