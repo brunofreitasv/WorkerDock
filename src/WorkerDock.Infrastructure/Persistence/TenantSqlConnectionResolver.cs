@@ -1,4 +1,3 @@
-using Microsoft.Data.SqlClient;
 using WorkerDock.Contracts.Secrets;
 
 namespace WorkerDock.Infrastructure.Persistence;
@@ -9,21 +8,12 @@ public static class TenantSqlConnectionResolver
     {
         TenantSqlConfiguration.Validate(settings);
         ct.ThrowIfCancellationRequested();
-        var builder = new SqlConnectionStringBuilder
-        {
-            DataSource = $"tcp:{settings.Host},{settings.Port}",
-            InitialCatalog = settings.Database,
-            UserID = settings.User,
-            Encrypt = SqlConnectionEncryptOption.Mandatory,
-            TrustServerCertificate = false,
-            PersistSecurityInfo = false
-        };
         try
         {
             using var password = await vault.ResolveAsync(settings.PasswordReference, ct);
             ct.ThrowIfCancellationRequested();
-            builder.Password = password.Reveal().ToString();
-            return builder.ConnectionString;
+            return TenantSqlConnectionBuilder.BuildWithPassword(
+                settings.Host, settings.Port, settings.Database, settings.User, password.Reveal().ToString());
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

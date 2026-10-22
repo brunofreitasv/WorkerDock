@@ -8,6 +8,34 @@ namespace WorkerDock.UnitTests;
 
 public sealed class TenantSqlConnectionTests
 {
+    [Fact]
+    public void BuildWithPassword_uses_validated_endpoint_and_required_tls()
+    {
+        var result = new SqlConnectionStringBuilder(TenantSqlConnectionBuilder.BuildWithPassword(
+            "sql.example.test", 1433, "tenant", "migration_user", "secret"));
+        Assert.Equal("tcp:sql.example.test,1433", result.DataSource);
+        Assert.Equal("tenant", result.InitialCatalog);
+        Assert.Equal("migration_user", result.UserID);
+        Assert.Equal("secret", result.Password);
+        Assert.Equal(SqlConnectionEncryptOption.Mandatory, result.Encrypt);
+        Assert.False(result.TrustServerCertificate);
+        Assert.False(result.PersistSecurityInfo);
+    }
+
+    [Theory]
+    [InlineData("bad;host", 1433, "tenant", "user", "password")]
+    [InlineData("sql.example.test", 0, "tenant", "user", "password")]
+    [InlineData("sql.example.test", 1433, "", "user", "password")]
+    [InlineData("sql.example.test", 1433, "tenant", "", "password")]
+    [InlineData("sql.example.test", 1433, "tenant", "user", "")]
+    public void BuildWithPassword_rejects_invalid_endpoint_or_empty_password(
+        string host, int port, string database, string user, string password)
+    {
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            TenantSqlConnectionBuilder.BuildWithPassword(host, port, database, user, password));
+        Assert.Equal("SqlConfigurationInvalid", error.Message);
+    }
+
     [Theory]
     [InlineData("Host")]
     [InlineData("Port")]

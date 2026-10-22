@@ -28,10 +28,18 @@ public static class TenantSqlConfiguration
 
     internal static void Validate(TenantSqlSettings settings)
     {
-        if (settings is null || !ValidHost(settings.Host) || settings.Port is < 1 or > 65535 ||
-            !ValidText(settings.Database) || !ValidText(settings.User) ||
+        if (settings is null)
+            throw new InvalidOperationException("SqlConfigurationInvalid");
+        ValidateEndpoint(settings.Host, settings.Port, settings.Database, settings.User);
+        if (
             settings.PasswordReference?.Name is not { Length: > 0 and <= 128 } reference ||
             !reference.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.'))
+            throw new InvalidOperationException("SqlConfigurationInvalid");
+    }
+
+    public static void ValidateEndpoint(string host, int port, string database, string user)
+    {
+        if (!ValidHost(host) || port is < 1 or > 65535 || !ValidText(database) || !ValidText(user))
             throw new InvalidOperationException("SqlConfigurationInvalid");
     }
 
