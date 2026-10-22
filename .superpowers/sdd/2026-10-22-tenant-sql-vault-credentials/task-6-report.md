@@ -15,4 +15,10 @@ Preserved the pre-existing unrelated hunks in `docs/tutorials/run-with-sql-serve
 
 ## Commit
 
-Task 6 paths and selected hunks were staged and the staged diff was inspected. The shared index was left untouched during Task 5's commit and resumed after the parent confirmed Task 5 commit `a7c5764` completed with scoped paths. Task 6 commit follows separately.
+Task 6 paths and selected hunks were committed as `0b1ef52` after the Task 5 commit `a7c5764` completed with scoped paths.
+
+## Fix round 1
+
+Set `DOTNET_ENVIRONMENT=Development` in the SQL setup migrator block and each applicable SQL tutorial command block (migrator, shared runtime setup, Tenant UI, Worker, Scheduler). This ensures fresh PowerShell windows satisfy the Development-only environment vault restriction. The pre-existing unrelated catalog digest edit in the tutorial remains unstaged.
+
+Verification: `pwsh -NoProfile -File tests/DeploymentSmoke.ps1` → `pass`.

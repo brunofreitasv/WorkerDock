@@ -45,6 +45,7 @@ server logins or database users.
 Apply the complete current tenant migration chain from the repository root. Supply a newly generated, stable GUID for this tenant and a protected migrator configuration file based on `deploy/config/migrator.example.json`. Its `Migrator:Sql` fields are `Host`, `Port`, `Database`, `User` and `PasswordReference`. Map the logical password reference through the deployment vault; never put the password or a connection string in the file. Keep the file ACL restricted to the deployment identity:
 
 ```powershell
+$env:DOTNET_ENVIRONMENT='Development'
 $env:WORKERDOCK_INSTANCE_ID='<stable-tenant-guid>'
 $env:WORKERDOCK_DEVELOPMENT_VAULT='1'
 $env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.migrator.sql.password":"TENANT_MIGRATOR_PASSWORD"}'

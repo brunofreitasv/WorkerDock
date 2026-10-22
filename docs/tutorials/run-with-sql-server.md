@@ -25,6 +25,7 @@ resolve its logical password reference from your Development vault mapping.
 The runtime SQL login must remain separate and restricted.
 
 ```powershell
+$env:DOTNET_ENVIRONMENT='Development'
 $env:WORKERDOCK_INSTANCE_ID='<stable-tenant-guid>'
 $env:WORKERDOCK_DEVELOPMENT_VAULT='1'
 $env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.migrator.sql.password":"TENANT_MIGRATOR_PASSWORD"}'
@@ -52,6 +53,7 @@ certificate in the local machine certificate store. SQL connections verify
 the server certificate; do not bypass validation.
 
 ```powershell
+$env:DOTNET_ENVIRONMENT='Development'
 $env:Tenant__InstanceId='<stable-tenant-guid>'
 $env:Tenant__Adapter='Sql'
 $env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
@@ -72,6 +74,7 @@ Tenant UI (serves the built frontend and API on the same origin):
 
 ```powershell
 $env:ASPNETCORE_ENVIRONMENT='Development'
+$env:DOTNET_ENVIRONMENT='Development'
 $env:Tenant__Adapter='Sql'
 $env:Tenant__InstanceId='<stable-tenant-guid>'
 $env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
@@ -91,6 +94,7 @@ HTTP 1.0.0/1.1.0 descriptors. Recompute it when changing a descriptor or
 adding a trusted template; a mismatch prevents the worker from starting.
 
 ```powershell
+$env:DOTNET_ENVIRONMENT='Development'
 $env:Tenant__InstanceId='<stable-tenant-guid>'
 $env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
 $env:Tenant__Sql__Port='1433'
@@ -111,6 +115,7 @@ dotnet run --project src/WorkerDock.Worker -c Release
 Scheduler:
 
 ```powershell
+$env:DOTNET_ENVIRONMENT='Development'
 $env:Tenant__InstanceId='<stable-tenant-guid>'
 $env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
 $env:Tenant__Sql__Port='1433'
