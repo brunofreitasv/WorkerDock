@@ -16,7 +16,7 @@ Start by checking the tenant's `/health/ready` endpoint, Windows service states,
 | Secret-backed jobs, health checks, or alerts return `SecretUnavailable` | Verify the relevant host registered a production `ISecretVault` adapter, its service identity, reference allowlist, and secret permissions | Install or correct the trusted adapter in that process; the repository's default development provider is unavailable unless explicitly enabled and is not a production integration. |
 | HTTP template cannot reach a destination | URL/host policy, DNS, TLS certificate validation, proxy/firewall rules, and egress allowlist | Permit only the approved destination and retry after confirming the remote effect is safe. |
 | Archive retention fails | Scheduler identity ACL, configured archive root, free space, manifest/checksum/read-back result | Preserve source rows, resolve storage or permission issue, then retry the same logical batch. Do not hand-delete source data. |
-| Upgrade is interrupted | Recovery journal, SQL migration history, backup verification, active release metadata, and service/IIS state | Follow [upgrade and restore](upgrade-and-restore.md); do not delete the journal or rerun blindly. The upgrade script does not auto-resume. |
+| Upgrade is interrupted | Recovery journal, SQL migration history, backup verification, active release metadata, and service/IIS state | Follow [upgrade and restore](upgrade-and-restore.md). Manually compare service and binary versions, migration history, release/configuration state, and verified backups; then reconcile the deployment or restore the matching database and application release before restarting. Do not rerun a partially completed deployment blindly. |
 
 ## Diagnostic boundaries
 

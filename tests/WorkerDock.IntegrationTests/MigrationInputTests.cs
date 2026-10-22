@@ -35,6 +35,15 @@ public sealed class MigrationInputTests
     }
 
     [Fact]
+    public void Troubleshooting_guide_documents_manual_interrupted_deployment_recovery()
+    {
+        var guide = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "docs", "how-to", "troubleshooting.md"));
+        Assert.DoesNotContain("The upgrade script does not auto-resume", guide, StringComparison.Ordinal);
+        Assert.Contains("Manually compare service and binary versions", guide, StringComparison.Ordinal);
+        Assert.Contains("verified backups", guide, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Current_guides_do_not_refer_to_removed_deployment_lifecycle_tools()
     {
         var root = FindRepositoryRoot();
