@@ -42,13 +42,22 @@ must not be a database owner or receive DDL rights. Use your organization's
 approved SQL or Windows identity process; deployment scripts do not create
 server logins or database users.
 
-Apply the complete current tenant migration chain from the repository root. Supply a newly generated, stable GUID for this tenant and a migrator connection string targeting the database. Keep secrets in protected deployment configuration:
+Apply the complete current tenant migration chain from the repository root. Supply a newly generated, stable GUID for this tenant and a protected migrator configuration file based on `deploy/config/migrator.example.json`. Its `Migrator:Sql` fields are `Host`, `Port`, `Database`, `User` and `PasswordReference`. Map the logical password reference through the deployment vault; never put the password or a connection string in the file. Keep the file ACL restricted to the deployment identity:
 
 ```powershell
 $env:WORKERDOCK_INSTANCE_ID='<stable-tenant-guid>'
-$env:WORKERDOCK_SQL='<tenant-migrator-connection-string>'
+$env:WORKERDOCK_DEVELOPMENT_VAULT='1'
+$env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.migrator.sql.password":"TENANT_MIGRATOR_PASSWORD"}'
+$env:TENANT_MIGRATOR_PASSWORD='<retrieve-from-protected-local-secret-store>'
+$env:Migrator__Sql__Host='<SQL_SERVER_FQDN>'
+$env:Migrator__Sql__Port='1433'
+$env:Migrator__Sql__Database='<TENANT_DATABASE>'
+$env:Migrator__Sql__User='<TENANT_MIGRATOR_LOGIN>'
+$env:Migrator__Sql__PasswordReference='tenant.migrator.sql.password'
 dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0008_retention
 ```
+
+`WORKERDOCK_DEVELOPMENT_VAULT` and its explicit secret map are for local Development only. Production must register the organization's `ISecretVault` adapter and resolve `PasswordReference` under the deployment migrator identity. Do not place credentials in command lines, shell history or source control.
 
 The runner applies every earlier migration in `database/tenant/manifest.json`, verifies both script checksums, checks server version and compatibility level, records migration history, and binds the database to the supplied instance ID. For a later release, apply its newest manifest migration ID. The migrator needs DDL rights only during migration.
 
@@ -71,7 +80,7 @@ sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
   -i .\deploy\permissions.rollback.sql
 ```
 
-Configure `Tenant__Adapter=Sql`, `Tenant__InstanceId` with the same GUID, and `Tenant__ConnectionString` with the application identity. The deployment package installer configures services and IIS; it does not create databases or run migrations.
+Configure each tenant web, scheduler and worker host with `Tenant:Adapter=Sql`, the same `Tenant:InstanceId`, and `Tenant:Sql:Host`, `Port`, `Database`, `User` and `PasswordReference`. Use the restricted application identity and an explicitly mapped logical reference. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in the host trust store. Do not enable trust-server-certificate bypasses. The deployment package installer configures services and IIS; it does not create databases or run migrations. Restart affected processes after rotating a vault password so new connections use it.
 
 ## Optional current Control Center
 
@@ -90,7 +99,6 @@ Take and verify a backup first. Rollbacks run one migration at a time and are gu
 
 ```powershell
 $env:WORKERDOCK_INSTANCE_ID='<same-tenant-guid>'
-$env:WORKERDOCK_SQL='<tenant-migrator-connection-string>'
 dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0008_retention
 ```
 

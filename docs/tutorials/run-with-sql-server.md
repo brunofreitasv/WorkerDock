@@ -15,19 +15,25 @@ hosts bound to localhost.
 - A stable, newly generated GUID for this database. Do not reuse the GUID from
   a memory run or another tenant.
 
-For SQL Server installation, database creation, grants, and connection string
-details, follow the [SQL Server setup guide](../how-to/setup-sql-server.md).
+For SQL Server installation, database creation and grants, follow the [SQL Server setup guide](../how-to/setup-sql-server.md).
 This tutorial uses placeholders and does not create or grant a database.
 
 ## Migrate and build
 
-At the repository root, set the migrator connection and tenant identity from
-your local secret store or deployment configuration. Avoid committing these
-values or saving credentials in shell history.
+At the repository root, configure the deployment-only migrator login and
+resolve its logical password reference from your Development vault mapping.
+The runtime SQL login must remain separate and restricted.
 
 ```powershell
 $env:WORKERDOCK_INSTANCE_ID='<stable-tenant-guid>'
-$env:WORKERDOCK_SQL='<dedicated-local-tenant-migrator-connection-string>'
+$env:WORKERDOCK_DEVELOPMENT_VAULT='1'
+$env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.migrator.sql.password":"TENANT_MIGRATOR_PASSWORD"}'
+$env:TENANT_MIGRATOR_PASSWORD='<retrieve-from-protected-local-secret-store>'
+$env:Migrator__Sql__Host='<SQL_SERVER_FQDN>'
+$env:Migrator__Sql__Port='1433'
+$env:Migrator__Sql__Database='<TENANT_DATABASE>'
+$env:Migrator__Sql__User='<TENANT_MIGRATOR_LOGIN>'
+$env:Migrator__Sql__PasswordReference='tenant.migrator.sql.password'
 dotnet run --project src/WorkerDock.DatabaseMigrator -c Release -- apply tenant 0008_retention
 
 dotnet restore WorkerDock.slnx --locked-mode
@@ -40,11 +46,22 @@ dotnet dev-certs https --trust
 `0008_retention` is the latest tenant migration in this checkout. Confirm the
 last ID in `database/tenant/manifest.json` if the checkout has advanced.
 
-Set the same tenant runtime settings in each service window:
+Set the tenant runtime settings and explicit Development vault mapping in each
+service window. Replace the placeholders, and trust the SQL Server issuing CA
+certificate in the local machine certificate store. SQL connections verify
+the server certificate; do not bypass validation.
 
 ```powershell
 $env:Tenant__InstanceId='<stable-tenant-guid>'
-$env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
+$env:Tenant__Adapter='Sql'
+$env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
+$env:Tenant__Sql__Port='1433'
+$env:Tenant__Sql__Database='<TENANT_DATABASE>'
+$env:Tenant__Sql__User='<TENANT_RUNTIME_LOGIN>'
+$env:Tenant__Sql__PasswordReference='tenant.runtime.sql.password'
+$env:WORKERDOCK_DEVELOPMENT_VAULT='1'
+$env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.runtime.sql.password":"TENANT_RUNTIME_PASSWORD"}'
+$env:TENANT_RUNTIME_PASSWORD='<retrieve-from-protected-local-secret-store>'
 ```
 
 ## Start the services
@@ -57,7 +74,14 @@ Tenant UI (serves the built frontend and API on the same origin):
 $env:ASPNETCORE_ENVIRONMENT='Development'
 $env:Tenant__Adapter='Sql'
 $env:Tenant__InstanceId='<stable-tenant-guid>'
-$env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
+$env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
+$env:Tenant__Sql__Port='1433'
+$env:Tenant__Sql__Database='<TENANT_DATABASE>'
+$env:Tenant__Sql__User='<TENANT_RUNTIME_LOGIN>'
+$env:Tenant__Sql__PasswordReference='tenant.runtime.sql.password'
+$env:WORKERDOCK_DEVELOPMENT_VAULT='1'
+$env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.runtime.sql.password":"TENANT_RUNTIME_PASSWORD"}'
+$env:TENANT_RUNTIME_PASSWORD='<retrieve-from-protected-local-secret-store>'
 dotnet run --project src/WorkerDock.Web --urls https://localhost:5001
 ```
 
@@ -68,7 +92,14 @@ adding a trusted template; a mismatch prevents the worker from starting.
 
 ```powershell
 $env:Tenant__InstanceId='<stable-tenant-guid>'
-$env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
+$env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
+$env:Tenant__Sql__Port='1433'
+$env:Tenant__Sql__Database='<TENANT_DATABASE>'
+$env:Tenant__Sql__User='<TENANT_RUNTIME_LOGIN>'
+$env:Tenant__Sql__PasswordReference='tenant.runtime.sql.password'
+$env:WORKERDOCK_DEVELOPMENT_VAULT='1'
+$env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.runtime.sql.password":"TENANT_RUNTIME_PASSWORD"}'
+$env:TENANT_RUNTIME_PASSWORD='<retrieve-from-protected-local-secret-store>'
 $env:Worker__InstallationId='<stable-unique-worker-installation-guid>'
 $env:Worker__CatalogDigest='8A719E8D8B3F5A5D5046ED8299D5D555F924F05B5E6AA64AE53B7F3A91AC2765'
 $env:Worker__HostCeiling='10'
@@ -81,7 +112,14 @@ Scheduler:
 
 ```powershell
 $env:Tenant__InstanceId='<stable-tenant-guid>'
-$env:Tenant__ConnectionString='<same-tenant-restricted-runtime-connection-string>'
+$env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
+$env:Tenant__Sql__Port='1433'
+$env:Tenant__Sql__Database='<TENANT_DATABASE>'
+$env:Tenant__Sql__User='<TENANT_RUNTIME_LOGIN>'
+$env:Tenant__Sql__PasswordReference='tenant.runtime.sql.password'
+$env:WORKERDOCK_DEVELOPMENT_VAULT='1'
+$env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.runtime.sql.password":"TENANT_RUNTIME_PASSWORD"}'
+$env:TENANT_RUNTIME_PASSWORD='<retrieve-from-protected-local-secret-store>'
 dotnet run --project src/WorkerDock.Scheduler -c Release
 ```
 
@@ -111,7 +149,8 @@ absolute `Central__Storage__DataDirectory` outside the release and web
 directories. Keep it protected for the center identity and administrators.
 The center instance ID must remain stable across restarts and restores. Tenant
 SQL setup above is unchanged; no central SQL provisioning or migration is
-needed. See [Control Center setup](../how-to/configure-control-center.md).
+needed. Restart each affected process after rotating the password in the local
+secret source. See [Control Center setup](../how-to/configure-control-center.md).
 
 Workers begin with zero acquisition limits. To allow one HTTP attempt, set
 both the template and this worker's limit after it has registered. In another

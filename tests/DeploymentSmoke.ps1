@@ -41,6 +41,31 @@ foreach ($configFile in Get-ChildItem -LiteralPath (Join-Path $deployRoot 'confi
     if ($configFile.Name -eq 'center.example.json' -and -not $example.Contains('Central')) { throw 'Center example does not use the Central host configuration section.' }
 }
 
+$sqlKeys = @('Host', 'Port', 'Database', 'User', 'PasswordReference')
+$tenantExample = Get-Content -LiteralPath (Join-Path $deployRoot 'config/tenant.example.json') -Raw | ConvertFrom-Json -AsHashtable
+$workerExample = Get-Content -LiteralPath (Join-Path $deployRoot 'config/worker.example.json') -Raw | ConvertFrom-Json -AsHashtable
+$migratorExamplePath = Join-Path $deployRoot 'config/migrator.example.json'
+if (-not (Test-Path -LiteralPath $migratorExamplePath -PathType Leaf)) { throw 'Migrator example is missing.' }
+$migratorExample = Get-Content -LiteralPath $migratorExamplePath -Raw | ConvertFrom-Json -AsHashtable
+foreach ($entry in @(
+    @{ Name = 'tenant'; Section = $tenantExample.Tenant },
+    @{ Name = 'worker'; Section = $workerExample.Tenant },
+    @{ Name = 'migrator'; Section = $migratorExample.Migrator }
+)) {
+    if ($entry.Section.Contains('ConnectionString')) { throw "$($entry.Name) example must not contain ConnectionString." }
+    if ($entry.Name -ne 'migrator' -and $entry.Section.Adapter -ne 'Sql') { throw "$($entry.Name) example must configure the Sql adapter." }
+    $sql = $entry.Section.Sql
+    if (-not $sql) { throw "$($entry.Name) example is missing its SQL settings." }
+    foreach ($key in $sqlKeys) {
+        if (-not $sql.Contains($key) -or $null -eq $sql[$key] -or [string]::IsNullOrWhiteSpace([string]$sql[$key])) {
+            throw "$($entry.Name) example is missing Tenant/Migrator Sql:$key."
+        }
+    }
+}
+if ($tenantExample.Tenant.Sql.PasswordReference -eq $migratorExample.Migrator.Sql.PasswordReference) {
+    throw 'Migrator example must use a distinct password reference from the tenant runtime example.'
+}
+
 if ($ConfigPath) {
     $config = Read-DeploymentConfig $ConfigPath
     if ($config.Contains('Tenant')) { [void](Assert-ConfigIdentity $config 'tenant' ([string]$config.Tenant.InstanceId)) }

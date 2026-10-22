@@ -1,14 +1,14 @@
 # Configuration reference
 
-Production configuration is normally kept in protected JSON files copied from `deploy/config/tenant.example.json`, `worker.example.json` and `center.example.json`. Files are stored under the installation root's `config` directory and retained across installer reruns and upgrades. A .NET environment variable uses double underscore (`__`) for each nested section. For example, `Tenant__ConnectionString` maps to `Tenant.ConnectionString`.
+Production configuration is normally kept in protected JSON files copied from `deploy/config/tenant.example.json`, `worker.example.json` and `center.example.json`. Files are stored under the installation root's `config` directory and retained across installer reruns and upgrades. A .NET environment variable uses double underscore (`__`) for each nested section. Tenant SQL fields are `Tenant:Sql:Host`, `Port`, `Database`, `User` and `PasswordReference`; tenant hosts also require `Tenant:Adapter=Sql` and `Tenant:InstanceId`. The corresponding environment names are `Tenant__Sql__Host`, `Tenant__Sql__Port`, `Tenant__Sql__Database`, `Tenant__Sql__User` and `Tenant__Sql__PasswordReference`.
 
 `WORKERDOCK_DEVELOPMENT_VAULT=1` enables the explicitly mapped environment-backed development secret provider; it is not a production vault integration. The tenant hosts currently register this development provider, which otherwise resolves no secrets. A production deployment must register its own `ISecretVault` adapter in every process that needs one. The Control Center rejects a missing production adapter at startup. See [secret integration](secrets.md).
 
 | Host | Configuration keys | Notes |
 | --- | --- | --- |
-| Tenant web | `Tenant:InstanceId`, `Tenant:ConnectionString`, `Tenant:Adapter`; `Access:*`; `DataProtection:KeyDirectory`; `Health:CredentialReference`; `Retention:ArchiveRoot` | SQL adapter in production. Optional Entra uses Authority, ClientId and ClientSecretReference together. |
-| Scheduler service | `Tenant:InstanceId`, `Tenant:ConnectionString`, `Retention:ArchiveRoot` | One per tenant. Runs schedules, projections, alerts and retention. |
-| Worker service | `Tenant:InstanceId`, `Tenant:ConnectionString`; `Worker:InstallationId`, `Worker:CatalogDigest`, `Worker:HostCeiling`, `Worker:DrainSeconds`; `Executor:Path`, `Executor:Arguments` | Unique worker installation GUID per service. Installer sets executor path to its release. |
+| Tenant web | `Tenant:InstanceId`, `Tenant:Adapter`, `Tenant:Sql:{Host,Port,Database,User,PasswordReference}`; `Access:*`; `DataProtection:KeyDirectory`; `Health:CredentialReference`; `Retention:ArchiveRoot` | SQL adapter in production. Optional Entra uses Authority, ClientId and ClientSecretReference together. |
+| Scheduler service | `Tenant:InstanceId`, `Tenant:Sql:{Host,Port,Database,User,PasswordReference}`, `Retention:ArchiveRoot` | One per tenant. Runs schedules, projections, alerts and retention. |
+| Worker service | `Tenant:InstanceId`, `Tenant:Adapter`, `Tenant:Sql:{Host,Port,Database,User,PasswordReference}`; `Worker:InstallationId`, `Worker:CatalogDigest`, `Worker:HostCeiling`, `Worker:DrainSeconds`; `Executor:Path`, `Executor:Arguments` | Unique worker installation GUID per service. Installer sets executor path to its release. |
 | Control Center web | `Central:InstanceId`, `Central:Storage:DataDirectory`; `Central:Adapter` (Development only for Memory); `Central:Health:AllowedHosts`, `Central:Health:AllowedPrivateCidrs`; `Access:*`; `DataProtection:KeyDirectory` | Stable center identity and absolute protected state directory outside release/web roots. AllowedHosts is mandatory. No central SQL connection is used. |
 
 ## Authentication keys
@@ -33,4 +33,4 @@ The scheduler uses `Retention.ArchiveRoot` for archive output. If set, this must
 
 ## SQL and migration variables
 
-The database migrator accepts `WORKERDOCK_SQL` and `WORKERDOCK_INSTANCE_ID` for tenant migrations, using `apply|rollback tenant <migration>`. Any database kind other than `tenant` is rejected before SQL access. See [database setup and migrations](../how-to/setup-sql-server.md) for the tenant SQL commands.
+The database migrator reads `Migrator:Sql:{Host,Port,Database,User,PasswordReference}` and `WORKERDOCK_INSTANCE_ID` for tenant migrations, using `apply|rollback tenant <migration>`. The migrator password reference must be distinct from the runtime reference and resolve under a deployment-only identity. Tenant upgrades pass a protected migrator file using `-MigratorConfigPath`; the upgrade preparation and migration commands use this config. Any database kind other than `tenant` is rejected before SQL access. See [database setup and migrations](../how-to/setup-sql-server.md) for the tenant SQL commands.

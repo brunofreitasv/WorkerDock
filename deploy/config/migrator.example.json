@@ -1,0 +1,11 @@
+{
+  "Migrator": {
+    "Sql": {
+      "Host": "<SQL_SERVER_FQDN>",
+      "Port": 1433,
+      "Database": "<TENANT_DATABASE>",
+      "User": "<TENANT_MIGRATOR_LOGIN>",
+      "PasswordReference": "tenant.migrator.sql.password"
+    }
+  }
+}

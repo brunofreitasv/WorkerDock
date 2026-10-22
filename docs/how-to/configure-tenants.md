@@ -9,7 +9,8 @@ Each tenant has a fixed instance GUID, one SQL database and separate runtime con
 | Setting | Purpose |
 | --- | --- |
 | `Tenant.InstanceId` | Stable tenant GUID, matching `-InstanceId` and every worker config. |
-| `Tenant.ConnectionString` | Tenant database connection using the restricted runtime identity; use encryption and certificate validation. |
+| `Tenant.Sql.Host`, `Tenant.Sql.Port`, `Tenant.Sql.Database` | SQL Server endpoint and tenant database. Use a DNS name or IP without an instance suffix. |
+| `Tenant.Sql.User`, `Tenant.Sql.PasswordReference` | Restricted runtime login and logical password reference resolved by the configured vault. Never store the password in config. |
 | `Tenant.Adapter` | Production SQL adapter (`Sql`). Memory mode is Development-only. |
 | `Access.Authority`, `Access.ClientId`, `Access.ClientSecretReference` | Optional Entra confidential app configuration. Supply all three or omit all three. |
 | `Access.RequiredManagementRole`, `Access.RoleClaimType` | Optional case-sensitive role required for management; default role claim is `roles`. |
@@ -17,11 +18,11 @@ Each tenant has a fixed instance GUID, one SQL database and separate runtime con
 | `Health.CredentialReference` | Uppercase logical reference used by the tenant `/health/ready` credential check. |
 | `Retention.ArchiveRoot` | Optional absolute archive directory writable by the scheduler identity. |
 
-`worker.example.json` supplies per-service settings. Its `Tenant.InstanceId` and connection must target the same tenant. `Worker.InstallationId` is a stable, unique GUID per worker service; `CatalogDigest` is the SHA-256 aggregate for the reviewed installed template catalog; `HostCeiling` sets that process's maximum host capacity; `DrainSeconds` accepts 1–60 seconds. `Executor.Path` is rewritten by the installer to the package's Windows executor path. `Executor.Arguments` is deployment-owned. The scheduler reads only the tenant database settings and is not separately configured as a worker.
+`worker.example.json` supplies per-service settings. Its `Tenant.InstanceId` and five `Tenant.Sql` fields must target the same tenant database as the web and scheduler. `Worker.InstallationId` is a stable, unique GUID per worker service; `CatalogDigest` is the SHA-256 aggregate for the reviewed installed template catalog; `HostCeiling` sets that process's maximum host capacity; `DrainSeconds` accepts 1–60 seconds. `Executor.Path` is rewritten by the installer to the package's Windows executor path. `Executor.Arguments` is deployment-owned. The scheduler reads the same tenant SQL settings and is not separately configured as a worker.
 
 For IIS and services, the installers copy the JSON files under `<InstallRoot>\config`, preserve them on rerun, and generate release-specific `appsettings` from those persistent files. Editing the original source file after install does not update the installed copy. Make configuration changes to the protected installed file and restart the affected process. Each additional worker receives its own JSON file and unique installation ID.
 
-Configuration can also be supplied through .NET environment variables, where `__` represents a section separator: for example `Tenant__InstanceId`, `Tenant__ConnectionString`, `Access__Authority`, `Worker__HostCeiling`, and `Executor__Path`. The deployment installers load protected JSON configuration; service environment variables must be set in the service's protected environment by deployment tooling. Do not place credentials in command lines, shell history or source control.
+Configuration can also be supplied through .NET environment variables, where `__` represents a section separator: for example `Tenant__InstanceId`, `Tenant__Sql__Host`, `Tenant__Sql__Port`, `Tenant__Sql__Database`, `Tenant__Sql__User`, and `Tenant__Sql__PasswordReference`. The deployment installers load protected JSON configuration; service environment variables must be set in the service's protected environment by deployment tooling. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in the host trust store. Do not place credentials in command lines, shell history or source control. Restart affected hosts after rotating a password in the vault.
 
 ## Authentication and views
 

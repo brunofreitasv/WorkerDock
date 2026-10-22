@@ -17,7 +17,7 @@ infrastructure before using this procedure for a live workload.
 
 Use Windows Server with IIS and the WebAdministration PowerShell module, PowerShell 7, the .NET 10 Hosting Bundle and a trusted HTTPS certificate in `LocalMachine\My`. Tenant databases require SQL Server 2022 or later with compatibility level 160. Create a dedicated database for every tenant. A fresh Control Center install has no SQL Server, central database, schema, SQL principal, connection string, or migrator requirement. Run installers from an elevated PowerShell 7 session.
 
-Use a deployment-only SQL identity for migrations and database backup operations. Runtime IIS and service identities use integrated authentication when possible and must not have DDL rights. Keep configuration, database credentials and Data Protection keys outside release packages. Install scripts restrict config and key directories to the configured identities and administrators. Preserve tenant and central instance GUIDs across restarts and upgrades.
+Use a deployment-only SQL identity for migrations and database backup operations, with a separate password reference and vault access policy. Runtime IIS and service identities use a restricted SQL login and password reference, and must not have DDL rights. Keep protected config files and Data Protection keys outside release packages. Install scripts restrict config and key directories to the configured identities and administrators. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in each host trust store. Restart affected processes after password rotation. Preserve tenant and central instance GUIDs across restarts and upgrades.
 
 ## Build and prepare SQL
 
@@ -41,7 +41,7 @@ The center does not use the tenant SQL permissions script.
 
 ## Install a tenant
 
-Copy `deploy/config/tenant.example.json` and `worker.example.json` to protected deployment storage. Set the same `Tenant.InstanceId` GUID in both files, the runtime connection string, Entra settings (if used), absolute Data Protection key and archive directories, and the worker's unique installation GUID, installed catalog digest, ceiling and drain time. Replace every placeholder. Use `Access.RequiredManagementRole` only when management must be restricted by role; remove it to allow any authenticated user to manage. See [tenant configuration](configure-tenants.md) and [authentication](configure-authentication.md).
+Copy `deploy/config/tenant.example.json` and `worker.example.json` to protected deployment storage. Set the same `Tenant.InstanceId` GUID and five `Tenant.Sql` values (`Host`, `Port`, `Database`, `User`, `PasswordReference`) in both files, Entra settings (if used), absolute Data Protection key and archive directories, and the worker's unique installation GUID, installed catalog digest, ceiling and drain time. Replace every placeholder. Map the logical password reference in the organization's vault; never place the password in JSON. Use `Access.RequiredManagementRole` only when management must be restricted by role; remove it to allow any authenticated user to manage. See [tenant configuration](configure-tenants.md) and [authentication](configure-authentication.md).
 
 Install using the package version whose migrations are applied:
 
@@ -102,7 +102,8 @@ pwsh -File .\deploy\Upgrade-Instance.ps1 `
   -InstallRoot 'C:\Program Files\WorkerDock\<TENANT>' `
   -ConfigPath 'C:\Program Files\WorkerDock\<TENANT>\config\tenant.json' `
   -PackagePath 'C:\WorkerDockPackages\workerdock-tenant-1.1.0.zip' `
-  -BackupPath '\\<SQL_BACKUP_SERVER>\WorkerDock\<TENANT>-before-1.1.0.bak'
+  -BackupPath '\\<SQL_BACKUP_SERVER>\WorkerDock\<TENANT>-before-1.1.0.bak' `
+  -MigratorConfigPath 'C:\WorkerDockConfig\<TENANT>\migrator.json'
 ```
 
 For a center upgrade, pass its `center.json`, center package and a new `.zip` backup path. The script requires stopped IIS, verifies state-format 1 support, archives and verifies the journal, health snapshot, configuration and active release with SHA-256 hashes, switches the release and leaves IIS stopped for review. It does not connect to SQL or run migrations. Start IIS manually and inspect readiness. Restore the verified archive with `Restore-CenterBackupArchive` from `WorkerDock.Deployment.psm1`, use the same center instance GUID and protected state directory, then run the archived compatible release. Preserve Data Protection keys. An uninstall must leave the persistent state directory intact.

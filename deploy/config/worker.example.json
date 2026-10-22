@@ -1,7 +1,14 @@
 {
   "Tenant": {
     "InstanceId": "<TENANT_INSTANCE_GUID>",
-    "ConnectionString": "Server=<SQL_SERVER>;Database=<TENANT_DATABASE>;Integrated Security=true;Encrypt=true;TrustServerCertificate=false;Application Name=WorkerDock-Worker"
+    "Adapter": "Sql",
+    "Sql": {
+      "Host": "<SQL_SERVER_FQDN>",
+      "Port": 1433,
+      "Database": "<TENANT_DATABASE>",
+      "User": "<TENANT_RUNTIME_LOGIN>",
+      "PasswordReference": "tenant.runtime.sql.password"
+    }
   },
   "Worker": {
     "InstallationId": "<WORKER_INSTALLATION_GUID>",

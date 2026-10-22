@@ -20,8 +20,11 @@ pwsh -File .\deploy\Upgrade-Instance.ps1 `
   -InstallRoot 'C:\Program Files\WorkerDock\<TENANT>' `
   -ConfigPath 'C:\Program Files\WorkerDock\<TENANT>\config\tenant.json' `
   -PackagePath 'C:\WorkerDockPackages\workerdock-tenant-1.1.0.zip' `
-  -BackupPath '\\<SQL_BACKUP_SERVER>\WorkerDock\<TENANT>-before-1.1.0.bak'
+  -BackupPath '\\<SQL_BACKUP_SERVER>\WorkerDock\<TENANT>-before-1.1.0.bak' `
+  -MigratorConfigPath 'C:\WorkerDockConfig\<TENANT>\migrator.json'
 ```
+
+`MigratorConfigPath` is required for tenant upgrades and points to protected JSON based on `deploy/config/migrator.example.json`. Its `Migrator:Sql` settings resolve through the deployment vault and use a separate migration/backup login and password reference. The tenant runtime configuration remains restricted to application rights.
 
 The tenant script requires the corresponding IIS site, application pool, scheduler, and worker services to be stopped before switching files. Before stopping them, an operator must block admission, inspect current executions, allow finite work to finish, and decide how to handle infinite-timeout jobs. The script cannot drain jobs or infer whether an external side effect is safe to repeat. It creates and verifies a SQL Server `COPY_ONLY` backup and a checksum-verified application ZIP, checks package hashes and schema compatibility, applies the package's migrations, writes a recovery journal with both backup paths, and stages the new release. It leaves services and IIS stopped for operator review and readiness checks.
 
