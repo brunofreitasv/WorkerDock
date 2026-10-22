@@ -41,7 +41,6 @@ public sealed class MonitoringAccessTests
             {
                 ["Tenant:Adapter"] = "Memory",
                 ["Tenant:InstanceId"] = Guid.NewGuid().ToString(),
-                ["Tenant:ConnectionString"] = "",
                 ["Health:CredentialReference"] = reference
             }));
             builder.ConfigureServices(services => services.AddSingleton<ISecretVault>(_ => new HealthTestVault(reference, token)));

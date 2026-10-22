@@ -33,11 +33,13 @@ using WorkerDock.Infrastructure.Alerts;
 using WorkerDock.Application.Retention;
 using WorkerDock.Infrastructure.Retention;
 using WorkerDock.Infrastructure.Values;
+using WorkerDock.Web;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddWorkerDockAccess();
 builder.Services.TryAddSingleton<TimeProvider>(TimeProvider.System);
-builder.Services.TryAddSingleton<ISecretVault>(_ => SecretVaultRegistration.CreateDevelopment());
+builder.Services.TryAddSingleton<ISecretVault>(provider => SecretVaultRegistration.CreateTenantSql(provider.GetRequiredService<IHostEnvironment>().IsDevelopment()));
+builder.Services.TryAddSingleton<TenantSqlStartup>();
 builder.Services.TryAddSingleton<IScheduleEvaluator, QuartzScheduleEvaluator>();
 var trustedTemplates = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
 {
@@ -56,10 +58,7 @@ builder.Services.TryAddSingleton<IJobCommands>(provider =>
     if (!Guid.TryParse(config["Tenant:InstanceId"], out var instanceId)) return new UnavailableJobCommands();
     if (config["Tenant:Adapter"] == "Memory")
         return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>(),profiles:provider.GetRequiredService<IConnectionProfiles>(),integrationSettings:provider.GetRequiredService<IIntegrationSettings>(),templateCatalog:provider.GetRequiredService<ITemplateCatalog>(),authoring:provider.GetRequiredService<ITemplateAuthoringService>()) : new UnavailableJobCommands();
-    var connection = config["Tenant:ConnectionString"];
-    return !string.IsNullOrWhiteSpace(connection)
-        ? new SqlJobCommands(new(connection, instanceId),provider.GetRequiredService<ITemplateCatalog>(),provider.GetRequiredService<ITemplateAuthoringService>())
-        : new UnavailableJobCommands();
+    return new SqlJobCommands(provider.GetRequiredService<TenantSqlStartup>().Options,provider.GetRequiredService<ITemplateCatalog>(),provider.GetRequiredService<ITemplateAuthoringService>());
 });
 builder.Services.TryAddSingleton<IIntegrationSettings>(provider =>
 {
@@ -67,8 +66,8 @@ builder.Services.TryAddSingleton<IIntegrationSettings>(provider =>
     var environment = provider.GetRequiredService<IHostEnvironment>();
     if (config["Tenant:Adapter"] == "Memory")
         return environment.IsDevelopment() ? new InMemoryIntegrationSettings() : new UnavailableIntegrationSettings();
-    return Guid.TryParse(config["Tenant:InstanceId"], out var instanceId) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlIntegrationSettings(new(config["Tenant:ConnectionString"]!, instanceId)) : new UnavailableIntegrationSettings();
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlIntegrationSettings(provider.GetRequiredService<TenantSqlStartup>().Options) : new UnavailableIntegrationSettings();
 });
 builder.Services.TryAddSingleton<ITenantSettingsService>(provider =>
 {
@@ -77,8 +76,7 @@ builder.Services.TryAddSingleton<ITenantSettingsService>(provider =>
     if (!Guid.TryParse(config["Tenant:InstanceId"], out var instanceId)) return new UnavailableTenantSettingsService();
     if (config["Tenant:Adapter"] == "Memory")
         return environment.IsDevelopment() ? new InMemoryTenantSettingsService(instanceId) : new UnavailableTenantSettingsService();
-    var connection = config["Tenant:ConnectionString"];
-    return !string.IsNullOrWhiteSpace(connection) ? new TenantSettingsService(new(connection, instanceId)) : new UnavailableTenantSettingsService();
+    return new TenantSettingsService(provider.GetRequiredService<TenantSqlStartup>().Options);
 });
 builder.Services.TryAddSingleton<IExecutionControls>(provider =>
 {
@@ -86,20 +84,20 @@ builder.Services.TryAddSingleton<IExecutionControls>(provider =>
     if (config["Tenant:Adapter"] == "Memory")
         return provider.GetRequiredService<IHostEnvironment>().IsDevelopment() && provider.GetRequiredService<IJobCommands>() is IExecutionControls controls
             ? controls : new UnavailableExecutionControls();
-    return Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlExecutionControls(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableExecutionControls();
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlExecutionControls(provider.GetRequiredService<TenantSqlStartup>().Options) : new UnavailableExecutionControls();
 });
 builder.Services.TryAddSingleton<ICapacityStore>(provider =>
 {
     var config=provider.GetRequiredService<IConfiguration>();
-    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlCapacityStore(new(config["Tenant:ConnectionString"]!,id)) : new UnavailableCapacityStore();
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlCapacityStore(provider.GetRequiredService<TenantSqlStartup>().Options) : new UnavailableCapacityStore();
 });
 builder.Services.TryAddSingleton<ICapacityCommands>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
-    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlCapacityCommands(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableCapacityCommands();
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlCapacityCommands(provider.GetRequiredService<TenantSqlStartup>().Options) : new UnavailableCapacityCommands();
 });
 builder.Services.TryAddSingleton<ITemplateCatalog>(provider =>
 {
@@ -110,35 +108,35 @@ builder.Services.TryAddSingleton<ITemplateCatalog>(provider =>
         catalog.RegisterAsync(trustedTemplates,default).GetAwaiter().GetResult();
         return catalog;
     }
-    return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlTemplateCatalog(new(config["Tenant:ConnectionString"]!,id),trustedTemplates) : new UnavailableTemplateCatalog();
+    return config["Tenant:Adapter"]!="Memory"
+        ? new SqlTemplateCatalog(provider.GetRequiredService<TenantSqlStartup>().Options,trustedTemplates) : new UnavailableTemplateCatalog();
 });
 builder.Services.TryAddSingleton<IConnectionProfiles>(provider =>
 {
     var config=provider.GetRequiredService<IConfiguration>();
     if(config["Tenant:Adapter"]=="Memory" && provider.GetRequiredService<IHostEnvironment>().IsDevelopment())return new InMemoryConnectionProfiles();
-    return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlConnectionProfiles(new(config["Tenant:ConnectionString"]!,id)) : new UnavailableConnectionProfiles();
+    return config["Tenant:Adapter"]!="Memory"
+        ? new SqlConnectionProfiles(provider.GetRequiredService<TenantSqlStartup>().Options) : new UnavailableConnectionProfiles();
 });
 builder.Services.TryAddSingleton<IProfileDiagnostics>(provider =>
 {
     var config=provider.GetRequiredService<IConfiguration>();
-    return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlProfileDiagnostics(new(config["Tenant:ConnectionString"]!,id)) : new UnavailableProfileDiagnostics();
+    return config["Tenant:Adapter"]!="Memory"
+        ? new SqlProfileDiagnostics(provider.GetRequiredService<TenantSqlStartup>().Options) : new UnavailableProfileDiagnostics();
 });
 builder.Services.TryAddSingleton<IScheduleCommands>(provider =>
 {
     var config=provider.GetRequiredService<IConfiguration>();
-    return config["Tenant:Adapter"]!="Memory" && Guid.TryParse(config["Tenant:InstanceId"],out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlScheduleCommands(new(config["Tenant:ConnectionString"]!,id),provider.GetRequiredService<IScheduleEvaluator>(),provider.GetRequiredService<TimeProvider>())
+    return config["Tenant:Adapter"]!="Memory"
+        ? new SqlScheduleCommands(provider.GetRequiredService<TenantSqlStartup>().Options,provider.GetRequiredService<IScheduleEvaluator>(),provider.GetRequiredService<TimeProvider>())
         : new UnavailableScheduleCommands();
 });
 builder.Services.TryAddSingleton<SqlJobLifecycle>(provider =>
 {
     var config=provider.GetRequiredService<IConfiguration>();
-    if(config["Tenant:Adapter"]=="Memory" || !Guid.TryParse(config["Tenant:InstanceId"],out var id) || string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"]))
+    if(config["Tenant:Adapter"]=="Memory")
         throw new WorkerDockException("PersistenceUnavailable");
-    return new SqlJobLifecycle(new(config["Tenant:ConnectionString"]!,id),provider.GetRequiredService<ITemplateCatalog>(),provider.GetRequiredService<IScheduleEvaluator>(),provider.GetRequiredService<TimeProvider>(),provider.GetRequiredService<ITemplateAuthoringService>());
+    return new SqlJobLifecycle(provider.GetRequiredService<TenantSqlStartup>().Options,provider.GetRequiredService<ITemplateCatalog>(),provider.GetRequiredService<IScheduleEvaluator>(),provider.GetRequiredService<TimeProvider>(),provider.GetRequiredService<ITemplateAuthoringService>());
 });
 builder.Services.TryAddSingleton<IJobLifecycle>(provider => provider.GetRequiredService<SqlJobLifecycle>());
 builder.Services.TryAddSingleton<IJobDuplicator>(provider => provider.GetRequiredService<SqlJobLifecycle>());
@@ -146,41 +144,41 @@ builder.Services.TryAddSingleton<IMonitoringQueries>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
     var clock = provider.GetRequiredService<TimeProvider>();
-    if (Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"]) && config["Tenant:Adapter"] != "Memory")
-        return new SqlMonitoringQueries(new(config["Tenant:ConnectionString"]!, id), clock);
+    if (config["Tenant:Adapter"] != "Memory")
+        return new SqlMonitoringQueries(provider.GetRequiredService<TenantSqlStartup>().Options, clock);
     return new UnavailableMonitoringQueries(Guid.TryParse(config["Tenant:InstanceId"], out var instanceId) ? instanceId : Guid.Empty, clock);
 });
 builder.Services.TryAddSingleton<IExecutionEventQueries>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
-    return Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"]) && config["Tenant:Adapter"] != "Memory"
-        ? new SqlExecutionEventQueries(new(config["Tenant:ConnectionString"]!, id))
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlExecutionEventQueries(provider.GetRequiredService<TenantSqlStartup>().Options)
         : new UnavailableExecutionEventQueries();
 });
 builder.Services.TryAddSingleton<UnavailableAlertConfigurations>();
 builder.Services.TryAddSingleton<IAlertRules>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
-    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlAlertRules(new(config["Tenant:ConnectionString"]!, id)) : provider.GetRequiredService<UnavailableAlertConfigurations>();
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlAlertRules(provider.GetRequiredService<TenantSqlStartup>().Options) : provider.GetRequiredService<UnavailableAlertConfigurations>();
 });
 builder.Services.TryAddSingleton<IAlertSinks>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
-    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlAlertRules(new(config["Tenant:ConnectionString"]!, id)) : provider.GetRequiredService<UnavailableAlertConfigurations>();
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlAlertRules(provider.GetRequiredService<TenantSqlStartup>().Options) : provider.GetRequiredService<UnavailableAlertConfigurations>();
 });
 builder.Services.TryAddSingleton<IAlertQueries>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
-    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlAlertQueries(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableAlertQueries();
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlAlertQueries(provider.GetRequiredService<TenantSqlStartup>().Options) : new UnavailableAlertQueries();
 });
 builder.Services.TryAddSingleton<IAlertDeliveryStore>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
-    return config["Tenant:Adapter"] != "Memory" && Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlAlertDeliveryStore(new(config["Tenant:ConnectionString"]!, id)) : new UnavailableAlertDeliveryStore();
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlAlertDeliveryStore(provider.GetRequiredService<TenantSqlStartup>().Options) : new UnavailableAlertDeliveryStore();
 });
 builder.Services.TryAddSingleton<IRetentionService>(provider =>
 {
@@ -188,11 +186,12 @@ builder.Services.TryAddSingleton<IRetentionService>(provider =>
     var environment = provider.GetRequiredService<IHostEnvironment>();
     if (config["Tenant:Adapter"] == "Memory")
         return environment.IsDevelopment() ? new InMemoryRetentionService() : new UnavailableRetentionService();
-    return Guid.TryParse(config["Tenant:InstanceId"], out var id) && !string.IsNullOrWhiteSpace(config["Tenant:ConnectionString"])
-        ? new SqlRetentionService(new(config["Tenant:ConnectionString"]!, id), config["Retention:ArchiveRoot"])
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlRetentionService(provider.GetRequiredService<TenantSqlStartup>().Options, config["Retention:ArchiveRoot"])
         : new UnavailableRetentionService();
 });
 var app = builder.Build();
+await app.Services.GetRequiredService<TenantSqlStartup>().InitializeAsync(app.Lifetime.ApplicationStopping);
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
     app.Services.GetRequiredService<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>().RemoveScheme("oidc");
@@ -260,7 +259,7 @@ app.Map("/api/{**path}", () => Results.NotFound());
 app.Map("/auth/{**path}", () => Results.NotFound());
 app.Map("/_test/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
-app.Run();
+await app.RunAsync();
 public partial class Program;
 internal sealed class UnavailableAlertQueries : IAlertQueries
 {

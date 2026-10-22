@@ -269,7 +269,6 @@ internal sealed class AccessHost : WebApplicationFactory<WorkerDock.Web.WebAssem
         {
             ["Tenant:Adapter"] = "Memory",
             ["Tenant:InstanceId"] = Guid.NewGuid().ToString(),
-            ["Tenant:ConnectionString"] = "",
             ["Access:Authority"] = issuer is null ? null : "https://issuer.example",
             ["Access:ClientId"] = issuer is null ? null : "tenant-client",
             ["Access:ClientSecretReference"] = issuer is null ? null : reference,

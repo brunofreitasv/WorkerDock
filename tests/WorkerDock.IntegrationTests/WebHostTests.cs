@@ -17,8 +17,7 @@ public sealed class WebHostTests
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Tenant:Adapter"] = "Memory",
-                    ["Tenant:InstanceId"] = instanceId.ToString(),
-                    ["Tenant:ConnectionString"] = ""
+                    ["Tenant:InstanceId"] = instanceId.ToString()
                 })));
         using var client = factory.CreateClient(new() { BaseAddress = new("https://localhost") });
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
@@ -78,7 +77,6 @@ public sealed class WebHostTests
                 {
                     ["Tenant:Adapter"] = "Memory",
                     ["Tenant:InstanceId"] = Guid.NewGuid().ToString(),
-                    ["Tenant:ConnectionString"] = "",
                     ["Retention:ArchiveRoot"] = "C:/secret/archive-root"
                 })));
         using var client = factory.CreateClient(new() { BaseAddress = new("https://localhost") });
@@ -113,11 +111,11 @@ public sealed class WebHostTests
     }
 
     [Fact]
-    public async Task Liveness_is_safe_and_readiness_fails_closed_without_database_configuration()
+    public async Task Memory_liveness_is_safe_and_readiness_fails_closed()
     {
         await using var factory = new WebApplicationFactory<WorkerDock.Web.WebAssemblyMarker>().WithWebHostBuilder(builder =>
-            builder.UseEnvironment("Production").ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Tenant:ConnectionString"] = "", ["Tenant:InstanceId"] = "", ["DataProtection:KeyDirectory"] = Path.Combine(Path.GetTempPath(), "WorkerDock-Keys-" + Guid.NewGuid().ToString("N")) })));
+            builder.UseEnvironment("Development").ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Tenant:Adapter"] = "Memory", ["Tenant:InstanceId"] = "", ["DataProtection:KeyDirectory"] = Path.Combine(Path.GetTempPath(), "WorkerDock-Keys-" + Guid.NewGuid().ToString("N")) })));
         using var client = factory.CreateClient(new() { BaseAddress = new("https://localhost") });
         var live = await client.GetAsync("/health/live");
         Assert.Equal(HttpStatusCode.OK, live.StatusCode);

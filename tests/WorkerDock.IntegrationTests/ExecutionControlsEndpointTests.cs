@@ -19,7 +19,7 @@ public sealed class ExecutionControlsEndpointTests
         {
             await using var host = new AccessHost();
             await using var configured = host.WithWebHostBuilder(builder => builder.UseEnvironment("Production").ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Tenant:Adapter"] = "Memory", ["Tenant:ConnectionString"] = "invalid", ["DataProtection:KeyDirectory"] = directory })));
+                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Tenant:Adapter"] = "Memory", ["DataProtection:KeyDirectory"] = directory })));
             using var client = configured.CreateClient(new() { BaseAddress = new("https://localhost"), AllowAutoRedirect = false });
             var token = (await client.GetFromJsonAsync<CsrfView>("/api/antiforgery"))!.RequestToken;
             using var response = await Send(client, token, $"/api/executions/{Guid.NewGuid()}/stop", new { force = false, confirmForce = false, reason = "request" });
