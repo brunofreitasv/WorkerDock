@@ -86,7 +86,8 @@ public sealed class MigrationTests
     public async Task Upgrade_creates_copy_only_backup_and_verifies_it()
     {
         var backupDirectory = Environment.GetEnvironmentVariable("WORKERDOCK_TEST_SQL_BACKUP_UNC");
-        if (string.IsNullOrWhiteSpace(backupDirectory)) return;
+        if (string.IsNullOrWhiteSpace(backupDirectory))
+            throw new InvalidOperationException("SQL_TEST_BLOCKED: configure WORKERDOCK_TEST_SQL_BACKUP_UNC for a new backup on a UNC share accessible to the disposable SQL Server and test process.");
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
