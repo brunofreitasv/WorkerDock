@@ -24,7 +24,7 @@ Only users with the management permission can edit rules and sinks or retry a de
 
 ## Database setup
 
-Apply tenant migration `0007_alerts` after the preceding tenant migrations using the database migrator. The matching rollback is `database/tenant/0007_alerts.down.sql`; it refuses to drop populated alert tables. The migration manifest contains SHA-256 checksums for both scripts. The database principal needs the migration permissions plus the runtime table grants declared at the end of the up migration.
+To add alert objects to a tenant, take and verify a backup, then apply the reviewed target through `scripts/Invoke-TenantMigration.ps1` as described in [SQL setup](../how-to/setup-sql-server.md). Migration `0007_alerts` is applied as part of the ordered chain when required. Its matching rollback refuses to drop populated alert tables; use explicit rollback selection and do not bypass its guard. The manifest contains SHA-256 checksums for both scripts. Use a separate migration credential and runtime principal.
 
 For local development, use the [in-memory tutorial](../tutorials/run-in-memory.md); it does not exercise SQL alert evaluation, leases, or outbox recovery. To verify delivery recovery, configure `WORKERDOCK_TEST_SQL` with a disposable SQL Server 2022+ instance as described in [SQL setup](../how-to/setup-sql-server.md), then run `dotnet test tests/WorkerDock.IntegrationTests --filter FullyQualifiedName~AlertDeliveryTests`. Migration checks that do not need SQL Server are `dotnet test tests/WorkerDock.IntegrationTests --filter 'FullyQualifiedName~CustomSqlSchemaTests|FullyQualifiedName~MigrationInputTests'`. Never put credentials in source control or test output.
 

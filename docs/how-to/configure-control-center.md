@@ -4,7 +4,7 @@ The Control Center is an optional ASP.NET Core application with its own React en
 
 ## Current setup
 
-A fresh Control Center needs no SQL Server database, SQL schema, SQL identity, SQL connection string, or database migrator. A nonempty `Central:ConnectionString` is rejected at startup. Configure a stable, nonempty `Central:InstanceId` and an absolute `Central:Storage:DataDirectory` outside the release and web directories. For example, use a persistent path such as `C:\ProgramData\WorkerDock\ControlCenter\state`; keep it across releases. The center writes its registry journal and advisory health snapshot there. Give Modify access only to the center IIS application-pool identity and administrators, and prevent the web server from serving the directory. Use one active center process per directory.
+A fresh Control Center stores its state in protected files and has no central SQL database, SQL identity, or SQL connection requirement. A nonempty `Central:ConnectionString` is rejected at startup. Configure a stable, nonempty `Central:InstanceId` and an absolute `Central:Storage:DataDirectory` outside the release and web directories. For example, use a persistent path such as `C:\ProgramData\WorkerDock\ControlCenter\state`; keep it across releases. The center writes its registry journal and advisory health snapshot there. Give Modify access only to the center IIS application-pool identity and administrators, and prevent the web server from serving the directory. Use one active center process per directory.
 
 The production file adapter is the default. In disposable Development runs, the in-memory adapter can be selected explicitly:
 

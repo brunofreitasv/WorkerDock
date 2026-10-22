@@ -1,6 +1,6 @@
-# Deploy WorkerDock on Windows Server
+# Deploy WorkerDock
 
-This procedure deploys one tenant and, optionally, a separate Control Center. A tenant consists of an IIS web application, a scheduler Windows service and one or more generic worker Windows services. The Control Center is a separate IIS application that stores its directory in protected files; it does not host tenant work or provision tenants.
+This guide describes the operator-managed deployment sequence for one tenant and, optionally, a separate Control Center. Windows Server, IIS, and Windows services are optional examples; another host and service manager can implement the same requirements. A tenant has a Web process, Scheduler process, one or more Worker processes, and one tenant database. The Control Center is separate, stores its state in protected files, and does not host tenant work or provision tenants.
 
 Production readiness is still under validation. The repository does not include
 a production `ISecretVault` integration for the Control Center; its production
@@ -8,102 +8,34 @@ host fails startup until a trusted adapter is registered. The tenant executor
 and scheduler currently call the development vault registration, which returns
 an unavailable provider unless the development-only environment mapping is
 enabled. Install and review your tenant vault adapter before relying on
-secret-backed jobs or alert sinks. These integration steps require code and
-deployment configuration; the installer does not supply an enterprise vault.
+secret-backed jobs or alert sinks. These integration steps require code and deployment configuration; the repository does not include an enterprise vault.
 Complete the [release checklist](../validation/release-checklist.md) on disposable
 infrastructure before using this procedure for a live workload.
 
 ## Requirements and identities
 
-Use Windows Server with IIS and the WebAdministration PowerShell module, PowerShell 7, the .NET 10 Hosting Bundle and a trusted HTTPS certificate in `LocalMachine\My`. Tenant databases require SQL Server 2022 or later with compatibility level 160. Create a dedicated database for every tenant. A fresh Control Center install has no SQL Server, central database, schema, SQL principal, connection string, or migrator requirement. Run installers from an elevated PowerShell 7 session.
+For the optional Windows/IIS deployment example, use Windows Server, PowerShell 7, the .NET 10 Hosting Bundle, IIS and a trusted HTTPS certificate. Configure TLS and service identities with your selected tooling. Tenant databases require SQL Server 2022 or later with compatibility level 160; create a dedicated database for each tenant. A fresh Control Center deployment has no SQL Server, central database, schema, SQL principal, or connection string.
 
-Use a deployment-only SQL identity for migrations and database backup operations, with a separate password reference and vault access policy. Runtime IIS and service identities use a restricted SQL login and password reference, and must not have DDL rights. Keep protected config files and Data Protection keys outside release packages. Install scripts restrict config and key directories to the configured identities and administrators. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in each host trust store. Restart affected processes after password rotation. Preserve tenant and central instance GUIDs across restarts and upgrades.
+Use a migration credential separate from the restricted runtime SQL identity. Protect migration credentials and database backups through your organization's approved processes. Runtime IIS and service identities use a restricted SQL login and password reference, and must not have DDL rights. Keep protected config files and Data Protection keys outside release packages. Set ACLs on protected configuration and key directories for the configured identities and administrators. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in each host trust store. Restart affected processes after password rotation. Preserve tenant and central instance GUIDs across restarts and upgrades.
 
 ## Build and prepare SQL
 
-Build release packages from a clean source checkout:
+Choose and review build and deployment tooling for your environment. WorkerDock leaves build and deployment tooling to the operator. For example, publish .NET services with `dotnet publish` and build the frontend with `npm.cmd --prefix frontend run build`, then assemble only reviewed release files. These are examples; package contents, signing, transfer, installation, configuration protection, and service registration are operator-selected.
 
-```powershell
-pwsh -File .\deploy\Build-Packages.ps1 -Version 1.0.0
-```
+Create one dedicated tenant database per tenant at compatibility level 160. Use either ordered migrations through `scripts/Invoke-TenantMigration.ps1` with an explicit target, a reviewed Web assembly directory, and an operator-supplied migration credential, or `database/tenant/current-state.sql` for a fresh empty database only. The snapshot cannot be used to upgrade an existing database. These paths are design alternatives; live SQL parity has not been verified. Use the separate deployment identity for migration and `database/tenant/permissions.sql` to grant an existing runtime principal membership in `WorkerDockRuntime`.
 
-The script produces tenant and center ZIP packages under `artifacts/packages/`. The tenant package retains its database migrator and schema compatibility window. The center package contains only the web component and declares state format compatibility 1; it has no migrator or SQL scripts.
+## Deploy a tenant
 
-Create tenant databases at compatibility level 160, then apply the tenant migration manifest using the deployment-only migrator connection. The exact migrator syntax and tenant target are in [SQL setup and migrations](setup-sql-server.md). Bind the tenant application principal to its runtime role after migration. From the repository root, for example:
+Prepare protected runtime files using `examples/config/tenant.example.json` and `worker.example.json`. Set the same stable `Tenant.InstanceId` and SQL database in Web, Scheduler, and each Worker configuration. Configure the restricted runtime identity, password reference, production vault adapter, TLS trust, Data Protection key directory, worker installation GUID and catalog digest. Keep secrets out of files and artifacts.
 
-```powershell
-sqlcmd -S '<SQL_SERVER>' -d '<TENANT_DATABASE>' -E -b `
-  -v TenantRuntimePrincipal="<TENANT_DB_USER>" `
-  -i .\deploy\permissions.sql
-```
+Before applying any migration, take and verify the operator-managed SQL backup. Block admission and dispatch, review and drain active executions, and stop Web, Scheduler, Worker and Executor processes. Apply the explicitly selected migration. Record migration result and checksums with the release evidence.
 
-The center does not use the tenant SQL permissions script.
+Assemble and deploy the chosen application binaries and frontend using organization-approved tooling. Preserve per-tenant configuration and stable instance IDs. Runtime configuration changes take effect after restarting affected processes. Start the processes and web host manually, then verify `/health/ready`, worker heartbeats, schedules, recent executions and logs before reopening admission. Use the release compatibility window and backup to guide recovery; see [upgrade and restore](upgrade-and-restore.md).
 
-## Install a tenant
+Windows Server and IIS are optional deployment examples. If used, configure bindings, TLS, service identities and ACLs through the selected tooling; no repository lifecycle scripts perform these steps.
 
-Copy `deploy/config/tenant.example.json` and `worker.example.json` to protected deployment storage. Set the same `Tenant.InstanceId` GUID and five `Tenant.Sql` values (`Host`, `Port`, `Database`, `User`, `PasswordReference`) in both files, Entra settings (if used), absolute Data Protection key and archive directories, and the worker's unique installation GUID, installed catalog digest, ceiling and drain time. Replace every placeholder. Map the logical password reference in the organization's vault; never place the password in JSON. Use `Access.RequiredManagementRole` only when management must be restricted by role; remove it to allow any authenticated user to manage. See [tenant configuration](configure-tenants.md) and [authentication](configure-authentication.md).
+## Deploy the Control Center
 
-Install using the package version whose migrations are applied:
+Prepare protected configuration from `examples/config/center.example.json`. Set a stable `Central.InstanceId`, absolute persistent `Central.Storage.DataDirectory` outside release and web directories, allowed health hosts, protected key path, and the production vault adapter. The Control Center stores tenant registrations and health state in files and does not use SQL. Back up its state and configuration through operator-selected tooling before a release change. Preserve the state directory and instance ID; configuration updates are persisted in files and take effect after process restart. Verify center `/health/ready` and registered tenant probes after start.
 
-```powershell
-pwsh -File .\deploy\Install-Tenant.ps1 `
-  -InstanceId '<TENANT_GUID>' `
-  -InstallRoot 'C:\Program Files\WorkerDock\<TENANT>' `
-  -ConfigPath 'C:\WorkerDockConfig\<TENANT>\tenant.json' `
-  -WorkerConfigPath 'C:\WorkerDockConfig\<TENANT>\worker.json' `
-  -PackagePath 'C:\WorkerDockPackages\workerdock-tenant-1.0.0.zip' `
-  -SiteName 'WorkerDock-<TENANT>' `
-  -HostName '<TENANT_HOSTNAME>' `
-  -CertificateThumbprint '<CERTIFICATE_THUMBPRINT>'
-```
-
-The installer verifies package hashes, creates an HTTPS SNI binding on port 443, an IIS application pool, scheduler and worker services, and protected persistent config. It uses the supplied service account options or the per-service virtual accounts. Accepted service identities are the service virtual account, LocalService, NetworkService or a gMSA; ordinary password-based accounts are rejected. The scheduler runs as `Production`; each worker has a service-specific environment name. The installer does not start services or the site. Review configuration, SQL connectivity and ACLs before starting them.
-
-The web host, scheduler and worker are separate processes. The scheduler owns schedules, dispatch/reconciliation and maintenance; worker services acquire execution work and start contained executor children. Add independent process capacity with another worker installation GUID and service name:
-
-```powershell
-pwsh -File .\deploy\Install-Worker.ps1 `
-  -InstanceId '<TENANT_GUID>' `
-  -InstallRoot 'C:\Program Files\WorkerDock\<TENANT>' `
-  -ConfigPath 'C:\WorkerDockConfig\<TENANT>\worker-02.json' `
-  -PackagePath 'C:\WorkerDockPackages\workerdock-tenant-1.0.0.zip' `
-  -ServiceName 'WorkerDock-<TENANT>-Worker02'
-```
-
-Its config needs the same tenant GUID and connection, but its own installation GUID. Keep its package version aligned to the active tenant release. Job creation and concurrency limits do not install services.
-
-## Install the Control Center
-
-The center uses its own stable instance GUID, protected file state, app registration, keys and runtime identity. Prepare `center.json` from `deploy/config/center.example.json`; set `Central.InstanceId`, an absolute `Central.Storage.DataDirectory` outside the release/web directories, `Central.Health.AllowedHosts`, center access settings and protected key path. Give the IIS app-pool identity Modify access to the state directory; the installer creates and protects it. Keep this directory across release changes and uninstall. Install it separately:
-
-```powershell
-pwsh -File .\deploy\Install-Center.ps1 `
-  -InstanceId '<CENTER_GUID>' `
-  -InstallRoot 'C:\Program Files\WorkerDock\ControlCenter' `
-  -ConfigPath 'C:\WorkerDockConfig\ControlCenter\center.json' `
-  -PackagePath 'C:\WorkerDockPackages\workerdock-center-1.0.0.zip' `
-  -SiteName 'WorkerDock-ControlCenter' `
-  -HostName '<CONTROL_CENTER_HOSTNAME>' `
-  -CertificateThumbprint '<CERTIFICATE_THUMBPRINT>'
-```
-
-The center needs no central SQL connection; a nonempty `Central:ConnectionString` is rejected. The center health vault must be implemented for production and bound to a center-only identity; the application deliberately fails production startup without an `ISecretVault` adapter. Resolve only approved tenant health credential references. Do not grant that identity access to tenant databases or credentials. Details for tenant registration URL and credential reference are in [configure tenants](configure-tenants.md) and [Control Center](configure-control-center.md).
-
-## Start and check
-
-After checking tenant SQL roles and app settings, start each configured Windows service and IIS site/application pool manually. Verify the web `/health/ready` endpoint, service status, event logs and worker heartbeats before directing users to the dashboard. The center checks journal readiness without SQL and probes only each registered tenant's fixed `/health/ready` endpoint; its result is advisory. Protect all public bindings with TLS. If TLS terminates at a proxy, configure trusted forwarding explicitly.
-
-## Upgrade and rollback
-
-Read [upgrade and restore](upgrade-and-restore.md) before each release. Block new admissions, inspect running executions and decide how to handle infinite-timeout jobs. Stop tenant services, IIS site and application pool manually. Then run the upgrade script with the persisted config, matching package, and a new UNC `.bak` location writable by the SQL Server service account:
-
-```powershell
-pwsh -File .\deploy\Upgrade-Instance.ps1 `
-  -InstallRoot 'C:\Program Files\WorkerDock\<TENANT>' `
-  -ConfigPath 'C:\Program Files\WorkerDock\<TENANT>\config\tenant.json' `
-  -PackagePath 'C:\WorkerDockPackages\workerdock-tenant-1.1.0.zip' `
-  -BackupPath '\\<SQL_BACKUP_SERVER>\WorkerDock\<TENANT>-before-1.1.0.bak' `
-  -MigratorConfigPath 'C:\WorkerDockConfig\<TENANT>\migrator.json'
-```
-
-For a center upgrade, pass its `center.json`, center package and a new `.zip` backup path. The script requires stopped IIS, verifies state-format 1 support, archives and verifies the journal, health snapshot, configuration and active release with SHA-256 hashes, switches the release and leaves IIS stopped for review. It does not connect to SQL or run migrations. Start IIS manually and inspect readiness. Restore the verified archive with `Restore-CenterBackupArchive` from `WorkerDock.Deployment.psm1`, use the same center instance GUID and protected state directory, then run the archived compatible release. Preserve Data Protection keys. An uninstall must leave the persistent state directory intact.
+See [tenant configuration](configure-tenants.md), [SQL setup](setup-sql-server.md), and [upgrade and restore](upgrade-and-restore.md). Complete the [release checklist](../validation/release-checklist.md) on disposable infrastructure before live use.

@@ -4,9 +4,9 @@ Use this checklist for a candidate release. A checked source build or portable s
 
 ## Candidate and packages
 
-- [ ] Select a version and confirm tenant and center package kinds.
-- [ ] Build from a clean, reviewed source checkout using locked dependencies.
-- [ ] Record package SHA-256 values and migration manifest/checksums.
+- [ ] Select a version and record the operator-selected build and deployment process.
+- [ ] Build from a clean, reviewed source checkout using locked dependencies; record the selected tooling and artifact inventory.
+- [ ] Record artifact SHA-256 values and migration manifest/checksums. Take and verify an operator-managed tenant database backup before migration.
 - [ ] Set tenant and center schema compatibility windows only from tested evidence.
 - [ ] Confirm packages and deployment examples contain no secrets or customer data.
 - [ ] Review third-party licenses/notices and include required attribution in distributed artifacts.

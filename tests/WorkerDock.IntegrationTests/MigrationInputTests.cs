@@ -6,6 +6,64 @@ namespace WorkerDock.IntegrationTests;
 public sealed class MigrationInputTests
 {
     [Fact]
+    public void Upgrade_guide_documents_builtin_template_migration_preflight_and_recovery()
+    {
+        var guide = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "docs", "how-to", "upgrade-and-restore.md"));
+        Assert.Contains("0010_remove_builtin_v1", guide, StringComparison.Ordinal);
+        Assert.Contains("execution refers to a built-in 1.0.0 revision", guide, StringComparison.Ordinal);
+        Assert.Contains("verified pre-upgrade database backup", guide, StringComparison.Ordinal);
+        Assert.Contains("stop the tenant Web, scheduler, and Worker services", guide, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Current_database_guides_document_manual_migration_and_fresh_snapshot_paths()
+    {
+        var root = FindRepositoryRoot();
+        var setup = File.ReadAllText(Path.Combine(root, "docs", "how-to", "setup-sql-server.md"));
+        var tutorial = File.ReadAllText(Path.Combine(root, "docs", "tutorials", "run-with-sql-server.md"));
+        var upgrade = File.ReadAllText(Path.Combine(root, "docs", "how-to", "upgrade-and-restore.md"));
+        Assert.Contains("scripts/Invoke-TenantMigration.ps1", setup, StringComparison.Ordinal);
+        Assert.Contains("Operator chooses a preparation path", setup, StringComparison.Ordinal);
+        Assert.Contains("database/tenant/current-state.sql", setup, StringComparison.Ordinal);
+        Assert.Contains("fresh-install-only", setup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Deployment-only migrator", setup, StringComparison.Ordinal);
+        Assert.Contains("database/tenant/current-state.sql", tutorial, StringComparison.Ordinal);
+        Assert.Contains("operator-managed SQL Server backup", upgrade, StringComparison.Ordinal);
+        Assert.Contains("scripts/Invoke-TenantMigration.ps1", upgrade, StringComparison.Ordinal);
+        Assert.True(upgrade.IndexOf("operator-managed SQL Server backup", StringComparison.Ordinal) <
+                    upgrade.IndexOf("scripts/Invoke-TenantMigration.ps1", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Current_guides_do_not_refer_to_removed_deployment_lifecycle_tools()
+    {
+        var root = FindRepositoryRoot();
+        var files = Directory.GetFiles(Path.Combine(root, "docs", "how-to"), "*.md")
+            .Concat(Directory.GetFiles(Path.Combine(root, "docs", "reference"), "*.md"))
+            .Concat(Directory.GetFiles(Path.Combine(root, "docs", "tutorials"), "*.md"))
+            .Append(Path.Combine(root, "README.md"));
+        foreach (var file in files)
+        {
+            var guide = File.ReadAllText(file);
+            Assert.DoesNotContain("Upgrade-Instance.ps1", guide, StringComparison.Ordinal);
+            Assert.DoesNotContain("Build-Packages.ps1", guide, StringComparison.Ordinal);
+            Assert.DoesNotContain("WorkerDock.DatabaseMigrator", guide, StringComparison.Ordinal);
+        }
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "README.md")) &&
+                Directory.Exists(Path.Combine(directory.FullName, "docs")))
+                return directory.FullName;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the WorkerDock repository root.");
+    }
+
+    [Fact]
     public void Tenant_manifest_checksums_match_every_up_and_down_script()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");

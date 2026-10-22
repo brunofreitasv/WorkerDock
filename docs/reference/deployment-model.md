@@ -24,7 +24,7 @@ vault integration is installed and verified. Complete the
 [release checklist](../validation/release-checklist.md) against disposable Windows and SQL
 infrastructure before live use.
 
-The deployment scripts require elevated PowerShell 7 for IIS and service setup.
+Windows/IIS hosting is an optional deployment example. Configure IIS and services through the operator-selected tooling.
 Use SQL Server 2022 or newer with a separate database per tenant. Apply tenant
 migrations before starting applications, then map each tenant runtime identity
 to `WorkerDockRuntime` in its tenant database. The current Control Center uses
@@ -33,12 +33,7 @@ it has no SQL principal. Runtime identities must not have schema-change rights.
 Keep configuration, credentials, and Data Protection keys outside release
 packages, protected by the relevant application identities.
 
-Installers validate package manifest file sizes and hashes, preserve protected
-configuration and Data Protection keys on reruns, and leave IIS and services
-stopped for operator review. Worker configurations need distinct installation
-GUIDs and the reviewed template catalog digest; additional workers must use the
-active tenant release. Resolve conflicting IIS names or installation identities
-before retrying an installer.
+Deployment tooling should preserve protected configuration and Data Protection keys across releases. Worker configurations need distinct installation GUIDs and the reviewed template catalog digest; additional workers must use the active tenant release. Resolve conflicting host names or installation identities before deploying.
 
 Before opening the application to users, start the configured services and site,
 check `/health/ready`, Windows service states and event logs, and verify worker
@@ -49,8 +44,6 @@ external secret provider, or restore path has been validated. The portable
 package-manifest hash handling only; it does not provision IIS or verify live
 SQL Server, Entra, or workload behavior.
 
-For upgrades and restores, follow [upgrade and restore](../how-to/upgrade-and-restore.md). The upgrade
-script leaves IIS and services stopped after staging; operators must start them
-manually and verify readiness and execution state. SQL Server is required for
+For upgrades and restores, follow [upgrade and restore](../how-to/upgrade-and-restore.md). Operators stop and start services manually and verify readiness and execution state. SQL Server is required for
 each deployed tenant; the Control Center can run without SQL. Memory mode is for
 Development and tests only.

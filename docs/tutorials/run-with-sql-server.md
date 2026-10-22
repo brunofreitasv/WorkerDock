@@ -10,7 +10,7 @@ hosts bound to localhost.
 
 - Windows, .NET SDK 10.0.402, Node.js 24.15.0 or a compatible maintained Node
   release, and SQL Server 2022 or later.
-- A dedicated empty tenant database, a deployment-only migrator login with DDL
+- A dedicated empty tenant database, a migration credential with temporary DDL
   rights, and a restricted runtime login with membership in `WorkerDockRuntime`.
 - A stable, newly generated GUID for this database. Do not reuse the GUID from
   a memory run or another tenant.
@@ -20,22 +20,24 @@ This tutorial uses placeholders and does not create or grant a database.
 
 ## Migrate and build
 
-At the repository root, configure the deployment-only migrator login and
-resolve its logical password reference from your Development vault mapping.
+At the repository root, prepare a fresh empty database with either the migration
+script below or the fresh-only `database/tenant/current-state.sql` snapshot. The
+snapshot must not be applied to an existing database. Live SQL parity between
+these two design paths has not been verified. Use a separate operator-supplied SQL migration login. Supply its `PSCredential`
+from your approved vault process or retrieve it through the protected PowerShell
+credential prompt; never place its password in shell history.
 The runtime SQL login must remain separate and restricted.
 
 ```powershell
 $env:DOTNET_ENVIRONMENT='Development'
-$env:WORKERDOCK_INSTANCE_ID='<stable-tenant-guid>'
-$env:WORKERDOCK_DEVELOPMENT_VAULT='1'
-$env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.migrator.sql.password":"TENANT_MIGRATOR_PASSWORD"}'
-$env:TENANT_MIGRATOR_PASSWORD='<retrieve-from-protected-local-secret-store>'
-$env:Migrator__Sql__Host='<SQL_SERVER_FQDN>'
-$env:Migrator__Sql__Port='1433'
-$env:Migrator__Sql__Database='<TENANT_DATABASE>'
-$env:Migrator__Sql__User='<TENANT_MIGRATOR_LOGIN>'
-$env:Migrator__Sql__PasswordReference='tenant.migrator.sql.password'
-dotnet run --project src/WorkerDock.DatabaseMigrator -c Release -- apply tenant 0008_retention
+$credential = Get-Credential '<OPERATOR_SQL_LOGIN>'
+dotnet publish src/WorkerDock.Web -c Release -o artifacts/web
+pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1 `
+  -Action Apply -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 `
+  -Database '<TENANT_DATABASE>' -Credential $credential `
+  -InstanceId '<stable-tenant-guid>' -TargetMigration '0010_remove_builtin_v1' `
+  -ScriptsRoot (Resolve-Path 'database').Path `
+  -AssemblyDirectory (Resolve-Path 'artifacts/web').Path
 
 dotnet restore WorkerDock.slnx --locked-mode
 npm.cmd --prefix frontend ci
@@ -44,8 +46,7 @@ dotnet publish src/WorkerDock.Executor -c Release -r win-x64 --self-contained fa
 dotnet dev-certs https --trust
 ```
 
-`0008_retention` is the latest tenant migration in this checkout. Confirm the
-last ID in `database/tenant/manifest.json` if the checkout has advanced.
+Choose and review the explicit target from `database/tenant/manifest.json`. The sample publishes the Web assembly first because the migration script loads the reviewed migration implementation from that output directory.
 
 Set the tenant runtime settings and explicit Development vault mapping in each
 service window. Replace the placeholders, and trust the SQL Server issuing CA
@@ -89,8 +90,8 @@ dotnet run --project src/WorkerDock.Web --urls https://localhost:5001
 ```
 
 Worker (choose a stable unique installation GUID). The digest below is
-`TemplateMetadata.AggregateDigest` of the installed SQL Server 1.0.0/1.1.0 and
-HTTP 1.0.0/1.1.0 descriptors. Recompute it when changing a descriptor or
+`TemplateMetadata.AggregateDigest` of the installed SQL Server and HTTP 1.1.0
+descriptors. Recompute it when changing a descriptor or
 adding a trusted template; a mismatch prevents the worker from starting.
 
 ```powershell

@@ -1,8 +1,8 @@
 # Database objects
 
-WorkerDock's only runtime SQL schema is the tenant schema in `database/tenant`. Tenant migrations have `.up.sql` and `.down.sql` files listed in a checksummed manifest. Apply tenant migrations with `WorkerDock.DatabaseMigrator`; do not execute an individual runtime script by hand or edit a migration after it has been applied. New schema changes use a new migration pair.
+WorkerDock's only runtime SQL schema is the tenant schema in `database/tenant`. Tenant migrations have `.up.sql` and `.down.sql` files listed in a checksummed manifest. Prepare tenant migrations with `scripts/Invoke-TenantMigration.ps1`, explicitly selecting the target migration. The optional script uses the reviewed Web and Infrastructure assemblies; do not execute an individual runtime script by hand or edit an applied migration. New schema changes use a new migration pair.
 
-All tenant-owned objects are under `[workerdock]`. Tenant application connections use the restricted runtime role created by tenant migrations. Current Control Center state is held in protected files, not SQL objects, and it has no SQL runtime principal. `deploy/permissions.sql` only adds an existing tenant database user or group to `WorkerDockRuntime`; it does not create roles, schemas, tables, procedures, or grants.
+All tenant-owned objects are under `[workerdock]`. Tenant application connections use the restricted runtime role created by tenant migrations. Current Control Center state is held in protected files, not SQL objects, and it has no SQL runtime principal. `database/tenant/permissions.sql` only adds an existing tenant database user or group to `WorkerDockRuntime`; it does not create roles, schemas, tables, procedures, or grants.
 
 ## Runtime tenant schema
 
@@ -24,6 +24,8 @@ All tenant-owned objects are under `[workerdock]`. Tenant application connection
 | `0008_retention` | retention policy, archive batches/items, request tombstones, purge audit, guarded purge procedures |
 
 Quartz schema is included in tenant migration `0002_quartz`; the source SQL Server script is preserved with its license and notices in `database/upstream/quartz-4.5.1/`. WorkerDock changes its table prefixes and schema to `[workerdock]`, and creates separate stores for scheduling and execution publishing. Do not install the upstream script independently. The paired down migration refuses to drop populated stores.
+
+`database/tenant/current-state.sql` is a convenience snapshot for provisioning a fresh, empty tenant database only. Never apply it to an existing database or use it for upgrades; use the ordered, checksummed migrations instead. `scripts/Invoke-TenantMigration.ps1` requires an explicit migration target. The `database/tenant/permissions.sql` script assigns an existing principal to the runtime role; `permissions.rollback.sql` removes that membership.
 
 ## Test-only SQL objects
 

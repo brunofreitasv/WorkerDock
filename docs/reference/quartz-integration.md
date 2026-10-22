@@ -33,7 +33,7 @@ The SQL schema comes from the attributed Quartz 4.5.1 SQL Server script in
 `database/upstream/quartz-4.5.1/`. `0002_quartz.up.sql` creates two prefixed
 copies of its creation section and grants `WorkerDockRuntime` table DML plus
 schema-history read. `0002_quartz.down.sql` refuses populated stores and drops
-both table sets in a migrator-owned serializable transaction. The upstream
+both table sets in one serializable migration transaction. The upstream
 script is retained for attribution and must not be run directly because its
 default drops existing Quartz tables. See [database.md](database-migrations.md) for exact
 local setup and [development.md](../validation/development-checks.md) for memory commands.

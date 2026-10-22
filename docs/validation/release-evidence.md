@@ -20,6 +20,8 @@ Record the exact checkout, tool versions, command, result and artifact location 
 - Production vault integration and secret rotation — NOT RUN; production adapters must first be implemented and installed for the relevant hosts.
 - Hosted GitHub workflows — NOT RUN from this worktree; CI workflow outcomes must be attached to a reviewed revision before release.
 
+Current deployments use operator-selected build and deployment tools. Before an explicit tenant migration, record the verified database backup, selected target migration, migration result, released binaries/configuration, readiness checks, and restore evidence. The SQL snapshot path is limited to fresh empty databases; live SQL parity with migrations remains unverified.
+
 ## Candidate evidence to attach
 
 For a release candidate, append the source commit and package checksums, SQL schema version/checksum, supported Windows/IIS/.NET/SQL versions, test runner identity, sanitized logs, backup/restore artifacts, identity-provider test summary, fault-matrix results and workload report. Keep secrets, customer data, and connection strings out of this file and its attachments.

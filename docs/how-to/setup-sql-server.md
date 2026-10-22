@@ -6,20 +6,27 @@ WorkerDock tenant databases require SQL Server 2022 or newer with database compa
 
 ```mermaid
 flowchart LR
-    subgraph Runtime["Runtime installation"]
-        Manifest["Versioned migration manifests"] --> Migrator["Deployment-only migrator"]
-        Migrator --> TenantDb[("Tenant database<br/>[workerdock] + Quartz tables")]
-        TenantApps["Tenant web, scheduler, workers"] -->|"restricted WorkerDockRuntime role"| TenantDb
-        CenterApp["Optional Control Center"] --> CenterFiles[("Protected state directory")]
-    end
+    Operator["Operator chooses a preparation path"]
+    Manifest["Versioned tenant migration manifest"] --> MigrationScript["Explicit target via Invoke-TenantMigration.ps1"]
+    Snapshot["Fresh-only current-state.sql snapshot"]
+    Operator --> MigrationScript
+    Operator --> Snapshot
+    MigrationScript --> TenantDb[("Tenant database<br/>[workerdock] + Quartz tables")]
+    Snapshot --> TenantDb
+    TenantApps["Tenant web, scheduler, workers"] -->|"restricted WorkerDockRuntime role"| TenantDb
+    CenterApp["Optional Control Center"] --> CenterFiles[("Protected state directory")]
     subgraph Tests["Disposable SQL integration tests only"]
         Fixtures["tests/sql + integration fixture scripts"] --> TestDb[("Generated WorkerDock_Test_* database")]
     end
 ```
 
-The tenant runtime manifest under `database/tenant` creates application objects
-and includes paired rollback scripts. It is the only production migration
-source. The `tests/sql` scripts create only fixture objects in generated
+For a tenant database, the operator chooses one preparation path: apply the
+ordered, checksummed migrations listed in `database/tenant/manifest.json` with
+an explicit target using `scripts/Invoke-TenantMigration.ps1`, or apply
+`database/tenant/current-state.sql` to a fresh empty database. The snapshot is
+fresh-install-only and must never be applied to an existing tenant or used as
+an upgrade. These paths are design alternatives; live SQL parity has not been
+verified. The `tests/sql` scripts create only fixture objects in generated
 disposable databases; never apply them to a runtime tenant. Quartz's attributed
 upstream source is retained for provenance and is not installed independently.
 The in-memory tutorial needs none of these SQL objects.
@@ -33,7 +40,7 @@ CREATE DATABASE [WorkerDockTenant];
 ALTER DATABASE [WorkerDockTenant] SET COMPATIBILITY_LEVEL = 160;
 ```
 
-Provision a deployment migrator identity with permission to create schemas,
+Provision a separate migration identity with permission to create schemas,
 tables, procedures and roles and to grant permissions in this dedicated
 database. A temporary `db_owner` membership is one way to supply these
 installation rights; remove it after migration. Provision a separate long-lived
@@ -42,25 +49,35 @@ must not be a database owner or receive DDL rights. Use your organization's
 approved SQL or Windows identity process; deployment scripts do not create
 server logins or database users.
 
-Apply the complete current tenant migration chain from the repository root. Supply a newly generated, stable GUID for this tenant and a protected migrator configuration file based on `deploy/config/migrator.example.json`. Its `Migrator:Sql` fields are `Host`, `Port`, `Database`, `User` and `PasswordReference`. Map the logical password reference through the deployment vault; never put the password or a connection string in the file. Keep the file ACL restricted to the deployment identity:
+Apply migrations from the repository root with an explicit target from
+`database/tenant/manifest.json`. Build or publish the Web application so the
+assembly directory contains `WorkerDock.Web.dll`, its dependency manifest, and
+`WorkerDock.Infrastructure.dll`; for example, use `dotnet publish` with your
+selected configuration. Supply a newly generated stable tenant GUID and the
+separate deployment migration credential:
 
 ```powershell
-$env:DOTNET_ENVIRONMENT='Development'
-$env:WORKERDOCK_INSTANCE_ID='<stable-tenant-guid>'
-$env:WORKERDOCK_DEVELOPMENT_VAULT='1'
-$env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.migrator.sql.password":"TENANT_MIGRATOR_PASSWORD"}'
-$env:TENANT_MIGRATOR_PASSWORD='<retrieve-from-protected-local-secret-store>'
-$env:Migrator__Sql__Host='<SQL_SERVER_FQDN>'
-$env:Migrator__Sql__Port='1433'
-$env:Migrator__Sql__Database='<TENANT_DATABASE>'
-$env:Migrator__Sql__User='<TENANT_MIGRATOR_LOGIN>'
-$env:Migrator__Sql__PasswordReference='tenant.migrator.sql.password'
-dotnet run --project src/WorkerDock.DatabaseMigrator -- apply tenant 0008_retention
+$credential = Get-Credential '<TENANT_MIGRATION_LOGIN>'
+$assemblyDirectory = (Resolve-Path 'src/WorkerDock.Web/bin/Release/net10.0').Path
+pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1 `
+  -Action Apply `
+  -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 -Database '<TENANT_DATABASE>' `
+  -Credential $credential -InstanceId '<stable-tenant-guid>' `
+  -TargetMigration '0010_remove_builtin_v1' `
+  -ScriptsRoot (Resolve-Path 'database').Path `
+  -AssemblyDirectory $assemblyDirectory
 ```
 
-`WORKERDOCK_DEVELOPMENT_VAULT` and its explicit secret map are for local Development only. Production must register the organization's `ISecretVault` adapter and resolve `PasswordReference` under the deployment migrator identity. Do not place credentials in command lines, shell history or source control.
+Select the target appropriate for the reviewed release; do not copy an example
+ID without checking the manifest. The script applies earlier migrations in
+order, verifies script checksums and schema history, checks server version and
+compatibility level, and binds the database to the supplied instance ID. Keep
+the migration identity separate from the long-lived runtime identity and remove
+its temporary DDL grants after migration.
 
-The runner applies every earlier migration in `database/tenant/manifest.json`, verifies both script checksums, checks server version and compatibility level, records migration history, and binds the database to the supplied instance ID. For a later release, apply its newest manifest migration ID. The migrator needs DDL rights only during migration.
+`WORKERDOCK_DEVELOPMENT_VAULT` and its explicit secret map are for local Development only. Production must follow the organization's approved protected credential process for the migration identity. The script prompts through a PowerShell credential object; do not place credentials in command lines, shell history or source control.
+
+The script applies every earlier migration in `database/tenant/manifest.json`, verifies both script checksums, checks server version and compatibility level, records migration history, and binds the database to the supplied instance ID. For a later release, apply its newest manifest migration ID. The migration identity needs DDL rights only during migration.
 
 After migration, ensure the tenant application identity is mapped to a
 database user, then add that principal to the runtime role. From the repository
@@ -70,18 +87,18 @@ server and database principal placeholders:
 ```powershell
 sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
   -v TenantRuntimePrincipal="<TENANT_DB_USER>" `
-  -i .\deploy\permissions.sql
+  -i .\database\tenant\permissions.sql
 ```
 
-`deploy/permissions.sql` adds a supplied tenant principal to `WorkerDockRuntime`; the tenant migration defines the grants. The tenant role contains the application's required data access, including DML for both Quartz stores. It does not grant schema changes. To remove an explicit role membership:
+`database/tenant/permissions.sql` adds a supplied tenant principal to `WorkerDockRuntime`; the tenant migration defines the grants. The tenant role contains the application's required data access, including DML for both Quartz stores. It does not grant schema changes. To remove an explicit role membership:
 
 ```powershell
 sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
   -v TenantRuntimePrincipal="<TENANT_DB_USER>" `
-  -i .\deploy\permissions.rollback.sql
+  -i .\database\tenant\permissions.rollback.sql
 ```
 
-Configure each tenant web, scheduler and worker host with `Tenant:Adapter=Sql`, the same `Tenant:InstanceId`, and `Tenant:Sql:Host`, `Port`, `Database`, `User` and `PasswordReference`. Use the restricted application identity and an explicitly mapped logical reference. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in the host trust store. Do not enable trust-server-certificate bypasses. The deployment package installer configures services and IIS; it does not create databases or run migrations. Restart affected processes after rotating a vault password so new connections use it.
+Configure each tenant web, scheduler and worker host with `Tenant:Adapter=Sql`, the same `Tenant:InstanceId`, and `Tenant:Sql:Host`, `Port`, `Database`, `User` and `PasswordReference`. Use the restricted application identity and an explicitly mapped logical reference. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in the host trust store. Do not enable trust-server-certificate bypasses. The deployment tooling configures services and hosts; SQL setup and migrations are an explicit operator step. Restart affected processes after rotating a vault password so new connections use it.
 
 ## Optional current Control Center
 
@@ -99,8 +116,13 @@ tenant.
 Take and verify a backup first. Rollbacks run one migration at a time and are guarded against discarding populated state. Stop all web, scheduler, worker, and publisher processes before rollback. For a truly empty disposable tenant database, remove the runtime membership, then run:
 
 ```powershell
-$env:WORKERDOCK_INSTANCE_ID='<same-tenant-guid>'
-dotnet run --project src/WorkerDock.DatabaseMigrator -- rollback tenant 0008_retention
+$credential = Get-Credential '<TENANT_MIGRATION_LOGIN>'
+pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1 `
+  -Action Rollback -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 `
+  -Database '<TENANT_DATABASE>' -Credential $credential `
+  -InstanceId '<same-tenant-guid>' -TargetMigration '<explicit-migration-id>' `
+  -ScriptsRoot (Resolve-Path 'database').Path `
+  -AssemblyDirectory (Resolve-Path 'src/WorkerDock.Web/bin/Release/net10.0').Path
 ```
 
 Continue with preceding IDs only when their down scripts' empty-state requirements are satisfied. For a populated database, restore a backup or perform a separately planned data migration; do not bypass a rollback guard. The Control Center has no SQL rollback because it stores its state in protected files.
