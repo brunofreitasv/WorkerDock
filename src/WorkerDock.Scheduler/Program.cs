@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Quartz;
 using Quartz.Extensibility;
@@ -30,18 +31,19 @@ using WorkerDock.Templates.Http;
 using WorkerDock.Templates.SqlServer;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Services.TryAddSingleton<ISecretVault>(_ => SecretVaultRegistration.CreateTenantSql(builder.Environment.IsDevelopment()));
 builder.Services.AddWindowsService();
 builder.Services.AddHostedService<SchedulerService>();
 await builder.Build().RunAsync();
 
-internal sealed class SchedulerService(IConfiguration configuration) : BackgroundService
+internal sealed class SchedulerService(IConfiguration configuration, ISecretVault secrets) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!Guid.TryParse(configuration["Tenant:InstanceId"], out var instanceId) || instanceId == Guid.Empty ||
-            string.IsNullOrWhiteSpace(configuration["Tenant:ConnectionString"]))
+        if (!Guid.TryParse(configuration["Tenant:InstanceId"], out var instanceId) || instanceId == Guid.Empty)
             throw new WorkerDockException("SchedulerConfigurationUnavailable");
-        var connection = configuration["Tenant:ConnectionString"]!;
+        TenantSqlConfiguration.RejectLegacy(configuration, "Tenant:ConnectionString");
+        var connection = await TenantSqlConnectionResolver.ResolveAsync(TenantSqlConfiguration.Read(configuration, "Tenant:Sql"), secrets, stoppingToken);
         await using var topology = new QuartzTopology(new(connection, instanceId));
         var node = new QuartzNodeOptions(instanceId, Guid.NewGuid().ToString("N"), 4);
         var handle = await topology.CreateExecutionPublisherAsync(node, stoppingToken);

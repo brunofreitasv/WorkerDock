@@ -4,6 +4,8 @@
     <ProjectReference Include="../../src/WorkerDock.Runtime/WorkerDock.Runtime.csproj" />
     <ProjectReference Include="../../src/WorkerDock.Quartz/WorkerDock.Quartz.csproj" />
     <ProjectReference Include="../../src/WorkerDock.Executor/WorkerDock.Executor.csproj" />
+    <ProjectReference Include="../../src/WorkerDock.Scheduler/WorkerDock.Scheduler.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../src/WorkerDock.Worker/WorkerDock.Worker.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../WorkerDock.TestTemplates/WorkerDock.TestTemplates.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="xunit" /><PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
     <Using Include="Xunit" />

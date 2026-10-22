@@ -2,6 +2,7 @@ using WorkerDock.Contracts.Templates;
 using WorkerDock.Infrastructure.Templates;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Quartz;
 using Quartz.Extensibility;
@@ -18,19 +19,23 @@ using WorkerDock.Infrastructure.Workers;
 using WorkerDock.Quartz.Capacity;
 using WorkerDock.Application.Observability;
 using WorkerDock.Infrastructure.Observability;
+using WorkerDock.Contracts.Secrets;
+using WorkerDock.Infrastructure.Secrets;
+using WorkerDock.Infrastructure.Persistence;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Services.TryAddSingleton<ISecretVault>(_ => SecretVaultRegistration.CreateTenantSql(builder.Environment.IsDevelopment()));
 builder.Services.AddWindowsService();
 builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(90));
 builder.Services.AddHostedService<WorkerService>();
 await builder.Build().RunAsync();
 
-internal sealed class WorkerService(IConfiguration configuration) : BackgroundService
+internal sealed class WorkerService(IConfiguration configuration, ISecretVault secrets) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!OperatingSystem.IsWindows() || !Guid.TryParse(configuration["Tenant:InstanceId"], out var instanceId) || instanceId == Guid.Empty ||
-            string.IsNullOrWhiteSpace(configuration["Tenant:ConnectionString"]) || string.IsNullOrWhiteSpace(configuration["Executor:Path"]))
+            string.IsNullOrWhiteSpace(configuration["Executor:Path"]))
             throw new WorkerDockException("WorkerConfigurationUnavailable");
         if (!Guid.TryParse(configuration["Worker:InstallationId"], out var installationId) || installationId == Guid.Empty ||
             configuration["Worker:CatalogDigest"] is not { Length: 64 } catalogDigest)
@@ -38,8 +43,10 @@ internal sealed class WorkerService(IConfiguration configuration) : BackgroundSe
         var ceiling = configuration.GetValue("Worker:HostCeiling", 10);
         var drainSeconds = configuration.GetValue("Worker:DrainSeconds", 40);
         if (drainSeconds is < 1 or > 60) throw new WorkerDockException("WorkerConfigurationUnavailable");
+        TenantSqlConfiguration.RejectLegacy(configuration, "Tenant:ConnectionString");
+        var connection = await TenantSqlConnectionResolver.ResolveAsync(TenantSqlConfiguration.Read(configuration, "Tenant:Sql"), secrets, stoppingToken);
         var boot = Guid.NewGuid().ToString("N");
-        var database = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(configuration["Tenant:ConnectionString"]!, instanceId);
+        var database = new TenantDatabaseOptions(connection, instanceId);
         await using var bufferedEvents = new BufferedExecutionEvents(new SqlExecutionEvents(database));
         // Explicit installed descriptors only. Built-in packages are added here with their reviewed handler references.
         IReadOnlyList<TemplateDescriptor> installedDescriptors=[new WorkerDock.Templates.SqlServer.SqlTemplate("1.0.0").Descriptor, new WorkerDock.Templates.SqlServer.SqlTemplate("1.1.0").Descriptor, WorkerDock.Templates.Http.HttpTemplateDescriptors.Get("1.0.0"), WorkerDock.Templates.Http.HttpTemplateDescriptors.Get("1.1.0")];
@@ -52,7 +59,7 @@ internal sealed class WorkerService(IConfiguration configuration) : BackgroundSe
             configuration.GetSection("Executor:Arguments").Get<string[]>() ?? [],
             installedDescriptors.ToDictionary(x=>x.Id+"@"+x.Version,x=>x.MetadataDigest,StringComparer.Ordinal)), bufferedEvents);
         var monitor = new OwnershipMonitor(store, store, supervisor, TimeProvider.System);
-        await using var topology = new QuartzTopology(new(configuration["Tenant:ConnectionString"]!, instanceId));
+        await using var topology = new QuartzTopology(new(connection, instanceId));
         var initial = await capacity.TransactAsync((s, _) => s.Snapshot, stoppingToken);
         var execution = await topology.CreateExecutionAsync(new(instanceId, boot, ceiling)
             { StartClosed = true, TemplateLimits = initial.TemplateLimits.ToDictionary(x => x.Key, _ => 0) }, new Factory(store, monitor, boot), stoppingToken);
