@@ -86,7 +86,6 @@ public sealed class AlertDeliveryTests
         var evaluator = new IncidentEvaluator(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
         Assert.Equal(1, await evaluator.EvaluateAsync(DateTimeOffset.UtcNow, 10, default));
         Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].AlertRules WHERE RuleId='{ruleId}' AND CurrentRevision=1 AND LastEvaluatedAtUtc IS NOT NULL"));
-        Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AlertEvaluationState WHERE LastRuleId IS NOT NULL"));
         var ruleStore = new SqlAlertRules(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
         var evaluatedRule = await ruleStore.GetAsync(ruleId, default);
         await ruleStore.SaveAsync(evaluatedRule.Rule with { Name = "Worker down revised" }, evaluatedRule.Version,

@@ -55,11 +55,11 @@ public sealed class CustomSqlSchemaTests
             .Select(match => match.Groups["name"].Value)) tables.Remove(dropped);
         var reviewed = new[]
         {
-            "AlertDeliveries", "AlertDeliveryAttempts", "AlertEvaluationState", "AlertIncidents", "AlertRuleRevisions", "AlertRules", "AlertSinkRevisions", "AlertSinks",
+            "AlertDeliveries", "AlertDeliveryAttempts", "AlertIncidents", "AlertRuleRevisions", "AlertRules", "AlertSinkRevisions", "AlertSinks",
             "ArchiveBatches", "ArchiveBatchItems", "Attempts", "AuditEvents", "Commands", "ConnectionProfileRevisions", "ConnectionProfiles",
             "ExecutionMetricAggregates", "Executions", "IntegrationSettings", "IntegrationSettingsRevisions", "JobRevisions", "Jobs",
-            "ManualRequestDedup", "OperationalEvents", "RetentionRequestTombstones",
-            "RuntimeStatus", "ScheduleRecoveryEvents", "ScheduleRuleScanState", "Schedules", "SchemaHistory",
+            "OperationalEvents", "RetentionRequestTombstones",
+            "RuntimeStatus", "ScheduleRuleScanState", "Schedules", "SchemaHistory",
             "TemplateCatalog", "TenantSettings"
         };
         Assert.Equal(reviewed.Order(StringComparer.Ordinal), tables.Order(StringComparer.Ordinal));
@@ -126,10 +126,29 @@ public sealed class CustomSqlSchemaTests
             .Order(StringComparer.Ordinal);
         var expectedSeeds = new[]
         {
-            "AlertEvaluationState", "IntegrationSettings", "IntegrationSettingsRevisions",
+            "IntegrationSettings", "IntegrationSettingsRevisions",
             "RuntimeStatus", "ScheduleRuleScanState", "SchemaHistory", "TemplateCatalog", "TenantSettings"
         }.Order(StringComparer.Ordinal);
         Assert.Equal(expectedSeeds, seededTables);
+    }
+
+    [Fact]
+    public void Fresh_baseline_keeps_dedup_recovery_and_alert_cursors_on_owner_rows()
+    {
+        var root = Root;
+        var up = File.ReadAllText(Path.Combine(root, "database", "tenant", "0001_initial.up.sql"));
+        var snapshot = File.ReadAllText(Path.Combine(root, "database", "tenant", "current-state.sql"));
+        foreach (var sql in new[] { up, snapshot })
+        {
+            Assert.DoesNotContain("ManualRequestDedup", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("ScheduleRecoveryEvents", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("AlertEvaluationState", sql, StringComparison.Ordinal);
+            Assert.Contains("ManualRequestExpiresAtUtc", sql, StringComparison.Ordinal);
+            Assert.Contains("UX_Executions_ManualRequest", sql, StringComparison.Ordinal);
+            Assert.Contains("ManualRequestExpiresAtUtc<SYSUTCDATETIME()", sql, StringComparison.Ordinal);
+            Assert.Contains("EventKind=N'ScheduleRecovery'", sql, StringComparison.Ordinal);
+            Assert.Contains("LastEvaluatedAtUtc", sql, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -166,6 +185,9 @@ public sealed class CustomSqlSchemaTests
         foreach (var obsolete in new[] { "Outbox", "ProjectionMaintenance", "Workers", "WorkerCapabilities", "ServiceHealth", "TemplatePolicies", "PolicyRevisions", "JobPermits", "AttemptStatusEvents", "ExecutionEvents" })
             Assert.DoesNotContain($"CREATE TABLE [workerdock].{obsolete}", up, StringComparison.Ordinal);
         Assert.DoesNotContain("CREATE TABLE [workerdock].RetentionPolicy", up, StringComparison.Ordinal);
+        Assert.DoesNotContain("ManualRequestDedup", up, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScheduleRecoveryEvents", up, StringComparison.Ordinal);
+        Assert.DoesNotContain("AlertEvaluationState", up, StringComparison.Ordinal);
         Assert.Contains("JOIN sys.objects o ON o.object_id=t.object_id", down);
         Assert.Contains("TemplateId NOT IN(N'workerdock.sql-server',N'workerdock.http')", down);
     }

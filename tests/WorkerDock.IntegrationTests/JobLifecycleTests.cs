@@ -273,7 +273,7 @@ public sealed class JobLifecycleTests
         Assert.Equal(3, firstPage);
         Assert.Equal(0, secondPage);
         Assert.Equal(3, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ScheduleId='{scheduleId}' AND TriggerKind=N'Scheduled'"));
-        Assert.True(await database.ScalarAsync($"SELECT SUM(SkippedOccurrences) FROM [workerdock].ScheduleRecoveryEvents WHERE ScheduleId='{scheduleId}'") >= 147);
+        Assert.True(await database.ScalarAsync($"SELECT SUM(SkippedOccurrences) FROM [workerdock].OperationalEvents WHERE EventKind=N'ScheduleRecovery' AND ScheduleId='{scheduleId}'") >= 147);
     }
 
     [Trait("Store", "Sql")]

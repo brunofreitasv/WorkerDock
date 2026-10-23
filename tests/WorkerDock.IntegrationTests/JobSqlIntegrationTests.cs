@@ -73,7 +73,7 @@ public sealed class JobSqlIntegrationTests
         await database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=0 WHERE JobId='{job.JobId}'");
         Assert.Equal(runs[0], await commands.RunNowAsync(job.JobId, "same-key", actor, default));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Executions"));
-        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].ManualRequestDedup"));
+        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Executions WHERE ManualActorScopeHash IS NOT NULL AND ManualRequestKeyHash IS NOT NULL AND ManualRequestExpiresAtUtc IS NOT NULL"));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Outbox WHERE EventType=N'ExecutionDispatch'"));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AuditEvents WHERE EventType=N'ManualRunAccepted'"));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AuditEvents WHERE EventType=N'ManualRunAccepted' AND JSON_VALUE(DetailsJson,'$.beforeRevision')='1' AND JSON_VALUE(DetailsJson,'$.afterRevision')='1' AND JSON_VALUE(DetailsJson,'$.outcome')='Accepted'"));
