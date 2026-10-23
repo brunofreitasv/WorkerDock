@@ -18,7 +18,7 @@ public sealed class IntegrationSettingsTests
     {
         await using var database = new SqlDatabaseFixture(); await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0012_execution_manual_dedup", default);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
         var settings = new SqlIntegrationSettings(new(database.ConnectionString, database.InstanceId));
         var actor = new ActorContext("manager", "test", Guid.NewGuid());
         var vault = await settings.GetVaultAsync(default);
@@ -35,7 +35,7 @@ public sealed class IntegrationSettingsTests
         Assert.Equal("PersistenceUnavailable", failed.Code);
         await database.ExecuteAsync("DROP TRIGGER [workerdock].IntegrationAuditFailure");
         Assert.Equal("api.example.test", Assert.Single((await settings.GetEgressAsync("tenant-jobs", default)).Hosts));
-        await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.RollbackAsync("tenant", "0004b_integration_settings", default));
+        await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.RollbackAsync("tenant", "0001_initial", default));
     }
 
     [Fact]

@@ -21,7 +21,7 @@ param([string]$ScriptPath, [string]$Case, [string]$ScriptsRoot, [string]$Assembl
 $credential = [pscredential]::new('migration_user', (ConvertTo-SecureString 'SENTINEL-password' -AsPlainText -Force))
 $common = @{
     Action = 'Apply'; SqlHost = 'sql.example.test'; Port = 1433; Database = 'tenant'
-    Credential = $credential; InstanceId = [guid]::NewGuid(); TargetMigration = '0001_bootstrap'
+    Credential = $credential; InstanceId = [guid]::NewGuid(); TargetMigration = '0001_initial'
     ScriptsRoot = $ScriptsRoot; AssemblyDirectory = $AssemblyDirectory
 }
 switch ($Case) {

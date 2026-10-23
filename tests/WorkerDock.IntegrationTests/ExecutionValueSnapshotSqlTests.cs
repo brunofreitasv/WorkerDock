@@ -19,9 +19,9 @@ public sealed class ExecutionValueSnapshotSqlTests
     [Fact]
     public async Task Crash_after_snapshot_commit_reuses_values_without_a_lifecycle_event()
     {
-        await using var fixture = new QuartzProcessFixture();
+        await using var fixture = new TenantSqlFixture();
         await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         var template = HttpTemplateDescriptors.Get("1.1.0");
         var catalog = new TemplateCatalog([template]);

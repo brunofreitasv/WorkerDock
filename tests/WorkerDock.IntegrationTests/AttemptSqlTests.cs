@@ -16,9 +16,9 @@ public sealed class AttemptSqlTests
     [Fact]
     public async Task ConcurrentClaims_StartOneAttemptWithoutDispatchOutbox()
     {
-        await using var fixture = new QuartzProcessFixture();
+        await using var fixture = new TenantSqlFixture();
         await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
@@ -52,9 +52,9 @@ public sealed class AttemptSqlTests
     [Fact]
     public async Task RestartAfterPossibleHandlerEntry_RequiresReview()
     {
-        await using var fixture = new QuartzProcessFixture();
+        await using var fixture = new TenantSqlFixture();
         await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         await SqlCapacityTestSetup.ReadyAsync(options, "boot-a", "boot-b");
@@ -78,9 +78,9 @@ public sealed class AttemptSqlTests
     [Fact]
     public async Task Direct_claim_rechecks_job_execution_template_due_and_capacity_gates()
     {
-        await using var fixture = new QuartzProcessFixture();
+        await using var fixture = new TenantSqlFixture();
         await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         await SqlCapacityTestSetup.ReadyAsync(options, "boot-a");
@@ -150,9 +150,9 @@ public sealed class AttemptSqlTests
     [Fact]
     public async Task Due_retrying_execution_keeps_its_template_slot_at_limit_one()
     {
-        await using var fixture = new QuartzProcessFixture();
+        await using var fixture = new TenantSqlFixture();
         await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         await SqlCapacityTestSetup.ReadyAsync(options, "boot-a");
@@ -177,9 +177,9 @@ public sealed class AttemptSqlTests
     [Fact]
     public async Task Ready_batch_skips_full_and_queued_jobs_to_reach_runnable_job()
     {
-        await using var fixture = new QuartzProcessFixture();
+        await using var fixture = new TenantSqlFixture();
         await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         await SqlCapacityTestSetup.ReadyAsync(options, "boot-a");
@@ -228,9 +228,9 @@ public sealed class AttemptSqlTests
     [Fact]
     public async Task Stopped_earlier_queued_execution_does_not_block_later_same_job_execution()
     {
-        await using var fixture = new QuartzProcessFixture();
+        await using var fixture = new TenantSqlFixture();
         await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         await SqlCapacityTestSetup.ReadyAsync(options, "boot-a");
@@ -254,10 +254,11 @@ public sealed class AttemptSqlTests
     [InlineData(true)]
     public async Task Competing_boots_stop_ordering_and_sql_fences_are_durable(bool snapshot)
     {
-        await using var fixture = new QuartzProcessFixture();
+        await using var fixture = new TenantSqlFixture();
         await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
         var job = new JobRevision(Guid.NewGuid(), 0, "attempt", "workerdock.http", "1.0.0", JsonSerializer.SerializeToElement(new { }), null,
             new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, "Queue", 100, 5));
@@ -302,7 +303,7 @@ public sealed class AttemptSqlTests
         Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{crash.TargetId}' AND State=N'NeedsReview' AND Certainty=N'Unknown'"));
         Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].AttemptStatusEvents WHERE ExecutionId='{crash.TargetId}' AND State=N'NeedsReview'"));
         Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].JobPermits WHERE ExecutionId='{crash.TargetId}'"));
-        var rejected = await Assert.ThrowsAsync<WorkerDockException>(async () => await fixture.Runner.RollbackAsync("tenant", "0003c_capacity", default));
+        var rejected = await Assert.ThrowsAsync<WorkerDockException>(async () => await fixture.Runner.RollbackAsync("tenant", "0001_initial", default));
         Assert.Equal("UnsafeRollback", rejected.Code);
     }
 
@@ -311,9 +312,9 @@ public sealed class AttemptSqlTests
     {
         await using var database = new SqlDatabaseFixture(); await database.CreateAsync(false);
         var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0003b_attempts", default);
-        await runner.RollbackAsync("tenant", "0003b_attempts", default);
-        await runner.ApplyAsync("tenant", "0003b_attempts", default);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.RollbackAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name=N'AttemptStatusEvents'"));
     }
 }

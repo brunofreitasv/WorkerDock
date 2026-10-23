@@ -8,9 +8,9 @@ separately using the deployment's approved identity process.
 
 This script only adds the supplied SQL/Windows user or group to the existing
 WorkerDockRuntime role. Versioned tenant migrations own all table and routine
-grants, including Quartz DML, business data, audit access, and the narrow
+grants, including runtime state, business data, audit access, and the narrow
 [workerdock] purge routines. This script creates or changes no roles, schemas,
-tables, procedures, or Quartz data. The current Control Center has no SQL
+tables, procedures, or runtime data. The current Control Center has no SQL
 runtime principal. Control Center state is stored in protected files and is not
 managed by this tenant SQL command.
 */

@@ -37,7 +37,7 @@ public sealed class ObservabilityTests
     [Fact]
     public void Observability_migration_only_adds_audit_select_to_runtime_role()
     {
-        var migration = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "database", "tenant", "0006_observability.up.sql"));
+        var migration = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "database", "tenant", "0001_initial.up.sql"));
         Assert.Contains("GRANT SELECT ON [workerdock].AuditEvents TO WorkerDockRuntime", migration, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GRANT UPDATE", migration, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GRANT DELETE", migration, StringComparison.OrdinalIgnoreCase);

@@ -67,7 +67,7 @@ public sealed class TenantSnapshotTests
     [InlineData("grant", "permissions", "REVOKE SELECT ON workerdock.TenantSettings FROM WorkerDockRuntime;")]
     [InlineData("trigger", "modules", "ALTER TRIGGER workerdock.AuditEvents_AppendOnly ON workerdock.AuditEvents AFTER UPDATE, DELETE AS BEGIN SET NOCOUNT ON; END;")]
     [InlineData("seed", "data:TenantSettings", "UPDATE workerdock.TenantSettings SET LogRetentionDays=31 WHERE InstanceId=(SELECT InstanceId FROM workerdock.TenantSettings);")]
-    [InlineData("history", "data:SchemaHistory", "UPDATE workerdock.SchemaHistory SET UpChecksum=REPLICATE('0',64) WHERE MigrationId=N'0001_bootstrap';")]
+    [InlineData("history", "data:SchemaHistory", "UPDATE workerdock.SchemaHistory SET UpChecksum=REPLICATE('0',64) WHERE MigrationId=N'0001_initial';")]
     public async Task Snapshot_drift_is_detected(string drift, string section, string mutation)
     {
         await using var migrated = new SqlDatabaseFixture();
@@ -104,11 +104,14 @@ public sealed class TenantSnapshotTests
     {
         await using var connection = new SqlConnection(database.ConnectionString);
         await connection.OpenAsync();
-        // One command deliberately: a guard error cannot be followed by later GO batches.
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.CommandTimeout = 120;
-        await command.ExecuteNonQueryAsync();
+        foreach (var batch in Regex.Split(sql, @"(?im)^\s*GO\s*$"))
+        {
+            if (string.IsNullOrWhiteSpace(batch)) continue;
+            await using var command = connection.CreateCommand();
+            command.CommandText = batch;
+            command.CommandTimeout = 120;
+            await command.ExecuteNonQueryAsync();
+        }
     }
 
     private static void AssertEquivalent(SortedDictionary<string, string[]> expected, SortedDictionary<string, string[]> actual)
@@ -127,7 +130,7 @@ public sealed class TenantSnapshotTests
         foreach (var (name, query) in CatalogQueries)
             state[name] = await ReadRowsAsync(connection, query, name == "modules");
 
-        // Read every table, including empty operational/Quartz tables. Only known generated
+        // Read every table, including empty operational tables. Only known generated
         // values are omitted; tenant identity, all seed values and both history hashes remain.
         var tables = new List<(string Table, string Columns)>();
         await using (var command = connection.CreateCommand())

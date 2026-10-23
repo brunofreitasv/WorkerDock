@@ -2,9 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
-using Quartz;
 using WorkerDock.Infrastructure.Persistence;
-using WorkerDock.Quartz.Hosting;
 
 namespace WorkerDock.IntegrationTests;
 
@@ -34,121 +32,93 @@ public sealed class CustomSqlSchemaTests
     }
 
     [Fact]
-    public void Bootstrap_owns_schema_lifetime_and_refuses_dependent_rollbacks()
-    {
-        var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
-        var up = File.ReadAllText(Path.Combine(directory, "0001_bootstrap.up.sql"));
-        var down = File.ReadAllText(Path.Combine(directory, "0001_bootstrap.down.sql"));
-        Assert.True(up.IndexOf("CREATE SCHEMA [workerdock]", StringComparison.Ordinal) >= 0);
-        Assert.True(up.IndexOf("CREATE SCHEMA [workerdock]", StringComparison.Ordinal) < up.IndexOf("CREATE TABLE", StringComparison.Ordinal));
-        Assert.Contains("MigrationId <> N'0001_bootstrap'", down);
-        Assert.EndsWith("DROP SCHEMA [workerdock];", down.Trim());
-    }
-
-    [Fact]
-    public void Every_paired_migration_targets_custom_schema_and_matches_exact_manifest_bytes()
+    public void Fresh_baseline_has_one_target_and_a_reviewed_table_inventory()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "manifest.json")));
-        var ids = manifest.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetString()!).ToArray();
-        Assert.Contains("0013_operational_retention", ids);
-        Assert.Equal(ids.Length, Directory.GetFiles(directory, "*.up.sql").Length);
-        Assert.Equal(ids.Length, Directory.GetFiles(directory, "*.down.sql").Length);
-        foreach (var entry in manifest.RootElement.EnumerateArray())
+        var entry = Assert.Single(manifest.RootElement.EnumerateArray());
+        Assert.Equal("0001_initial", entry.GetProperty("id").GetString());
         foreach (var direction in new[] { "up", "down" })
         {
-            var path = Path.Combine(directory, entry.GetProperty("id").GetString() + "." + direction + ".sql");
-            var sql = File.ReadAllText(path);
-            Assert.False(Regex.IsMatch(sql, @"\b dbo\s*\.|\[dbo\]\s*\.", RegexOptions.IgnorePatternWhitespace | RegexOptions.IgnoreCase), path);
-            Assert.Contains("[workerdock]", sql);
+            var path = Path.Combine(directory, "0001_initial." + direction + ".sql");
             Assert.Equal(entry.GetProperty(direction + "Sha256").GetString(), Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))));
-            foreach (Match table in Regex.Matches(sql, @"(?im)^CREATE (?:TABLE|TRIGGER)\s+(\S+)"))
-                Assert.StartsWith("[workerdock].", table.Groups[1].Value);
         }
-    }
 
-    [Fact]
-    public void Retention_schema_keeps_replay_tombstones_and_restricts_audit_purge_to_a_bounded_procedure()
-    {
-        var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
-        var up = File.ReadAllText(Path.Combine(directory, "0008_retention.up.sql"));
-        var down = File.ReadAllText(Path.Combine(directory, "0008_retention.down.sql"));
-        Assert.Contains("RetentionPolicy", up);
-        Assert.Contains("Version rowversion NOT NULL", up);
-        Assert.Contains("VALUES(1,30,90,365,0,0)", up);
-        Assert.Contains("ArchiveBatches", up);
-        Assert.Contains("ArchiveRemovedAtUtc", up);
-        Assert.Contains("CREATE PROCEDURE [workerdock].PurgeExpiredArchiveBatchItems", up);
-        Assert.Contains("DENY DELETE ON [workerdock].ArchiveBatchItems TO WorkerDockRuntime", up);
-        Assert.Contains("LogCutoffUtc datetime2(7) NOT NULL", up);
-        Assert.Contains("LogCutoffUtc=@LogCutoffUtc", up);
-        Assert.Contains("AggregatedAtUtc IS NOT NULL", up);
-        Assert.Contains("N'Abandoned'", up);
-        Assert.Contains("Archive log item is newer than the batch log cutoff", up);
-        Assert.Contains("RetentionRequestTombstones", up);
-        Assert.Contains("RetentionPurgeAudit", up);
-        Assert.Contains("CREATE PROCEDURE [workerdock].PurgeAuditEvents", up);
-        Assert.Contains("CREATE PROCEDURE [workerdock].PurgeRetentionRequestTombstones", up);
-        Assert.Contains("EXECUTE AS OWNER", up);
-        Assert.Contains("DELETE TOP (@MaxRows)", up);
-        Assert.Contains("GRANT EXECUTE ON [workerdock].PurgeAuditEvents TO WorkerDockRuntime", up);
-        Assert.DoesNotContain("GRANT DELETE ON [workerdock].AuditEvents TO WorkerDockRuntime", up);
-        Assert.DoesNotContain("GRANT SELECT,INSERT,UPDATE,DELETE ON [workerdock].RetentionRequestTombstones TO WorkerDockRuntime", up);
-        Assert.Contains("Cannot remove populated retention state", down);
-    }
-
-    [Fact]
-    public void Operational_retention_transition_consolidates_event_and_policy_state()
-    {
-        var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
-        var up = File.ReadAllText(Path.Combine(directory, "0013_operational_retention.up.sql"));
-        var down = File.ReadAllText(Path.Combine(directory, "0013_operational_retention.down.sql"));
-
-        Assert.Contains("CREATE TABLE [workerdock].OperationalEvents", up);
-        Assert.Contains("PurgeOperationalEvents", up);
-        Assert.Contains("LastEvaluatedAtUtc", up);
-        Assert.Contains("ArchiveBeforeDelete", up);
-        Assert.Contains("AuditEvents", File.ReadAllText(Path.Combine(Root, "src", "WorkerDock.Infrastructure", "Retention", "SqlRetentionService.cs")));
-        Assert.Contains("Operational event consolidation cannot be rolled back", down);
-        Assert.DoesNotContain("DROP TABLE [workerdock].ArchiveBatches", down);
-        Assert.DoesNotContain("DROP TABLE [workerdock].ArchiveBatchItems", down);
-        Assert.DoesNotContain("DROP TABLE [workerdock].RetentionRequestTombstones", down);
-    }
-
-    [Fact]
-    public void Runtime_and_probe_sql_never_resolve_tenant_objects_via_default_schema()
-    {
-        var tables = Directory.GetFiles(Path.Combine(Root, "database", "tenant"), "*.up.sql")
-            .SelectMany(path => Regex.Matches(File.ReadAllText(path), @"(?im)^CREATE TABLE\s+(?:\[?\w+\]?\.)\[?(\w+)\]?")
-                .Select(match => match.Groups[1].Value)).Concat(new[] { "QuartzProbeState", "QuartzProbeEvents" }).Distinct().ToArray();
-        foreach (var area in new[] { "src", "tests", Path.Combine("database", "tenant") })
-        foreach (var path in Directory.GetFiles(Path.Combine(Root, area), "*", SearchOption.AllDirectories)
-            .Where(path => !path.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar) && !path.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar))
-            .Where(path => !path.StartsWith(Path.Combine(Root, "tests") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || Path.GetExtension(path) == ".sql")
-            .Where(path => Path.GetExtension(path) is ".cs" or ".sql"))
+        var up = File.ReadAllText(Path.Combine(directory, "0001_initial.up.sql"));
+        Assert.Contains("@InstanceId", up);
+        Assert.Contains("WorkerDockRuntime", up);
+        Assert.DoesNotContain("Quartz", up, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("QRTZ", up, StringComparison.OrdinalIgnoreCase);
+        var tables = Regex.Matches(up, @"(?im)^CREATE TABLE\s+\[workerdock\]\.\[?(?<name>\w+)\]?")
+            .Select(match => match.Groups["name"].Value).ToHashSet(StringComparer.Ordinal);
+        foreach (var dropped in Regex.Matches(up, @"(?im)^DROP TABLE\s+\[workerdock\]\.\[?(?<name>\w+)\]?")
+            .Select(match => match.Groups["name"].Value)) tables.Remove(dropped);
+        var reviewed = new[]
         {
-            if (path.EndsWith(nameof(CustomSqlSchemaTests) + ".cs", StringComparison.Ordinal)) continue;
-            var text = File.ReadAllText(path);
-            Assert.False(Regex.IsMatch(text, @"\bdbo\s*\.|\[dbo\]\s*\.", RegexOptions.IgnoreCase), path);
-            foreach (var table in tables)
-                Assert.False(Regex.IsMatch(text, @"\b(?:FROM|JOIN|INTO|UPDATE|TABLE|REFERENCES|ON)\s+\[?" + Regex.Escape(table) + @"\]?\b", RegexOptions.IgnoreCase), path + ": " + table);
-        }
+            "AlertDeliveries", "AlertDeliveryAttempts", "AlertEvaluationState", "AlertIncidents", "AlertRuleRevisions", "AlertRules", "AlertSinkRevisions", "AlertSinks",
+            "ArchiveBatches", "ArchiveBatchItems", "Attempts", "AttemptStatusEvents", "AuditEvents", "Commands", "ConnectionProfileRevisions", "ConnectionProfiles",
+            "ExecutionEvents", "ExecutionMetricAggregates", "Executions", "IntegrationSettings", "IntegrationSettingsRevisions", "JobPermits", "JobRevisions", "Jobs",
+            "ManualRequestDedup", "OperationalEvents", "Outbox", "PolicyRevisions", "ProjectionMaintenance", "RetentionPolicy", "RetentionPurgeAudit", "RetentionRequestTombstones",
+            "RuntimeStatus", "ScheduleRecoveryEvents", "ScheduleRuleScanState", "Schedules", "SchemaHistory", "ServiceHealth",
+            "TemplateCatalog", "TemplatePolicies", "TenantSettings", "WorkerCapabilities", "Workers"
+        };
+        Assert.Equal(reviewed.Order(StringComparer.Ordinal), tables.Order(StringComparer.Ordinal));
     }
 
-    [Theory]
-    [InlineData(false, "WDS_QRTZ_")]
-    [InlineData(true, "WDE_QRTZ_")]
-    public void Quartz_runtime_prefix_uses_public_schema_qualified_configuration(bool execution, string suffix)
+    [Fact]
+    [Trait("Store", "Sql")]
+    public async Task FreshInstall_HasNoQuartzObjects()
     {
-        var source = File.ReadAllText(Path.Combine(Root, "src", "WorkerDock.Quartz", "Hosting", "QuartzTopology.cs"));
-        var prefix = "[workerdock]." + suffix;
-        Assert.Contains("\"" + prefix + "\"", source);
-        var options = new AdoJobStoreOptions();
-        QuartzTopology.ConfigurePersistentStore(options, execution);
-        Assert.Equal(prefix, options.TablePrefix);
-        Assert.Equal(SchemaProvisioning.Validate, options.SchemaProvisioning);
-        Assert.True(options.AcquireTriggersWithinLock);
-        Assert.True(options.StoreJobDataAsStrings);
-        Assert.Contains("settings.SchemaProvisioning = SchemaProvisioning.Validate", source);
+        await using var fixture = new TenantSqlFixture();
+        await fixture.CreateAsync(false);
+        var objects = await ReadStringsAsync(fixture.Database, "SELECT name FROM sys.objects WHERE schema_id=SCHEMA_ID(N'workerdock') AND is_ms_shipped=0");
+        Assert.DoesNotContain(objects, name => name.Contains("QRTZ", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(fixture.Database.InstanceId.ToString(), await ReadScalarAsync(fixture.Database, "SELECT CONVERT(nvarchar(36),InstanceId) FROM [workerdock].TenantSettings"));
+        Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].TemplateCatalog WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server')"));
+        Assert.Equal(2, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].TemplateCatalog WHERE TemplateVersion=N'1.1.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server')"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID(N'WorkerDockRuntime') AND major_id=OBJECT_ID(N'[workerdock].RuntimeStatus') AND permission_name=N'SELECT' AND state=N'G'"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID(N'WorkerDockRuntime') AND major_id=OBJECT_ID(N'[workerdock].RuntimeStatus') AND permission_name=N'UPDATE' AND state=N'G'"));
+    }
+
+    [Fact]
+    [Trait("Store", "Sql")]
+    public async Task Fresh_baseline_rollback_is_guarded_by_business_data()
+    {
+        await using var fixture = new SqlDatabaseFixture();
+        await fixture.CreateAsync(false);
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(fixture.ConnectionString, fixture.InstanceId, fixture.ScriptsRoot);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await fixture.ExecuteAsync("INSERT [workerdock].Jobs(JobId,CurrentRevision) VALUES(NEWID(),0)");
+        var error = await Assert.ThrowsAsync<WorkerDock.Application.Common.WorkerDockException>(async () => await runner.RollbackAsync("tenant", "0001_initial", default));
+        Assert.Equal("UnsafeRollback", error.Code);
+        Assert.Equal(1, await fixture.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Jobs"));
+    }
+
+    [Fact]
+    public void Fresh_baseline_permissions_keep_audit_and_archive_protection()
+    {
+        var up = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "database", "tenant", "0001_initial.up.sql"));
+        Assert.Contains("GRANT INSERT ON [workerdock].AuditEvents TO WorkerDockRuntime", up);
+        Assert.DoesNotContain("GRANT DELETE ON [workerdock].AuditEvents TO WorkerDockRuntime", up);
+        Assert.Contains("DENY DELETE ON [workerdock].ArchiveBatchItems TO WorkerDockRuntime", up);
+        Assert.Contains("PurgeAuditEvents", up);
+        Assert.Contains("PurgeExpiredArchiveBatchItems", up);
+    }
+
+    private static async Task<string[]> ReadStringsAsync(SqlDatabaseFixture fixture, string sql)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand(); command.CommandText = sql;
+        await using var reader = await command.ExecuteReaderAsync();
+        var rows = new List<string>(); while (await reader.ReadAsync()) rows.Add(reader.GetString(0));
+        return rows.ToArray();
+    }
+
+    private static async Task<string> ReadScalarAsync(SqlDatabaseFixture fixture, string sql)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync(); await using var command = connection.CreateCommand(); command.CommandText = sql;
+        return (string)(await command.ExecuteScalarAsync())!;
     }
 }

@@ -16,8 +16,10 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0009_dynamic_values", default);
-        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), JobCommandTestCatalog.Create());
+            .ApplyAsync("tenant", "0001_initial", default);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
         var job = Job() with { Configuration = JsonDocument.Parse("{\"secret\":\"audit-must-not-copy-this\"}").RootElement.Clone() };
         var actor = Actor();
         await commands.SaveAsync(job, null, actor, default);
@@ -36,9 +38,11 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0009_dynamic_values", default);
+            .ApplyAsync("tenant", "0001_initial", default);
         await database.ExecuteAsync("CREATE TRIGGER [workerdock].TestJobAuditFailure ON [workerdock].AuditEvents AFTER INSERT AS THROW 51000, 'Injected audit failure', 1;");
-        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), JobCommandTestCatalog.Create());
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () =>
             await commands.SaveAsync(Job(), null, Actor(), default));
         Assert.Equal("PersistenceUnavailable", error.Code);
@@ -55,8 +59,10 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0009_dynamic_values", default);
-        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), JobCommandTestCatalog.Create());
+            .ApplyAsync("tenant", "0001_initial", default);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
         var job = Job();
         await commands.SaveAsync(job, null, Actor(), default);
         await database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
@@ -73,7 +79,7 @@ public sealed class JobSqlIntegrationTests
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AuditEvents WHERE EventType=N'ManualRunAccepted' AND JSON_VALUE(DetailsJson,'$.beforeRevision')='1' AND JSON_VALUE(DetailsJson,'$.afterRevision')='1' AND JSON_VALUE(DetailsJson,'$.outcome')='Accepted'"));
         var unsafeRollback = await Assert.ThrowsAsync<WorkerDockException>(async () =>
             await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-                .RollbackAsync("tenant", "0003_execution", default));
+                .RollbackAsync("tenant", "0001_initial", default));
         Assert.Equal("UnsafeRollback", unsafeRollback.Code);
     }
 
@@ -83,8 +89,10 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0009_dynamic_values", default);
-        var commands = new SqlJobCommands(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), JobCommandTestCatalog.Create());
+            .ApplyAsync("tenant", "0001_initial", default);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
         var job = Job();
         await commands.SaveAsync(job, null, Actor(), default);
         await database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
@@ -104,11 +112,11 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0003_execution", default);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name=N'Executions'"));
-        await runner.RollbackAsync("tenant", "0003_execution", default);
+        await runner.RollbackAsync("tenant", "0001_initial", default);
         Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name=N'Executions'"));
-        await runner.ApplyAsync("tenant", "0003_execution", default);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name=N'Executions'"));
     }
 

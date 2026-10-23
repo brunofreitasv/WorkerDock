@@ -12,7 +12,7 @@ public sealed partial class SqlProfileTests
     [InlineData(true)]
     public async Task Restricted_profile_revisions_pin_and_diagnostics_are_durable(bool snapshot)
     {
-        await using var f=new QuartzProcessFixture();await f.CreateAsync(snapshot);await f.Runner.ApplyAsync("tenant","0004a_profiles",default);
+        await using var f=new TenantSqlFixture();await f.CreateAsync(snapshot);await f.Runner.ApplyAsync("tenant","0001_initial",default);
         var options=new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(f.RuntimeConnectionString,f.Database.InstanceId);
         var store=new SqlConnectionProfiles(options);var proposed=SqlTemplateTests.Profile();await store.SaveAsync(proposed,null,Actor,default);var first=await store.GetCurrentAsync(proposed.ProfileId,default);
         await store.SaveAsync(proposed with { Server="rotated" },first.Version,Actor,default);var current=await store.GetCurrentAsync(proposed.ProfileId,default);
@@ -27,14 +27,14 @@ public sealed partial class SqlProfileTests
         Assert.Equal(proposed.Server,(await store.GetRevisionAsync(first.Current.ProfileRevisionId,default)).Server);
         await Assert.ThrowsAsync<WorkerDockException>(async()=>await new SqlProfileDiagnostics(options).StartAsync(proposed.ProfileId,"Target",Actor,default));
         await Assert.ThrowsAsync<SqlException>(async()=>await f.Database.ExecuteAsync("UPDATE [workerdock].ConnectionProfileRevisions SET ConfigurationJson=N'{}'"));
-        await Assert.ThrowsAsync<WorkerDockException>(async()=>await f.Runner.RollbackAsync("tenant","0004a_profiles",default));
+        await Assert.ThrowsAsync<WorkerDockException>(async()=>await f.Runner.RollbackAsync("tenant","0001_initial",default));
     }
     [Trait("Store","Sql")]
     [Fact]
     public async Task Migration_round_trip_and_audit_failure_are_atomic()
     {
         await using var f=new SqlDatabaseFixture();await f.CreateAsync(false);var runner=new WorkerDock.Infrastructure.Migrations.MigrationRunner(f.ConnectionString,f.InstanceId,f.ScriptsRoot);
-        await runner.ApplyAsync("tenant","0004a_profiles",default);await runner.RollbackAsync("tenant","0004a_profiles",default);await runner.ApplyAsync("tenant","0004a_profiles",default);
+        await runner.ApplyAsync("tenant","0001_initial",default);await runner.RollbackAsync("tenant","0001_initial",default);await runner.ApplyAsync("tenant","0001_initial",default);
         await f.ExecuteAsync("CREATE TRIGGER [workerdock].SqlProfileAuditFailure ON [workerdock].AuditEvents AFTER INSERT AS THROW 51027,'Synthetic audit failure',1;");
         var store=new SqlConnectionProfiles(new(f.ConnectionString,f.InstanceId));
         await Assert.ThrowsAsync<WorkerDockException>(async()=>await store.SaveAsync(SqlTemplateTests.Profile(),null,Actor,default));

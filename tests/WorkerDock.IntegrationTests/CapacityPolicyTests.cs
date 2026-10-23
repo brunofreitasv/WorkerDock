@@ -1,16 +1,24 @@
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Workers;
 using WorkerDock.Infrastructure.Executions;
-using Quartz;
-using Quartz.Extensibility;
-using WorkerDock.Quartz.Capacity;
-using WorkerDock.Quartz.Hosting;
 using System.Collections.Concurrent;
 
 namespace WorkerDock.IntegrationTests;
 
 public sealed class CapacityPolicyTests
 {
+    private sealed class MemoryCapacityStore(CapacityState state, DateTimeOffset now) : ICapacityStore
+    {
+        private readonly SemaphoreSlim gate = new(1, 1);
+
+        public async ValueTask<T> TransactAsync<T>(Func<CapacityState, DateTimeOffset, T> change, CancellationToken ct)
+        {
+            await gate.WaitAsync(ct);
+            try { return change(state, now); }
+            finally { gate.Release(); }
+        }
+    }
+
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
     private static CapacityState Policy() => new("catalog", new() { ["sql"] = 3 });
     private static Guid Register(CapacityState p, string boot = "a", string digest = "catalog", int ceiling = 3)
@@ -47,66 +55,6 @@ public sealed class CapacityPolicyTests
         Assert.Equal(0, attempts.Snapshot.Ordinal);
     }
     [Fact]
-    public async Task Decrease_does_not_kill_running_children()
-    {
-        var policy = Policy(); var installation = Register(policy);
-        var memory = new MemoryCapacityStore(policy, Now);
-        var jobs = new BlockingJobs();
-        var tenant = Guid.NewGuid();
-        await using var topology = QuartzTopology.CreateMemory(tenant,"Development");
-        var scheduler = await topology.CreateExecutionAsync(new(tenant,"a",3) { TemplateLimits = new Dictionary<string,int> { ["sql"] = 3 } }, jobs, default);
-        var coordinator = new CapacityCoordinator(memory,scheduler,installation,"a",ExecutionLimitScope.Node);
-        await coordinator.ApplyPendingAsync(default);
-        for (var i=0;i<3;i++) await jobs.Schedule(scheduler,i);
-        await jobs.WaitForStarts(3);
-        policy.SetTemplateLimit("sql",1); Assert.Equal("Effective",(await coordinator.ApplyPendingAsync(default)).State);
-        await jobs.Schedule(scheduler,3);
-        Assert.Equal(3,jobs.Active); Assert.Equal(0,jobs.Cancellations);
-        jobs.Release(0); jobs.Release(1); await jobs.WaitForActive(1);
-        Assert.Equal(3,jobs.Starts);
-        policy.SetTemplateLimit("sql",0); await coordinator.ApplyPendingAsync(default);
-        jobs.Release(2); await jobs.WaitForActive(0);
-        Assert.Equal(3,jobs.Starts);
-        await jobs.Schedule(scheduler,4);
-        policy.SetTemplateLimit("sql",2); await coordinator.ApplyPendingAsync(default);
-        await jobs.WaitForStarts(5); Assert.Equal(2,jobs.Active); Assert.Equal(0,jobs.Cancellations);
-        jobs.Release(3); jobs.Release(4); await scheduler.Shutdown(true);
-    }
-    private sealed class BlockingJobs : IJobFactory
-    {
-        private readonly ConcurrentDictionary<int,TaskCompletionSource> exits = new();
-        public int Starts; public int Active; public int Cancellations;
-        public async ValueTask Schedule(IScheduler scheduler,int id)
-        {
-            exits[id]=new(TaskCreationOptions.RunContinuationsAsynchronously);
-            await scheduler.ScheduleJob(JobBuilder.Create<Blocked>().WithIdentity(id.ToString()).UsingJobData("id",id.ToString()).Build(),
-                TriggerBuilder.Create().WithIdentity(id.ToString()).WithExecutionGroup("sql").StartNow().Build());
-        }
-        public void Release(int id) => exits[id].TrySetResult();
-        public Task WaitForStarts(int value) => Until(() => Volatile.Read(ref Starts)==value);
-        public Task WaitForActive(int value) => Until(() => Volatile.Read(ref Active)==value);
-        private static async Task Until(Func<bool> predicate)
-        { using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(10)); while(!predicate()) await Task.Delay(10,timeout.Token); }
-        public ValueTask<JobScope> CreateJob(TriggerFiredBundle b,IScheduler s,CancellationToken ct=default) => ValueTask.FromResult(new JobScope(new Blocked(this)));
-        public ValueTask ReturnJob(JobScope scope,CancellationToken ct=default) => ValueTask.CompletedTask;
-        private sealed class Blocked(BlockingJobs owner) : IJob
-        {
-            public async ValueTask Execute(IJobExecutionContext context,CancellationToken ct)
-            {
-                Interlocked.Increment(ref owner.Active); Interlocked.Increment(ref owner.Starts);
-                try { await owner.exits[int.Parse(context.JobDetail.JobDataMap.GetString("id")!)].Task.WaitAsync(ct); }
-                catch(OperationCanceledException) { Interlocked.Increment(ref owner.Cancellations); throw; }
-                finally { Interlocked.Decrement(ref owner.Active); }
-            }
-        }
-    }
-    internal sealed class MemoryCapacityStore(CapacityState state, DateTimeOffset now) : ICapacityStore
-    {
-        private readonly object gate = new();
-        public ValueTask<T> TransactAsync<T>(Func<CapacityState,DateTimeOffset,T> change, CancellationToken ct)
-        { ct.ThrowIfCancellationRequested(); lock(gate) return ValueTask.FromResult(change(state,now)); }
-    }
-    [Fact]
     public void Offline_node_cannot_rejoin_with_old_policy()
     {
         var p = Policy(); var a = Register(p); var b = Register(p, "b");
@@ -123,7 +71,7 @@ public sealed class CapacityPolicyTests
     }
 
     [Fact]
-    public void Unavailable_node_requires_fence_and_quartz_recovery_before_promotion()
+    public void Unavailable_node_requires_fence_and_runtime_recovery_before_promotion()
     {
         var p = Policy(); var a = Register(p); var b = Register(p, "b");
         p.Acknowledge(a, "a", 0, Now); p.Acknowledge(b, "b", 0, Now); p.Promote(Now);

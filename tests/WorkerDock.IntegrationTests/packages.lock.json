@@ -259,22 +259,6 @@
           "Microsoft.Extensions.Options": "10.0.13"
         }
       },
-      "Microsoft.Extensions.Diagnostics.HealthChecks": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "4x6y2Uy+g9Ou93eBCVkG/3JCwnc2AMKhrE1iuEhXT/MzNN7co/Zt6yL+q1Srt0CnOe3iLX+sVqpJI4ZGlOPfug==",
-        "dependencies": {
-          "Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions": "10.0.0",
-          "Microsoft.Extensions.Hosting.Abstractions": "10.0.0",
-          "Microsoft.Extensions.Logging.Abstractions": "10.0.0",
-          "Microsoft.Extensions.Options": "10.0.0"
-        }
-      },
-      "Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "jAhZbzDa117otUBMuQQ6JzSfuDbBBrfOs5jw5l7l9hKpzt+LjYKVjSauXG2yV9u7BqUSLUtKLwcerDQDeQ+0Xw=="
-      },
       "Microsoft.Extensions.FileProviders.Abstractions": {
         "type": "Transitive",
         "resolved": "10.0.13",
@@ -599,12 +583,6 @@
           "WorkerDock.Infrastructure": "[1.0.0, )"
         }
       },
-      "workerdock.databasemigrator": {
-        "type": "Project",
-        "dependencies": {
-          "WorkerDock.Infrastructure": "[1.0.0, )"
-        }
-      },
       "workerdock.domain": {
         "type": "Project"
       },
@@ -618,14 +596,6 @@
           "WorkerDock.Application": "[1.0.0, )",
           "WorkerDock.Templates.Http": "[1.0.0, )",
           "WorkerDock.Templates.SqlServer": "[1.0.0, )"
-        }
-      },
-      "workerdock.quartz": {
-        "type": "Project",
-        "dependencies": {
-          "Microsoft.Data.SqlClient": "[7.1.1, )",
-          "Quartz": "[4.5.1, )",
-          "WorkerDock.Infrastructure": "[1.0.0, )"
         }
       },
       "workerdock.templates.http": {
@@ -646,7 +616,6 @@
         "type": "Project",
         "dependencies": {
           "WorkerDock.Infrastructure": "[1.0.0, )",
-          "WorkerDock.Quartz": "[1.0.0, )",
           "WorkerDock.Templates.SqlServer": "[1.0.0, )"
         }
       },
@@ -670,20 +639,6 @@
           "Microsoft.Extensions.Caching.Memory": "10.0.13",
           "Microsoft.Extensions.Configuration.Abstractions": "10.0.13",
           "Microsoft.Extensions.Logging": "10.0.13"
-        }
-      },
-      "Quartz": {
-        "type": "CentralTransitive",
-        "requested": "[4.5.1, )",
-        "resolved": "4.5.1",
-        "contentHash": "vexFR5Z/Sbu0um75NOhjhinOEB4Acb/HAK6Q90EpGV44/YBxfchatXWoKJDOtYu8UtodBm6rs5GVtfM7TfUmsg==",
-        "dependencies": {
-          "Microsoft.Extensions.Configuration.Binder": "10.0.0",
-          "Microsoft.Extensions.DependencyInjection": "10.0.0",
-          "Microsoft.Extensions.Diagnostics.HealthChecks": "10.0.0",
-          "Microsoft.Extensions.Hosting.Abstractions": "10.0.0",
-          "Microsoft.Extensions.Logging.Abstractions": "10.0.0",
-          "Microsoft.Extensions.Options.ConfigurationExtensions": "10.0.0"
         }
       },
       "System.Security.Cryptography.Pkcs": {

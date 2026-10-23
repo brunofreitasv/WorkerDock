@@ -15,8 +15,8 @@ public sealed class CapacityPolicySqlTests
     [Fact]
     public async Task Template_and_job_limits_are_applied_on_their_owner_rows()
     {
-        await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0012_execution_manual_dedup", default);
+        await using var fixture = new TenantSqlFixture(); await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         var actor = new ActorContext("manager", "Anonymous", Guid.NewGuid());
@@ -36,9 +36,10 @@ public sealed class CapacityPolicySqlTests
     [InlineData(true)]
     public async Task Sql_epoch_fences_acquired_delivery_and_preserves_exclusive_order(bool snapshot)
     {
-        await using var fixture=new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant","0009_dynamic_values",default);
+        await using var fixture=new TenantSqlFixture(); await fixture.CreateAsync(snapshot);
+        await fixture.Runner.ApplyAsync("tenant","0001_initial",default);
         var options=new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString,fixture.Database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
         await SqlCapacityTestSetup.ReadyAsync(options,"capacity-worker");
         var jobs=new SqlJobCommands(options,JobCommandTestCatalog.Create()); var actor=new ActorContext("manager","Anonymous",Guid.NewGuid());
         var job=new JobRevision(Guid.NewGuid(),0,"capacity","workerdock.http","1.0.0",JsonSerializer.SerializeToElement(new {}),null,AttemptLifecycleTests.Policy());
@@ -69,8 +70,8 @@ public sealed class CapacityPolicySqlTests
     {
         await using var database=new SqlDatabaseFixture(); await database.CreateAsync(false);
         var runner=new MigrationRunner(database.ConnectionString,database.InstanceId,database.ScriptsRoot);
-        await runner.ApplyAsync("tenant","0003c_capacity",default); await runner.RollbackAsync("tenant","0003c_capacity",default);
-        await runner.ApplyAsync("tenant","0003c_capacity",default);
+        await runner.ApplyAsync("tenant","0001_initial",default); await runner.RollbackAsync("tenant","0001_initial",default);
+        await runner.ApplyAsync("tenant","0001_initial",default);
         Assert.Equal(1,await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].PolicyRevisions WHERE PolicyKind=N'Capacity' AND State=N'Pending'"));
     }
 }

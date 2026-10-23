@@ -6,16 +6,6 @@ namespace WorkerDock.IntegrationTests;
 public sealed class MigrationInputTests
 {
     [Fact]
-    public void Upgrade_guide_documents_builtin_template_migration_preflight_and_recovery()
-    {
-        var guide = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "docs", "how-to", "upgrade-and-restore.md"));
-        Assert.Contains("0010_remove_builtin_v1", guide, StringComparison.Ordinal);
-        Assert.Contains("execution refers to a built-in 1.0.0 revision", guide, StringComparison.Ordinal);
-        Assert.Contains("verified pre-upgrade database backup", guide, StringComparison.Ordinal);
-        Assert.Contains("stop the tenant Web, scheduler, and Worker services", guide, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void Current_database_guides_document_manual_migration_and_fresh_snapshot_paths()
     {
         var root = FindRepositoryRoot();
@@ -123,11 +113,11 @@ public sealed class MigrationInputTests
         Directory.CreateDirectory(tenant);
         try
         {
-            foreach (var name in new[] { "manifest.json", "0001_bootstrap.up.sql", "0001_bootstrap.down.sql" })
+            foreach (var name in new[] { "manifest.json", "0001_initial.up.sql", "0001_initial.down.sql" })
                 File.Copy(Path.Combine(AppContext.BaseDirectory, "database", "tenant", name), Path.Combine(tenant, name));
-            await File.AppendAllTextAsync(Path.Combine(tenant, "0001_bootstrap.up.sql"), "\n-- modified\n");
+            await File.AppendAllTextAsync(Path.Combine(tenant, "0001_initial.up.sql"), "\n-- modified\n");
             var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), root);
-            var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "0001_bootstrap", default));
+            var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "0001_initial", default));
             Assert.Equal("MigrationChecksumMismatch", error.Code);
         }
         finally

@@ -3,7 +3,7 @@ using WorkerDock.Application.Scheduling;
 using WorkerDock.Application.Jobs;
 using WorkerDock.Domain.Scheduling;
 using WorkerDock.Infrastructure.Authentication;
-using WorkerDock.Quartz.Scheduling;
+using WorkerDock.Infrastructure.Scheduling;
 
 namespace WorkerDock.Web.Endpoints;
 
@@ -70,7 +70,7 @@ public static class ScheduleEndpoints
             if (input.Cron is not null || input.LocalOnce is null || input.LocalOnce.Value.Kind != DateTimeKind.Unspecified)
                 throw new WorkerDockException("ValidationFailed", "localOnce");
             // ResolveLocalOnce is the sole authority for gaps and ambiguous times.
-            once = new QuartzScheduleEvaluator().ResolveLocalOnce(input.LocalOnce.Value, input.ZoneId, input.SelectedOffset);
+            once = new FiveFieldScheduleEvaluator().ResolveLocalOnce(input.LocalOnce.Value, input.ZoneId, input.SelectedOffset);
         }
         else if (input.Kind == "Cron")
         {

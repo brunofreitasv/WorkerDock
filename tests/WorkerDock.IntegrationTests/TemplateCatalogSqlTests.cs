@@ -12,8 +12,8 @@ public sealed class TemplateCatalogSqlTests
     [Fact]
     public async Task Built_in_catalog_registers_both_versions_without_changing_legacy_digests()
     {
-        await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await using var fixture = new TenantSqlFixture(); await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
         var descriptors = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
         {
             SqlTemplateDescriptors.Get("1.0.0"), SqlTemplateDescriptors.Get("1.1.0"),
@@ -32,8 +32,8 @@ public sealed class TemplateCatalogSqlTests
     [InlineData(true)]
     public async Task Restricted_catalog_promotes_bootstrap_once_and_preserves_retired_metadata(bool snapshot)
     {
-        await using var fixture=new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant","0009_dynamic_values",default);
+        await using var fixture=new TenantSqlFixture(); await fixture.CreateAsync(snapshot);
+        await fixture.Runner.ApplyAsync("tenant","0001_initial",default);
         var original=TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor() with { Id="workerdock.http" });
         var changed=TemplateMetadata.WithDigest(original with { Description="changed" });
         var options=new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString,fixture.Database.InstanceId);
@@ -54,7 +54,7 @@ public sealed class TemplateCatalogSqlTests
         Assert.Single(await catalog.ListAsync(default));
         await Assert.ThrowsAsync<SqlException>(async()=>await fixture.Database.ExecuteAsync("UPDATE [workerdock].TemplateCatalog SET MetadataDigest=REPLICATE('A',64) WHERE TemplateId=N'workerdock.http'"));
         await Assert.ThrowsAsync<SqlException>(async()=>await fixture.Database.ExecuteAsync("UPDATE [workerdock].TemplateCatalog SET MetadataDigest=LOWER(MetadataDigest) WHERE TemplateId=N'workerdock.http'"));
-        var rollback=await Assert.ThrowsAsync<WorkerDockException>(async()=>await fixture.Runner.RollbackAsync("tenant","0004_templates",default));
+        var rollback=await Assert.ThrowsAsync<WorkerDockException>(async()=>await fixture.Runner.RollbackAsync("tenant","0001_initial",default));
         Assert.Equal("UnsafeRollback",rollback.Code);
     }
     [Fact]
@@ -62,9 +62,9 @@ public sealed class TemplateCatalogSqlTests
     {
         await using var database=new SqlDatabaseFixture(); await database.CreateAsync(false);
         var runner=new MigrationRunner(database.ConnectionString,database.InstanceId,database.ScriptsRoot);
-        await runner.ApplyAsync("tenant","0003d_dispatch",default);
+        await runner.ApplyAsync("tenant","0001_initial",default);
         await database.ExecuteAsync("UPDATE [workerdock].TemplateCatalog SET MetadataDigest=REPLICATE('A',64) WHERE TemplateId=N'workerdock.http'");
-        await runner.ApplyAsync("tenant","0004_templates",default);
+        await runner.ApplyAsync("tenant","0001_initial",default);
         var descriptor=TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor() with { Id="workerdock.http" });
         var catalog=new SqlTemplateCatalog(new(database.ConnectionString,database.InstanceId),[descriptor]);
         var conflict=await Assert.ThrowsAsync<WorkerDockException>(async()=>await catalog.RegisterAsync([descriptor],default));
@@ -77,9 +77,9 @@ public sealed class TemplateCatalogSqlTests
     {
         await using var database=new SqlDatabaseFixture(); await database.CreateAsync(snapshot);
         var runner=new MigrationRunner(database.ConnectionString,database.InstanceId,database.ScriptsRoot);
-        await runner.ApplyAsync("tenant","0004_templates",default);
-        await runner.RollbackAsync("tenant","0004_templates",default);
-        await runner.ApplyAsync("tenant","0004_templates",default);
-        Assert.Equal(8,await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory"));
+        await runner.ApplyAsync("tenant","0001_initial",default);
+        await runner.RollbackAsync("tenant","0001_initial",default);
+        await runner.ApplyAsync("tenant","0001_initial",default);
+        Assert.Equal(1,await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory"));
     }
 }

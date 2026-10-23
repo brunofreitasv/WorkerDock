@@ -8,7 +8,7 @@ using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Jobs;
 using WorkerDock.Infrastructure.Persistence;
 using WorkerDock.Infrastructure.Retention;
-using WorkerDock.Quartz.Scheduling;
+using WorkerDock.Infrastructure.Scheduling;
 
 namespace WorkerDock.IntegrationTests;
 
@@ -67,7 +67,7 @@ public sealed class DynamicValuePersistenceTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0008_retention", default);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = Guid.NewGuid();
         var executionId = Guid.NewGuid();
         await database.ExecuteAsync($$"""
@@ -78,7 +78,7 @@ public sealed class DynamicValuePersistenceTests
             INSERT [workerdock].Executions(ExecutionId,JobId,JobRevision,TriggerKind,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc)
             VALUES('{{executionId}}','{{jobId}}',1,N'Manual',N'legacy-key',N'Queued',N'Known',SYSUTCDATETIME(),NEWID(),SYSUTCDATETIME());
             """);
-        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
         Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].JobRevisions WHERE JobId='{jobId}' AND DynamicValuesJson IS NULL"));
         Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{executionId}' AND ValueContextJson IS NULL AND FirstStartedAtUtc IS NULL AND ValueSnapshotJson IS NULL AND ValueResolutionError IS NULL"));
     }
@@ -92,7 +92,7 @@ public sealed class DynamicValuePersistenceTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = Guid.NewGuid();
         var executionId = Guid.NewGuid();
         var plan = stateKind == "plan" ? "N'{\"resolverVersion\":1,\"timeZoneId\":\"UTC\",\"bindings\":[]}'" : "NULL";
@@ -108,7 +108,7 @@ public sealed class DynamicValuePersistenceTests
             await database.ExecuteAsync($"UPDATE [workerdock].Executions SET ValueContextJson=N'{{\"resolverVersion\":1,\"timeZoneId\":\"UTC\",\"triggerKind\":\"Manual\",\"scheduledForUtc\":null,\"requestedAtUtc\":\"2026-10-20T00:00:00Z\",\"referenceDateOverride\":null,\"firstStartedAtUtc\":null}}' WHERE ExecutionId='{executionId}'");
         if (stateKind == "snapshot")
             await database.ExecuteAsync($"UPDATE [workerdock].Executions SET ValueSnapshotJson=N'{{\"resolverVersion\":1,\"inputDigest\":\"{new string('A', 64)}\",\"values\":{{}}}}' WHERE ExecutionId='{executionId}'");
-        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.RollbackAsync("tenant", "0009_dynamic_values", default));
+        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.RollbackAsync("tenant", "0001_initial", default));
         Assert.Equal("UnsafeRollback", error.Code);
     }
 
@@ -126,7 +126,7 @@ public sealed class DynamicValuePersistenceTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = Guid.NewGuid();
         var executionId = Guid.NewGuid();
         var context = stateKind.StartsWith("context", StringComparison.Ordinal) ? "N'{\"triggerKind\":\"Manual\"}'" : "NULL";
@@ -164,7 +164,7 @@ public sealed class DynamicValuePersistenceTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var catalog = JobCommandTestCatalog.Create();
         var commands = new SqlJobCommands(options, catalog);
@@ -179,7 +179,7 @@ public sealed class DynamicValuePersistenceTests
         sidecar.Dispose();
         var loaded = await commands.GetEditableAsync(job.JobId, default);
         Assert.True(JsonElement.DeepEquals(expectedPlan.RootElement, loaded.Revision.DynamicValues!.Value));
-        var lifecycle = new SqlJobLifecycle(options, catalog, new QuartzScheduleEvaluator(), TimeProvider.System);
+        var lifecycle = new SqlJobLifecycle(options, catalog, new FiveFieldScheduleEvaluator(), TimeProvider.System);
         var duplicateId = Guid.NewGuid();
         await lifecycle.DuplicateAsync(job.JobId, duplicateId, loaded.Version, actor, default);
         var duplicate = await commands.GetEditableAsync(duplicateId, default);

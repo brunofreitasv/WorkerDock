@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><IsTestProject>true</IsTestProject><IsPackable>false</IsPackable></PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/WorkerDock.Quartz/WorkerDock.Quartz.csproj" /><ProjectReference Include="../../src/WorkerDock.Templates.Http/WorkerDock.Templates.Http.csproj" /><ProjectReference Include="../../src/WorkerDock.Application/WorkerDock.Application.csproj" /><ProjectReference Include="../../src/WorkerDock.Infrastructure/WorkerDock.Infrastructure.csproj" />
-    <ProjectReference Include="../WorkerDock.TestHost/WorkerDock.TestHost.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../src/WorkerDock.Templates.Http/WorkerDock.Templates.Http.csproj" /><ProjectReference Include="../../src/WorkerDock.Application/WorkerDock.Application.csproj" /><ProjectReference Include="../../src/WorkerDock.Infrastructure/WorkerDock.Infrastructure.csproj" />
+
     <ProjectReference Include="../../src/WorkerDock.Web/WorkerDock.Web.csproj" />
     <ProjectReference Include="../../src/WorkerDock.ControlCenter/WorkerDock.ControlCenter.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
@@ -18,8 +18,4 @@
     <Content Include="../fixtures/dynamic-values.json" Link="fixtures/dynamic-values.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../sql/*.sql" Link="target-sql/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" /><Content Include="Sql/*.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-  <Target Name="CopyQuartzTestHost" AfterTargets="Build">
-    <ItemGroup><TestHostFiles Include="../WorkerDock.TestHost/bin/$(Configuration)/$(TargetFramework)/**/*" /></ItemGroup>
-    <Copy SourceFiles="@(TestHostFiles)" DestinationFiles="@(TestHostFiles->'$(OutDir)testhost/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-  </Target>
 <ItemGroup><ProjectReference Include="../../src/WorkerDock.Templates.SqlServer/WorkerDock.Templates.SqlServer.csproj" /></ItemGroup></Project>

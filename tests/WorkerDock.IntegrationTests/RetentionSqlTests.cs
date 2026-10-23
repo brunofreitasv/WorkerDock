@@ -189,7 +189,7 @@ public sealed class RetentionSqlTests
     [Fact]
     public void Transition_schema_consolidates_operational_state_and_keeps_archive_integrity_records()
     {
-        var sql = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "database", "tenant", "0013_operational_retention.up.sql"));
+        var sql = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "database", "tenant", "0001_initial.up.sql"));
 
         Assert.Contains("OperationalEvents", sql, StringComparison.Ordinal);
         Assert.Contains("ALTER TABLE [workerdock].AlertRules", sql, StringComparison.Ordinal);

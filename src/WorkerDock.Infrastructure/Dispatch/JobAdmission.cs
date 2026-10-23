@@ -81,7 +81,7 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
         return decisions.Admit.Count;
     }
 
-    // A delivery epoch is immutable once Quartz can acquire it. Rebinding creates a new outbox identity.
+    // A delivery epoch is immutable once a runtime can acquire it. Rebinding creates a new outbox identity.
     private static async ValueTask BindDeliveriesAsync(DbConnection c, DbTransaction t, Guid jobId, CancellationToken ct)
     {
         await using var read = Command(c, t, """

@@ -2,7 +2,7 @@ using Microsoft.Data.SqlClient;
 
 namespace WorkerDock.IntegrationTests;
 
-internal static class QuartzRuntimeConnection
+internal static class TenantRuntimeConnection
 {
     internal static SqlConnectionStringBuilder ForDatabase(string? configured, string ownerConnection)
     {

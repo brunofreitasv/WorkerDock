@@ -75,7 +75,6 @@ public sealed class TenantSqlHostStartupTests
     }
 
     [Theory]
-    [InlineData("Scheduler")]
     [InlineData("Worker")]
     public async Task Missing_password_reference_stops_host_before_sql_without_disclosing_secrets(string host)
     {
@@ -93,7 +92,7 @@ public sealed class TenantSqlHostStartupTests
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        info.ArgumentList.Add(Path.Combine(root, "src", "WorkerDock." + host, "bin", "Release", host == "Scheduler" ? "net10.0" : "net10.0-windows", "WorkerDock." + host + ".dll"));
+        info.ArgumentList.Add(Path.Combine(root, "src", "WorkerDock." + host, "bin", "Release", "net10.0-windows", "WorkerDock." + host + ".dll"));
         foreach (var key in info.Environment.Keys.Where(key => key.StartsWith("Tenant__", StringComparison.OrdinalIgnoreCase) ||
                      key.StartsWith("Worker__", StringComparison.OrdinalIgnoreCase) || key.StartsWith("Executor__", StringComparison.OrdinalIgnoreCase)).ToArray())
             info.Environment.Remove(key);

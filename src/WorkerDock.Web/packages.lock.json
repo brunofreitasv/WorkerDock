@@ -151,14 +151,6 @@
           "WorkerDock.Templates.SqlServer": "[1.0.0, )"
         }
       },
-      "workerdock.quartz": {
-        "type": "Project",
-        "dependencies": {
-          "Microsoft.Data.SqlClient": "[7.1.1, )",
-          "Quartz": "[4.5.1, )",
-          "WorkerDock.Infrastructure": "[1.0.0, )"
-        }
-      },
       "workerdock.templates.http": {
         "type": "Project",
         "dependencies": {
@@ -208,12 +200,6 @@
           "Microsoft.Data.SqlClient": "6.1.7",
           "Microsoft.EntityFrameworkCore.Relational": "10.0.13"
         }
-      },
-      "Quartz": {
-        "type": "CentralTransitive",
-        "requested": "[4.5.1, )",
-        "resolved": "4.5.1",
-        "contentHash": "vexFR5Z/Sbu0um75NOhjhinOEB4Acb/HAK6Q90EpGV44/YBxfchatXWoKJDOtYu8UtodBm6rs5GVtfM7TfUmsg=="
       },
       "System.Security.Cryptography.Pkcs": {
         "type": "CentralTransitive",

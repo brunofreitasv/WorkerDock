@@ -5,7 +5,7 @@ Run in the target database with the same SQLCMD variables as permissions.sql.
 This paired script removes only the explicitly supplied principal-to-role
 memberships when both named principals and roles exist and the membership is
 present. Empty variables, absent principals/roles, and absent memberships are
-no-ops. It does not revoke role grants or drop roles or business/Quartz objects.
+no-ops. It does not revoke role grants or drop roles or business objects.
 */
 SET NOCOUNT ON;
 
