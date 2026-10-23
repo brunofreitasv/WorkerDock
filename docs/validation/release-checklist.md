@@ -6,8 +6,8 @@ Use this checklist for a candidate release. A checked source build or portable s
 
 - [ ] Select a version and record the operator-selected build and deployment process.
 - [ ] Build from a clean, reviewed source checkout using locked dependencies; record the selected tooling and artifact inventory.
-- [ ] Record artifact SHA-256 values and migration manifest/checksums. Take and verify an operator-managed tenant database backup before migration.
-- [ ] Set tenant and center schema compatibility windows only from tested evidence.
+- [ ] Record artifact SHA-256 values and the `0001_initial` manifest checksums. Verify the target tenant database is new and empty before baseline installation.
+- [ ] Verify SQL Server 2022+ and compatibility level 160 using a disposable tenant database; record SQL checks as unverified if `WORKERDOCK_TEST_SQL` is unavailable.
 - [ ] Confirm packages and deployment examples contain no secrets or customer data.
 - [ ] Review third-party licenses/notices and include required attribution in distributed artifacts.
 
@@ -15,12 +15,13 @@ Use this checklist for a candidate release. A checked source build or portable s
 
 - [ ] Run the required .NET, frontend, and deployment smoke checks; record exact outcomes.
 - [ ] Run integration tests against the supported SQL Server version and record schema compatibility.
-- [ ] Complete disposable Windows/IIS installation and re-entry checks for tenant, center, and additional worker.
+- [ ] Complete disposable Windows/IIS installation checks for the tenant web app, one runtime service, and optional Control Center.
+- [ ] Verify the tenant mutex rejects a second runtime service and the configured host ceiling bounds concurrent child processes.
 - [ ] Verify HTTPS/SNI, service identities, runtime SQL permissions, Data Protection key ACLs, and archive ACLs.
 - [ ] Install and verify production `ISecretVault` adapters in the Control Center and each tenant process that resolves secrets. Confirm identity isolation, reference allowlists, rotation, and redaction; leave `WORKERDOCK_DEVELOPMENT_VAULT` disabled.
 - [ ] Exercise Entra/OIDC with a designated test registration, including role-protected management.
 - [ ] Verify Anonymous mode is not enabled on any network-exposed deployment.
-- [ ] Exercise upgrade, interrupted-upgrade recovery, verified backup, and restore on disposable infrastructure.
+- [ ] Exercise fresh baseline rollback guards, verified backup, and restore on disposable infrastructure. No tenant upgrade converter is included.
 - [ ] Complete the fault/security/isolation matrix and accessibility checks required by the release plan.
 - [ ] Run the target workload and publish hardware, workload mix, concurrency, throughput, latency, and errors. Measure clock skew and scheduled-work behavior separately; the supplied manual-run load driver does not cover them. The 10 tenant / 100 jobs / 10 concurrent executions target is not a capacity guarantee.
 

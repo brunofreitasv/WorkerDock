@@ -2,13 +2,13 @@
 
 Jobs use immutable revisions. New jobs begin disabled with concurrency limit 1; enabling is an explicit management command. A successful edit appends a revision and requires the prior rowversion through `If-Match`. The configuration GET is restricted to managers and returns an opaque quoted `ETag`; safe command receipts contain only command/target IDs and state. The server creates new job IDs, actor identity and correlation IDs. Built-in templates are registered by the installed Worker packages, and accepted executions pin the job, template, and referenced profile revisions.
 
-An accepted manual run commits one queued execution, its revision, audit event, 24-hour actor/session-and-job-scoped request record, command receipt and `ExecutionDispatch` outbox intent in one business transaction. Concurrent retries with the same request key return the original receipt during that window. An expired key may create a new run. The current manual command has no caller payload beyond job ID and request key; the stored request hash protects that input and future payload-bearing commands must compare their full canonical input. The execution idempotency key is separate from the request key and stays stable across attempts. Outbox publication to Quartz occurs later and is not part of this transaction. WorkerDock promises durable intent and guarded redelivery, not exactly-once external effects. Unknown effects require review unless the job policy explicitly permits replay.
+An accepted manual run commits one queued execution, its revision, audit event, 24-hour actor/session-and-job-scoped request record, and command receipt in one business transaction. Concurrent retries with the same request key return the original receipt during that window. An expired key may create a new run. The current manual command has no caller payload beyond job ID and request key; the stored request hash protects that input and future payload-bearing commands must compare their full canonical input. The execution idempotency key is separate from the request key and stays stable across attempts. The runtime claims queued rows directly from SQL. WorkerDock promises durable intent and bounded redelivery, not exactly-once external effects. Unknown effects require review unless the job policy explicitly permits replay.
 
 For dynamic-capable template revisions, the immutable revision also pins a typed dynamic-value plan and resolver version. The plan names only schema-declared scalar targets; it cannot point into secret or sensitive fields. At admission, scheduled executions pin their original occurrence instant and manual executions pin their accepted request time. A manual `referenceDateOverride` is an optional date-only value included in the deduplication payload; reusing a request key with a different override conflicts. A duplicate request with the same key and override returns the original accepted execution. Leaving the override empty uses the request's local date in the plan timezone.
 
 Dynamic sources are **ReferenceDate**, **ScheduledTimestamp**, **FirstExecutionStart**, **ExecutionId**, and **IdempotencyKey**. ReferenceDate uses the original scheduled occurrence's local date, so a job due October 20 and run October 21 still uses October 20; retries retain that context. Manual executions use the override when supplied, otherwise their accepted request date. ScheduledTimestamp is the original occurrence instant and is unavailable to manual executions. FirstExecutionStart is set on the first accepted attempt and retained across retries; it is not a continually changing current time. ExecutionId and IdempotencyKey are stable per execution. Month/day shifts and period boundaries use the pinned timezone; date-only values remain dates, while timestamp outputs support compatible offset/UTC ISO or Unix formats. A retry or recovery reuses the first persisted resolved-value snapshot instead of recalculating from the current clock.
 
-The manager-only template-values preview runs the resolver against an explicit sample context and returns bounded validation issues plus example values marked as examples. Preview does not execute template code, contact SQL/HTTP targets, or resolve vault secrets. Execution snapshots contain resolved nonsecret dynamic values only; secret references continue through the existing execution-time vault path and are never copied into a dynamic plan or snapshot. The SQL and HTTP templates retain legacy version 1.0.0 behavior and publish dynamic authoring in version 1.1.0. A job revision remains pinned to its exact template version; editing it does not silently upgrade it.
+The manager-only template-values preview runs the resolver against an explicit sample context and returns bounded validation issues plus example values marked as examples. Preview does not execute template code, contact SQL/HTTP targets, or resolve vault secrets. Execution snapshots contain resolved nonsecret dynamic values only; secret references continue through the existing execution-time vault path and are never copied into a dynamic plan or snapshot. The SQL Server and HTTP built-ins expose version 1.1.0 only in the fresh-install catalog. Custom templates remain pinned to their own versions.
 
 The memory adapter is a development/test substitute for `IJobCommands`, selected only with `Tenant:Adapter=Memory` in Development. Its state is lost on process exit. The integration suite has memory-backed tests; see [development](../validation/development-checks.md) for local commands.
 
@@ -23,32 +23,32 @@ dotnet run --project src/WorkerDock.Web --urls https://localhost:5001
 
 Use a second PowerShell terminal to request a session-bound CSRF token, then send `Origin: https://localhost:5001` and `X-WorkerDock-CSRF: <token>` on POST/PUT requests. `POST /api/jobs` accepts a revision body with `jobId` set to the empty GUID; the server assigns its ID. `GET /api/jobs/{id}/configuration` returns the edit `ETag`; `PUT /api/jobs/{id}` requires that value in `If-Match`. `POST /api/jobs/{id}/runs` accepts `{ "requestKey": "new-client-key" }` once the job is enabled.
 
-For tenant SQL provisioning, restricted identities, integration test prerequisites, and rollback, follow [Set up SQL Server](../how-to/setup-sql-server.md). Do not apply an old migration ID to create a current database; the latest tenant chain is documented in the [database object reference](database-objects.md).
+For fresh tenant SQL provisioning, restricted identities, integration test prerequisites, and guarded rollback, follow [Set up SQL Server](../how-to/setup-sql-server.md). Apply the `0001_initial` baseline to a new database; the schema is listed in the [database object reference](database-objects.md).
 
 ## Durable attempts, retries and stop
 
-Quartz invokes `ExecuteTemplateJob`, which checks immutable dispatch identity,
-authorizes one attempt in the business transaction, reads the pinned descriptor,
-and awaits Runtime supervision through child exit and outcome persistence.
-There is no WorkerDock work-table polling/claim loop. Quartz recovery/redelivery
-rechecks existing attempts and never grants permission to repeat their effects.
-Short recovery-review jobs run on the separate schedule/control scheduler.
+The tenant runtime reads bounded candidate IDs from SQL, then atomically
+rechecks each execution, job, revision, and capacity before inserting an
+attempt. A local semaphore limits concurrent child processes. SQL time and the
+tenant business transaction lock decide which runtime may claim work. Expired
+attempts are classified before new admissions; uncertain handler entry moves
+the execution to `NeedsReview` unless its pinned policy allows bounded replay.
 
 The default application renewal interval is 10 seconds and the lease is 60 seconds.
 Begin, renewal and completion use SQL time under the short tenant business lock;
 renewal/completion require the current generation, worker boot and active,
 unexpired lease. Descriptor reads recheck that same fence and pinned catalog/profile
-availability. They cannot substitute a newer revision. No Quartz, vault or child
+availability. They cannot substitute a newer revision. No runtime, vault or child
 call occurs while the business transaction is locked.
 
-Runtime polls durable controls outside Quartz execution-slot capacity. A null
+Runtime polls durable controls independently of execution admission. A null
 execution timeout means infinite duration; ownership still renews and stop still
 works. Finite timeout starts at admission and includes startup. Runtime uses
 monotonic elapsed time from each acknowledged ownership request, subtracts a
 safety margin, requests cooperative cancellation, then contains the tree within
 30 seconds or earlier when ownership safety requires it. A late acknowledgement
 cannot revive a child past the conservative local boundary. Synchronize host/SQL
-clocks for Quartz and operator timestamps. An unresponsive OS/host can outlive
+clocks for operator timestamps. An unresponsive OS/host can outlive
 local deadlines; leases protect WorkerDock records, not remote systems.
 
 A stop response acknowledges the committed stop marker and audit; it does not
@@ -64,12 +64,12 @@ transient safe codes retry automatically; permanent/unlisted failures and a dela
 hint alone do not grant permission. Exponential jitter is bounded by RetryMaxDelay.
 Negative RetryAfter hints are ignored; nonnegative hints are capped, combined with
 the jittered delay using the greater value, and capped again. Approved retries
-create future one-shot outbox intents with the original execution idempotency key.
-Quartz trigger retry is None, and the wrapper does not sleep/refire for backoff.
+set a future SQL `AvailableAtUtc` with the original execution idempotency key.
+The runtime poll observes the bounded backoff without occupying an execution slot.
 The logical job permit is retained during backoff and NeedsReview and released on
 finalization.
 
-Expiry marks an attempt Abandoned without deleting Quartz rows. A crash before
+Expiry marks an attempt Abandoned. A crash before
 launch and a crash after effects are both uncertain unless no handler entry can
 be proved. Uncertain effects become NeedsReview unless the pinned job policy
 explicitly permits bounded replay. Managers can ReconcileSucceeded, Cancel, or
@@ -79,9 +79,9 @@ decision. Cancel/reconciliation can release an unresolved permit, so the operato
 must acknowledge possible external overlap. Targets must honor the stable key or
 provide their own transaction/lock when strict external deduplication is required.
 
-Shutdown puts acquisition in standby, requests cancellation and drains for the
-configured bounded interval (Worker:DrainSeconds, default 40), then forces local
-containment. Cleanup still runs if the scheduler standby call fails. Unknown
+Shutdown stops new claims, requests cancellation and drains for the
+configured bounded interval (`Worker:DrainSeconds`, default 40), then forces local
+containment. Unknown
 effects or a lost outcome acknowledgement never become a fabricated success.
 Status events feed the current [execution monitoring](monitoring.md) timeline.
 Real SQL fences, restart, and migration proofs remain pending as described in

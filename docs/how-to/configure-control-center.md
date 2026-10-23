@@ -33,6 +33,6 @@ longer includes the historical SQL schema or an automatic importer. Preserve
 any old database and release backup according to your recovery policy; create
 and configure a current file-backed center separately, then register tenant
 links through its management panel. Tenant SQL migrations and the tenant's two
-Quartz stores remain required and unchanged.
+Tenant schedules and queued work are managed directly by the tenant runtime service and SQL database.
 
-There is no dedicated central Windows service. Host the Control Center web application separately (for example, as its own IIS application); tenant schedulers and worker services continue to run independently if the Control Center is unavailable.
+There is no dedicated central Windows service. Host the Control Center web application separately (for example, as its own IIS application); each tenant runtime service continues to operate if the Control Center is unavailable.

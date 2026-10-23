@@ -34,7 +34,7 @@ The wizard reports that the draft was saved, the job state becomes **Enabled**, 
 
 ## If it does not work
 
-If validation reports issues, correct the named fields and validate again. If the save reports a stale revision, reload the current revision and review it again before saving. A pending projection means the change may not yet appear in monitoring. If no template is selectable or a control is unavailable, ask an administrator to check template availability and your Manage role.
+If validation reports issues, correct the named fields and validate again. If the save reports a stale revision, reload the current revision and review it again before saving. Job and schedule changes are committed to SQL and appear in monitoring as the views refresh. If no template is selectable or a control is unavailable, ask an administrator to check template availability and your Manage role.
 
 ## Related guides
 

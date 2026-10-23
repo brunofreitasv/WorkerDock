@@ -1,6 +1,6 @@
 # Alerts
 
-WorkerDock evaluates alert rules against tenant SQL Server data and writes incident and delivery intent in the same transaction. Quartz projects the opaque delivery reference from the existing outbox. There is no external broker.
+WorkerDock evaluates alert rules against tenant SQL Server data and writes incident and durable delivery rows in the same transaction. The tenant runtime polls bounded batches and claims deliveries with SQL leases. There is no broker.
 
 ## Conditions and evaluation
 
@@ -10,7 +10,7 @@ The evaluator uses bounded batches and a SQL-backed rule-and-subject cursor. It 
 
 ## Webhook sink and secrets
 
-Webhook configuration contains an HTTPS destination and optional header names whose values are secret references. Inline header values, credentials in URLs, transport-controlled headers, and secret values in the database are rejected. At send time the delivery worker resolves references through `ISecretVault`. The scheduler currently registers the development vault adapter, which is unavailable unless its development-only environment mapping is explicitly enabled. No production vault adapter is included, so live secret-backed delivery remains unverified until a trusted provider is integrated and tested.
+Webhook configuration contains an HTTPS destination and optional header names whose values are secret references. Inline header values, credentials in URLs, transport-controlled headers, and secret values in the database are rejected. At send time the tenant runtime resolves references through `ISecretVault`. Tenant hosts currently register the development vault adapter, which is unavailable unless its development-only environment mapping is explicitly enabled. No production vault adapter is included, so live secret-backed delivery remains unverified until a trusted provider is integrated and tested.
 
 Destinations are checked against the tenant outbound policy at execution time. Configure that policy with explicit host and port allowlists. Private, loopback, link-local, and otherwise unsafe destinations are denied by default to reduce SSRF risk. Keep vault identities and webhook credentials scoped to the tenant.
 
@@ -24,9 +24,9 @@ Only users with the management permission can edit rules and sinks or retry a de
 
 ## Database setup
 
-To add alert objects to a tenant, take and verify a backup, then apply the reviewed target through `scripts/Invoke-TenantMigration.ps1` as described in [SQL setup](../how-to/setup-sql-server.md). Migration `0007_alerts` is applied as part of the ordered chain when required. Its matching rollback refuses to drop populated alert tables; use explicit rollback selection and do not bypass its guard. The manifest contains SHA-256 checksums for both scripts. Use a separate migration credential and runtime principal.
+Alert objects are created by the `0001_initial` fresh-install baseline. There is no tenant upgrade converter because no tenant databases are deployed. The guarded rollback refuses to remove populated state. Use a separate migration credential and runtime principal.
 
-For local development, use the [in-memory tutorial](../tutorials/run-in-memory.md); it does not exercise SQL alert evaluation, leases, or outbox recovery. To verify delivery recovery, configure `WORKERDOCK_TEST_SQL` with a disposable SQL Server 2022+ instance as described in [SQL setup](../how-to/setup-sql-server.md), then run `dotnet test tests/WorkerDock.IntegrationTests --filter FullyQualifiedName~AlertDeliveryTests`. Migration checks that do not need SQL Server are `dotnet test tests/WorkerDock.IntegrationTests --filter 'FullyQualifiedName~CustomSqlSchemaTests|FullyQualifiedName~MigrationInputTests'`. Never put credentials in source control or test output.
+For local development, use the [in-memory tutorial](../tutorials/run-in-memory.md); it does not exercise SQL alert evaluation or delivery leases. To verify delivery recovery, configure `WORKERDOCK_TEST_SQL` with a disposable SQL Server 2022+ instance as described in [SQL setup](../how-to/setup-sql-server.md), then run the integration tests. When that variable is unavailable, SQL delivery behavior remains unverified. Never put credentials in source control or test output.
 
 ## Adding another sink
 

@@ -14,7 +14,7 @@
 
 - There are no SQL-backed Control Center installations to migrate; retiring the importer does not discard deployed data.
 - Keep every `database/tenant/manifest.json` entry and the exact bytes of its paired `.up.sql` and `.down.sql` scripts.
-- Keep test-only SQL under `tests/sql` and `tests/WorkerDock.IntegrationTests/Sql`, plus `database/upstream/quartz-4.5.1` and its license/notice in source control.
+- Keep test-only SQL under `tests/sql` and `tests/WorkerDock.IntegrationTests/Sql`. Third-party scheduler source and its notice were removed with the single-runtime cutover.
 - Current Control Center persistence stays in protected files; its package and upgrade path require no SQL.
 - Preserve all unrelated uncommitted logo edits and the modified `.superpowers/sdd/2026-10-17-workerdock-03-templates/progress.md` on disk.
 - Source cleanup does not delete ignored local build output, SQL databases, backup archives, or deployed installations.
@@ -87,7 +87,7 @@
 - Produces: active setup documentation with one supported SQL migration root, `database/tenant`, and no legacy importer procedure.
 
 - [ ] **Step 1: Record preservation state.** Run `git status --short`, `git ls-files '.superpowers/sdd/**'`, and record the SHA-256 of the modified progress file and dirty logo files. Do not stage or delete those logo files.
-- [ ] **Step 2: Update active docs.** Remove archived central schema/import instructions and links; retain exact tenant migration, test fixture, Quartz provenance, center file-state, and release-validation guidance. Stage only the README SQL hunk so its pre-existing logo hunk remains unstaged.
+- [ ] **Step 2: Update active docs.** Remove archived central schema/import instructions and links; retain fresh tenant schema, test fixture, center file-state, and release-validation guidance. Stage only the README SQL hunk so its pre-existing logo hunk remains unstaged.
 - [ ] **Step 3: Remove historical records from tracking.** Delete the listed superseded `docs/superpowers` plan/spec files. After confirming the tracked list, run index-only removal for `.superpowers/sdd`; its ignored local files must remain intact.
 - [ ] **Step 4: Verify.** Search active docs and code for `database/central`, `WorkerDock.CentralImport`, `apply central`, and `rollback central`; expect no references outside this cleanup spec/plan or retained Git history. Confirm the recorded local file hashes are unchanged, the deleted docs have no remaining active links, and `git diff --check` passes.
 - [ ] **Step 5: Commit.** Stage only Task 3 changes and commit `docs: remove obsolete central SQL guidance and work logs`.

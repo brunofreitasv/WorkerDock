@@ -11,12 +11,13 @@ Leitura para consultar descrições e versões dos modelos. Gerenciar para selec
 ## Etapas
 
 1. Abra [Modelos](#/templates) para consultar o catálogo de modelos instalados. O seletor de modelos do assistente de tarefas mostra o nome de exibição e a versão de cada modelo.
-2. Escolha um modelo selecionável ao criar uma tarefa. Uma versão aposentada continua visível para tarefas existentes, mas fica desativada para novas seleções.
-3. Os pacotes de modelos são instalados pela implantação do aplicativo. A interface do tenant não cria, envia nem instala pacotes de modelos. Desenvolvedores que adicionam um modelo personalizado devem seguir `docs/how-to/add-custom-template.md` no repositório de código-fonte.
+2. Os modelos integrados SQL Server e HTTP oferecem a versão **1.1.0**. Escolha um deles ao criar uma tarefa.
+3. Novas instalações incluem os modelos integrados SQL Server e HTTP na versão **1.1.0**. Os pacotes de modelos são instalados pela implantação do aplicativo; a interface do tenant não cria nem instala pacotes.
+4. Novos modelos exigem uma alteração de desenvolvimento e implantação. Autores podem seguir `docs/how-to/add-custom-template.md` no repositório de origem.
 
 ## Resultado
 
-Você identifica o modelo instalado e a versão disponível para uma tarefa e entende por que uma versão aposentada não pode ser selecionada em uma tarefa nova.
+Você identifica os modelos integrados disponíveis, ambos na versão 1.1.0, e entende que modelos personalizados podem usar outras versões.
 
 ## Exemplo prático
 
@@ -28,8 +29,10 @@ Confirme o nome e a versão do modelo na revisão ou nos detalhes da tarefa. Dep
 
 ## Recuperação
 
-Se o modelo não aparecer, peça a um gerente para confirmar se ele está instalado para o tenant. Se um campo não estiver disponível, escolha uma versão compatível ou solicite ao autor do modelo uma atualização de esquema e implantação. Usuários do tenant não podem adicionar modelos pelo catálogo.
+Se o modelo não aparecer, peça a um gerente para confirmar se ele está instalado para o tenant. Se um campo não estiver disponível, solicite ao autor do modelo uma atualização de esquema e implantação. Usuários do tenant não podem adicionar modelos pelo catálogo.
 
 ## Guias relacionados
 
 Consulte [criação de tarefas](#/help:jobs), [tarefas do SQL Server](#/help:sql-jobs) e [tarefas HTTP](#/help:http-jobs).
+
+Para desenvolver modelos, consulte `docs/how-to/add-custom-template.md` no repositório de origem.

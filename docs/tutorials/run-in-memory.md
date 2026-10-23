@@ -1,7 +1,7 @@
 # Run WorkerDock with memory adapters
 
 This starts the Tenant web UI and Control Center without SQL Server. The Worker
-and Scheduler require SQL-backed tenant state and do not run in this mode.
+and the tenant runtime service require SQL-backed tenant state and do not run in this mode.
 Memory data is disposable and is lost when either process stops.
 
 ## Prerequisites

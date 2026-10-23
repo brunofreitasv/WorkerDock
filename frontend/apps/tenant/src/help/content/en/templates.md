@@ -13,8 +13,8 @@ Read users can inspect installed templates. Manage users can select one in the j
 ## Steps
 
 1. Open [Templates](#/templates) to review the installed catalog, display names, versions, and descriptions.
-2. Open [Jobs](#/jobs), start a job, and choose a template in **Template**. The picker shows templates available to this tenant.
-3. Review the generated fields in **Configuration**. Select a template version intentionally; existing jobs stay pinned to their saved version when the catalog changes.
+2. The built-in SQL Server and HTTP templates support version **1.1.0**. Open [Jobs](#/jobs), start a job, and choose one in **Template**.
+3. Review the generated fields in **Configuration**. Fresh installations include the built-in SQL Server and HTTP templates at version **1.1.0**.
 4. Validate the configuration, review the draft, and activate only when its settings and prerequisites are ready.
 
 ## Worked example
@@ -27,7 +27,7 @@ Confirm the selected template name and version in the job review or details. Aft
 
 ## Recover
 
-If the template is missing, ask a manager to confirm it is installed for the tenant. If a field is unavailable, choose a compatible template version or ask the template author to update and deploy the schema. A tenant user cannot add a template through the catalog.
+If the template is missing, ask a manager to confirm it is installed for the tenant. If a field is unavailable, ask the template author to update and deploy the schema. A tenant user cannot add a template through the catalog.
 
 ## Result
 

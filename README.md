@@ -2,7 +2,7 @@
 
 <img src="frontend/packages/ui/src/brand/workerdock-mark.png" alt="WorkerDock logo" width="72" height="72">
 
-WorkerDock is a self-hosted platform for creating, scheduling, running, monitoring, and auditing jobs. It includes a React operator dashboard, .NET services, SQL Server and Quartz.NET for deployed scheduling, and trusted SQL Server and HTTP worker templates. Each tenant has its own database and runtime services; the optional Control Center links to independently deployed tenants. No external message broker is required.
+WorkerDock is a self-hosted platform for creating, scheduling, running, monitoring, and auditing jobs. It includes a React operator dashboard, .NET services, SQL Server, and trusted SQL Server and HTTP job templates. Each tenant has its own database and one Windows runtime service that launches bounded child processes. The optional Control Center links to independently deployed tenants. No external message broker is required.
 
 ## Getting started
 
@@ -18,7 +18,7 @@ For a quick visual tour, see the [tenant and process map](docs/reference/archite
 
 ## SQL assets
 
-[`database/tenant`](database/tenant) is the only production SQL migration source. Its checksummed manifest contains tenant runtime migrations and paired rollbacks; select and apply them with `scripts/Invoke-TenantMigration.ps1` for each tenant database. The Control Center keeps state in protected files and has no SQL assets. SQL fixtures under [`tests/sql`](tests/sql) and [`tests/WorkerDock.IntegrationTests/Sql`](tests/WorkerDock.IntegrationTests/Sql) are for disposable integration tests only. Quartz's attributed upstream source is retained under `database/upstream` for provenance and is not a deployment script. For a fresh database only, `database/tenant/current-state.sql` is an alternative snapshot; it is not an upgrade path. See the [database object reference](docs/reference/database-objects.md) and [SQL setup guide](docs/how-to/setup-sql-server.md) for supported commands and permissions.
+[`database/tenant`](database/tenant) is the only production SQL migration source. Its checksummed manifest contains the `0001_initial` fresh-install baseline and guarded rollback; apply it to a new tenant database with `scripts/Invoke-TenantMigration.ps1`. There is no tenant database upgrade converter because no tenant databases are deployed. The Control Center keeps state in protected files and has no SQL assets. SQL fixtures under [`tests/sql`](tests/sql) and [`tests/WorkerDock.IntegrationTests/Sql`](tests/WorkerDock.IntegrationTests/Sql) are for disposable integration tests only. For a fresh database only, `database/tenant/current-state.sql` is an alternative snapshot; it is not an upgrade path. See the [database object reference](docs/reference/database-objects.md) and [SQL setup guide](docs/how-to/setup-sql-server.md) for supported commands and permissions.
 
 ## Project status
 

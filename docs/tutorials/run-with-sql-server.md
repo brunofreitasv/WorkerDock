@@ -1,6 +1,6 @@
 # Run WorkerDock with SQL Server
 
-This local setup runs the Tenant UI, Worker and Scheduler against one tenant
+This local setup runs the Tenant UI and one runtime service against one tenant
 database. The Control Center uses its Development memory registry for this
 disposable run. A fresh persistent Control Center uses
 `Central:Storage:DataDirectory` and needs no central SQL database. Keep all
@@ -20,10 +20,10 @@ This tutorial uses placeholders and does not create or grant a database.
 
 ## Migrate and build
 
-At the repository root, prepare a fresh empty database with either the migration
-script below or the fresh-only `database/tenant/current-state.sql` snapshot. The
-snapshot must not be applied to an existing database. Live SQL parity between
-these two design paths has not been verified. Use a separate operator-supplied SQL migration login. Supply its `PSCredential`
+At the repository root, prepare a fresh empty database with the `0001_initial`
+baseline or the `database/tenant/current-state.sql` snapshot. Neither is an
+upgrade path. No tenant databases are deployed and no upgrade converter is
+provided. Use a separate operator-supplied SQL migration login. Supply its `PSCredential`
 from your approved vault process or retrieve it through the protected PowerShell
 credential prompt; never place its password in shell history.
 The runtime SQL login must remain separate and restricted.
@@ -35,7 +35,7 @@ dotnet publish src/WorkerDock.Web -c Release -o artifacts/web
 & scripts/Invoke-TenantMigration.ps1 `
   -Action Apply -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 `
   -Database '<TENANT_DATABASE>' -Credential $credential `
-  -InstanceId '<stable-tenant-guid>' -TargetMigration '0010_remove_builtin_v1' `
+  -InstanceId '<stable-tenant-guid>' -TargetMigration '0001_initial' `
   -ScriptsRoot (Resolve-Path 'database').Path `
   -AssemblyDirectory (Resolve-Path 'artifacts/web').Path
 
@@ -46,7 +46,7 @@ dotnet publish src/WorkerDock.Executor -c Release -r win-x64 --self-contained fa
 dotnet dev-certs https --trust
 ```
 
-Choose and review the explicit target from `database/tenant/manifest.json`. The sample publishes the Web assembly first because the migration script loads the reviewed migration implementation from that output directory.
+The manifest contains only `0001_initial`. The sample publishes the Web assembly first because the migration script loads the reviewed migration implementation from that output directory.
 
 Run the migration script with the PowerShell call operator in the same session
 that created `$credential`. A `PSCredential` object cannot be passed through a
@@ -71,9 +71,9 @@ $env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.runtime.sql.password":"TENANT_R
 $env:TENANT_RUNTIME_PASSWORD='<retrieve-from-protected-local-secret-store>'
 ```
 
-## Start the services
+## Start the tenant
 
-Start each command in its own PowerShell window from the repository root.
+Start the runtime service and Web host in separate PowerShell windows from the repository root.
 
 Tenant UI (serves the built frontend and API on the same origin):
 
@@ -93,10 +93,10 @@ $env:TENANT_RUNTIME_PASSWORD='<retrieve-from-protected-local-secret-store>'
 dotnet run --project src/WorkerDock.Web --urls https://localhost:5001
 ```
 
-Worker (choose a stable unique installation GUID). The digest below is
-`TemplateMetadata.AggregateDigest` of the installed SQL Server and HTTP 1.1.0
-descriptors. Recompute it when changing a descriptor or
-adding a trusted template; a mismatch prevents the worker from starting.
+Runtime service. The digest below is `TemplateMetadata.AggregateDigest` of the
+installed SQL Server and HTTP 1.1.0 descriptors. Recompute it when changing a
+descriptor or adding a trusted template; a mismatch prevents startup. The
+service is single instance per tenant and runs at most ten execution children.
 
 ```powershell
 $env:DOTNET_ENVIRONMENT='Development'
@@ -109,28 +109,11 @@ $env:Tenant__Sql__PasswordReference='tenant.runtime.sql.password'
 $env:WORKERDOCK_DEVELOPMENT_VAULT='1'
 $env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.runtime.sql.password":"TENANT_RUNTIME_PASSWORD"}'
 $env:TENANT_RUNTIME_PASSWORD='<retrieve-from-protected-local-secret-store>'
-$env:Worker__InstallationId='<stable-unique-worker-installation-guid>'
 $env:Worker__CatalogDigest='8A719E8D8B3F5A5D5046ED8299D5D555F924F05B5E6AA64AE53B7F3A91AC2765'
 $env:Worker__HostCeiling='10'
 $env:Worker__DrainSeconds='40'
 $env:Executor__Path=(Resolve-Path 'src/WorkerDock.Executor/bin/Release/net10.0-windows/win-x64/publish/WorkerDock.Executor.exe').Path
 dotnet run --project src/WorkerDock.Worker -c Release
-```
-
-Scheduler:
-
-```powershell
-$env:DOTNET_ENVIRONMENT='Development'
-$env:Tenant__InstanceId='<stable-tenant-guid>'
-$env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
-$env:Tenant__Sql__Port='1433'
-$env:Tenant__Sql__Database='<TENANT_DATABASE>'
-$env:Tenant__Sql__User='<TENANT_RUNTIME_LOGIN>'
-$env:Tenant__Sql__PasswordReference='tenant.runtime.sql.password'
-$env:WORKERDOCK_DEVELOPMENT_VAULT='1'
-$env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.runtime.sql.password":"TENANT_RUNTIME_PASSWORD"}'
-$env:TENANT_RUNTIME_PASSWORD='<retrieve-from-protected-local-secret-store>'
-dotnet run --project src/WorkerDock.Scheduler -c Release
 ```
 
 Optional Control Center, using a local memory registry for this Development
@@ -147,9 +130,9 @@ dotnet run --project src/WorkerDock.ControlCenter --urls https://localhost:5002
 The Tenant UI is at <https://localhost:5001/> and Control Center at
 <https://localhost:5002/>. Check `/health/live` on both web hosts. Check
 `/health/ready` on the Control Center after startup. The Tenant readiness route
-checks the real SQL-backed monitoring state and can return 503 until its
-dependencies are healthy. Confirm Worker registration and Scheduler startup in their
-console logs. The web process serves the frontend assets; Node is not a runtime
+checks the real SQL-backed runtime heartbeat and can return 503 until its
+dependencies are healthy. Confirm runtime startup and heartbeat in its console
+logs. The web process serves the frontend assets; Node is not a runtime
 dependency. The Control Center's tenant health probe accepts only HTTPS port
 443, so the tenant on port 5001 cannot be registered as a probe target in this
 local tutorial.
@@ -162,9 +145,8 @@ SQL setup above is unchanged; no central SQL provisioning or migration is
 needed. Restart each affected process after rotating the password in the local
 secret source. See [Control Center setup](../how-to/configure-control-center.md).
 
-Workers begin with zero acquisition limits. To allow one HTTP attempt, set
-both the template and this worker's limit after it has registered. In another
-PowerShell window, use the worker installation GUID chosen above:
+To allow one HTTP attempt, set the template limit. `Worker:HostCeiling` sets
+the runtime's maximum concurrent child count. In another PowerShell window:
 
 ```powershell
 $origin='https://localhost:5001'
@@ -172,17 +154,17 @@ $null=Invoke-WebRequest "$origin/api/session" -SessionVariable browser
 $csrf=Invoke-RestMethod "$origin/api/antiforgery" -WebSession $browser
 $headers=@{'X-WorkerDock-CSRF'=$csrf.requestToken;'Origin'=$origin}
 Invoke-RestMethod "$origin/api/templates/workerdock.http/limit" -Method Put -WebSession $browser -Headers $headers -ContentType 'application/json' -Body '{"limit":1}'
-Invoke-RestMethod "$origin/api/workers/<stable-unique-worker-installation-guid>/limit" -Method Put -WebSession $browser -Headers $headers -ContentType 'application/json' -Body '{"limit":1}'
 ```
 
-These commands require management access. The responses are accepted command
-receipts; wait until `GET /api/capacity` reports the effective revision before
-expecting dispatch. A job also needs a valid configuration and must be enabled.
-Use the same API with `workerdock.sql-server` to open that template's limit.
+These commands require management access and return accepted command receipts.
+A job also needs a valid configuration and must be enabled. The runtime polls
+for queued executions and respects the tenant child ceiling plus template and
+job limits.
 
 ## Stop and clean up
 
-Stop all four processes with Ctrl+C. Keep the tenant database to preserve local
+Stop the Web and runtime processes with Ctrl+C, then stop the optional Control
+Center if it is running. Keep the tenant database to preserve local
 SQL data. To remove a disposable database, stop the services, back up anything
 needed, then drop only that dedicated database using your SQL Server
 administration tool. Do not run migration rollback against a populated database;

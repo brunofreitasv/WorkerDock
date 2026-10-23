@@ -17,11 +17,11 @@ Use the tenant UI to check current status and safe result codes. Do not copy pas
 
 ## Worked example
 
-If an execution is still pending, first compare its timeline and current state with the scheduler and worker views. If no worker is available, an operator can check the worker heartbeat and exact template capability. If a worker is available but the execution reports a safe SQL connection code, a manager can review the job's selected profile and an operator can validate the target permissions and secret-provider setup. Avoid repeatedly starting the job until its external effect and current execution state are understood.
+If an execution is still queued, check its timeline and current state, the runtime heartbeat, child ceiling, job/template limits, and exact template version. If the execution reports a safe SQL connection code, a manager can review the job's selected profile and an operator can validate target permissions and secret-provider setup. Avoid repeatedly starting the job until its external effect and current execution state are understood.
 
 ## Verify
 
-After the responsible change, refresh the affected page and check its **Updated** time. Confirm that the worker heartbeat or setting is current, and inspect a new or safely retried execution's result and timeline. A successful UI refresh proves only that the displayed API request succeeded; it does not prove an external side effect unless the target system confirms it.
+After the responsible change, refresh the affected page and check its **Updated** time. Confirm that the runtime heartbeat or setting is current, and inspect a new or safely retried execution's result and timeline. A successful UI refresh proves only that the displayed API request succeeded; it does not prove an external side effect unless the target system confirms it.
 
 ## Recover
 
@@ -30,10 +30,10 @@ After the responsible change, refresh the affected page and check its **Updated*
 | Page shows stale or unavailable data | Updated time, refresh warning, configured store health | Refresh once. If it persists, ask an operator to check the SQL store and service health; unavailable is not the same as empty. |
 | Settings save is denied | Manage role and identity-provider role claim | Ask an administrator to correct access. Do not bypass the UI with a direct API request. |
 | Settings report a stale version | Whether another manager changed the setting | Reload, review the current value, and apply only the needed edit. |
-| Job stays pending or fails before a worker starts | Scheduler status, projection state, worker heartbeat and template ID/version | Ask an operator to check scheduler and worker compatibility; never edit Quartz tables directly. |
+| Job stays queued or fails before a child starts | Runtime readiness, SQL availability, execution state and template ID/version | Ask an operator to check the single runtime service, SQL access and installed template catalog. |
 | SQL or HTTP job cannot reach its target | Selected profile or destination policy, secret reference, host/port, TLS and target availability | Review [SQL jobs](#/help:sql-jobs) or [HTTP jobs](#/help:http-jobs), then ask the operator to verify deployment access. |
-| Alert delivery fails | Alert rule, sink, delivery state, egress policy and scheduler health | Review [Alert rules](#/help:alert-rules) and [Alert deliveries](#/help:incidents-deliveries); do not paste sink credentials into the UI. |
-| Archive maintenance fails | Archive root, scheduler permissions, disk capacity and integrity status | Preserve source records and follow [retention guidance](#/help:retention) with an operator. |
+| Alert delivery fails | Alert rule, sink, delivery state, egress policy and runtime health | Review [Alert rules](#/help:alert-rules) and [Alert deliveries](#/help:incidents-deliveries); do not paste sink credentials into the UI. |
+| Archive maintenance fails | Archive root, runtime permissions, disk capacity and integrity status | Preserve source records and follow [retention guidance](#/help:retention) with an operator. |
 
 ## Related guides
 

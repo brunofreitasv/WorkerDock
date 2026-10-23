@@ -16,7 +16,6 @@ const dashboard = {
   desiredCapacityRevision: 2,
   effectiveCapacityRevision: 2,
   capacityState: "Applied",
-  pendingProjections: 0,
   upcomingItems: [],
   recentItems: [],
 };

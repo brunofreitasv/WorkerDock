@@ -14,7 +14,7 @@ the [job flow](reference/scheduling.md#job-flow), and the
 ## How-to guides: complete a specific task
 
 - [Set up SQL Server](how-to/setup-sql-server.md): create tenant runtime databases and apply migrations; provision disposable test databases separately. The Control Center has no SQL setup.
-- [Deploy to production](how-to/deploy-production.md): build packages and install the tenant, scheduler, workers, and Control Center on Windows/IIS.
+- [Deploy to production](how-to/deploy-production.md): build packages and install one tenant runtime service plus the optional Control Center.
 - [Configure tenants](how-to/configure-tenants.md): find tenant settings, service configuration, secret references, and Control Center registration.
 - [Upgrade or restore](how-to/upgrade-and-restore.md).
 - [Add a custom template](how-to/add-custom-template.md).
@@ -27,7 +27,7 @@ the [job flow](reference/scheduling.md#job-flow), and the
 ## Reference: look up exact behavior and settings
 
 - [Configuration keys and locations](reference/configuration.md).
-- [Database objects and script ownership](reference/database-objects.md): tenant runtime migrations, test fixtures, and Quartz source provenance.
+- [Database objects and script ownership](reference/database-objects.md): fresh-install tenant schema and test fixtures.
 - [Database migration and SQL test details](reference/database-migrations.md).
 - [SQL Server template](reference/sql-template.md) and [HTTP template](reference/http-template.md).
 - [Schedules and job lifecycle](reference/scheduling.md) and [execution guarantees](reference/execution-guarantees.md).
@@ -43,6 +43,6 @@ the [job flow](reference/scheduling.md#job-flow), and the
 ## Design and architecture
 
 - [Architecture and component boundaries](reference/architecture.md).
-- [Quartz scheduling and dispatch](reference/quartz-integration.md).
+- [Single-node runtime service](reference/deployment-model.md): tenant process model, child ceiling, and readiness.
 
 Start with a tutorial or task guide for an end-to-end procedure; use reference pages to inspect behavior, contracts, and design. Memory-mode results do not prove SQL persistence or production readiness. The [release checklist](validation/release-checklist.md) identifies validation that still needs a real deployment.

@@ -17,7 +17,7 @@ Use a interface do tenant para consultar estados atuais e códigos de resultado 
 
 ## Exemplo prático
 
-Se uma execução continuar pendente, compare primeiro sua linha do tempo e seu estado atual com as telas do scheduler e dos workers. Se nenhum worker estiver disponível, um operador pode verificar o heartbeat e a compatibilidade exata do modelo. Se houver worker disponível, mas a execução mostrar um código seguro de conexão SQL, um usuário Manage pode revisar o perfil selecionado e um operador pode validar as permissões do destino e a configuração do provedor de segredos. Evite iniciar a tarefa repetidamente até entender o efeito externo e o estado atual da execução.
+Se uma execução continuar na fila, confira sua linha do tempo e seu estado, o heartbeat do runtime, o limite de processos filhos, os limites do job/modelo e a versão exata do modelo. Se a execução mostrar um código seguro de conexão SQL, um usuário Manage pode revisar o perfil selecionado e um operador pode validar as permissões do destino e a configuração do provedor de segredos. Evite iniciar a tarefa repetidamente até entender o efeito externo e o estado atual da execução.
 
 ## Verificação
 
@@ -30,10 +30,10 @@ Depois da correção responsável, atualize a página afetada e confira o horár
 | A página mostra dados desatualizados ou indisponíveis | Horário Atualizado, aviso de atualização, saúde do armazenamento configurado | Atualize uma vez. Se persistir, peça a um operador para verificar o SQL e os serviços; indisponível não significa vazio. |
 | A gravação das configurações é negada | Função Manage e declaração da função no provedor de identidade | Peça a um administrador para corrigir o acesso. Não contorne a interface com uma solicitação direta à API. |
 | Configurações informam que a versão está desatualizada | Se outro gerente alterou a configuração | Recarregue, confira o valor atual e aplique apenas a edição necessária. |
-| Tarefa fica pendente ou falha antes de iniciar em um worker | Estado do scheduler, projeção, heartbeat do worker e ID/versão do modelo | Peça a um operador para conferir o scheduler e a compatibilidade do worker; nunca edite tabelas Quartz diretamente. |
+| Tarefa permanece na fila ou falha antes de iniciar | Estado do runtime, disponibilidade do SQL, limites e ID/versão do modelo | Peça ao operador para conferir o serviço único de runtime, o acesso ao SQL e o catálogo instalado. |
 | Tarefa SQL ou HTTP não alcança o destino | Perfil selecionado ou política de destino, referência de segredo, host/porta, TLS e disponibilidade do destino | Consulte [tarefas SQL](#/help:sql-jobs) ou [tarefas HTTP](#/help:http-jobs) e peça ao operador para verificar o acesso da implantação. |
-| A entrega de alerta falha | Regra, destino, estado da entrega, política de saída e saúde do scheduler | Consulte [regras de alerta](#/help:alert-rules) e [entregas de alertas](#/help:incidents-deliveries); não cole credenciais de destino na interface. |
-| A manutenção de arquivos falha | Diretório de arquivos, permissões do scheduler, capacidade do disco e estado da integridade | Preserve os registros de origem e siga o [guia de retenção](#/help:retention) com um operador. |
+| A entrega de alerta falha | Regra, destino, estado da entrega, política de saída e saúde do runtime | Consulte [regras de alerta](#/help:alert-rules) e [entregas de alertas](#/help:incidents-deliveries); não cole credenciais de destino na interface. |
+| A manutenção de arquivos falha | Diretório de arquivos, permissões do runtime, capacidade do disco e estado da integridade | Preserve os registros de origem e siga o [guia de retenção](#/help:retention) com um operador. |
 
 ## Guias relacionados
 

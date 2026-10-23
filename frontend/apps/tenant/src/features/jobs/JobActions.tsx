@@ -4,7 +4,7 @@ import { ApiError, mutate } from "../../api/client";
 import { StopDialog } from "../executions/StopDialog";
 import type { Labels } from "@workerdock/ui";
 
-export interface JobStateDto { jobId: string; etag?: string | null; enabled: boolean; archived: boolean; paused?: boolean; projectionPending?: boolean; executionId?: string }
+export interface JobStateDto { jobId: string; etag?: string | null; enabled: boolean; archived: boolean; paused?: boolean; executionId?: string }
 export function JobActions({ job, onRefresh, onDuplicate, onStale, blocked = false, safetyActions = false, t }: { job: JobStateDto; onRefresh(): void; onDuplicate?(jobId: string): void; onStale?(): void; blocked?: boolean; safetyActions?: boolean; t: Labels }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

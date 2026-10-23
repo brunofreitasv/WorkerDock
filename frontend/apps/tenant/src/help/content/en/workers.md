@@ -25,7 +25,7 @@ You can tell what state and heartbeat the last response reported, and whether th
 
 ## If it does not work
 
-If the view says data is unavailable, refresh and check the **Updated** time. A persistent unavailable state can indicate that the monitoring store or worker projection is not configured. A memory-mode response does not prove live worker coordination or SQL persistence. Ask an administrator to inspect service health and deployment configuration.
+If the view says data is unavailable, refresh and check the **Updated** time. A persistent unavailable state can indicate that SQL is unavailable or the runtime heartbeat is stale. A memory-mode response does not prove SQL persistence or live child supervision. Ask an administrator to inspect the runtime service and deployment configuration.
 
 ## Related guides
 

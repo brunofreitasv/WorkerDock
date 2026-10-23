@@ -7,8 +7,7 @@ Production configuration is normally kept in protected JSON files copied from `e
 | Host | Configuration keys | Notes |
 | --- | --- | --- |
 | Tenant web | `Tenant:InstanceId`, `Tenant:Adapter`, `Tenant:Sql:{Host,Port,Database,User,PasswordReference}`; `Access:*`; `DataProtection:KeyDirectory`; `Health:CredentialReference`; `Retention:ArchiveRoot` | SQL adapter in production. Optional Entra uses Authority, ClientId and ClientSecretReference together. |
-| Scheduler service | `Tenant:InstanceId`, `Tenant:Sql:{Host,Port,Database,User,PasswordReference}`, `Retention:ArchiveRoot` | One per tenant. Runs schedules, projections, alerts and retention. |
-| Worker service | `Tenant:InstanceId`, `Tenant:Adapter`, `Tenant:Sql:{Host,Port,Database,User,PasswordReference}`; `Worker:InstallationId`, `Worker:CatalogDigest`, `Worker:HostCeiling`, `Worker:DrainSeconds`; `Executor:Path`, `Executor:Arguments` | Unique worker installation GUID per service. Deployment configuration sets the executor path for the selected release. |
+| Tenant runtime service | `Tenant:InstanceId`, `Tenant:Adapter`, `Tenant:Sql:{Host,Port,Database,User,PasswordReference}`; `Worker:CatalogDigest`, `Worker:HostCeiling`, `Worker:DrainSeconds`; `Executor:Path`, `Executor:Arguments`; `Retention:ArchiveRoot` | One service per tenant. Polls SQL for schedules and work; launches at most `HostCeiling` child processes. |
 | Control Center web | `Central:InstanceId`, `Central:Storage:DataDirectory`; `Central:Adapter` (Development only for Memory); `Central:Health:AllowedHosts`, `Central:Health:AllowedPrivateCidrs`; `Access:*`; `DataProtection:KeyDirectory` | Stable center identity and absolute protected state directory outside release/web roots. AllowedHosts is mandatory. No central SQL connection is used. |
 
 ## Authentication keys
@@ -17,13 +16,13 @@ Production configuration is normally kept in protected JSON files copied from `e
 
 No authentication settings means anonymous read and management. Entra without a required role means authenticated read and management. Entra plus required role means any accepted user can read and only the matching role can manage. See [authentication](../how-to/configure-authentication.md).
 
-## Worker and scheduler settings
+## Runtime settings
 
-`Worker.InstallationId` must be a nonempty GUID unique to a worker service; changing it identifies a different installed worker. `Worker.CatalogDigest` must match the aggregate digest for the reviewed descriptors installed in that package. `Worker.HostCeiling` is the service process's host capacity ceiling. `Worker.DrainSeconds` is constrained to 1 through 60. `Executor.Path` and arguments are deployment-authored and never job-supplied. The default worker example uses a ceiling of 10 and 40-second drain period.
+`Worker.CatalogDigest` must match the aggregate digest for reviewed descriptors installed in the runtime package. `Worker.HostCeiling` is the tenant's maximum concurrent child count and accepts values from 1 through 1000; the example uses 10. `Worker.DrainSeconds` is constrained to 1 through 60; the example uses 40 seconds. The runtime holds a tenant-scoped named mutex and rejects a second service instance. It polls due schedules every second, executions every 500 ms, alert rules and metric aggregation every five seconds, deliveries every two seconds, zone rules and retention every minute. These intervals are bounded polling cadence, not exact start-time guarantees. `Executor.Path` and arguments are deployment-authored and never job-supplied.
 
 Dynamic-value plans are job-revision data, not host configuration or secrets. A plan stores its resolver version, timezone, declared JSON Pointer targets, sources, and transformations. Execution context and resolved nonsecret values are stored with the execution. No additional environment variable, vault key, or deployment credential is needed to enable the built-in dynamic sources. See [job execution guarantees](execution-guarantees.md) for source semantics and retry behavior.
 
-The scheduler uses `Retention.ArchiveRoot` for archive output. If set, this must be an absolute directory writable only by the scheduler service identity and administrators.
+The runtime uses `Retention.ArchiveRoot` for archive output. If set, this must be an absolute directory writable only by the runtime service identity and administrators.
 
 ## Control Center health probe
 

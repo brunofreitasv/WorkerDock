@@ -1,14 +1,14 @@
 # Configure a tenant and register it in Control Center
 
-Each tenant has a fixed instance GUID, one SQL database and separate runtime configuration for the IIS web app, scheduler and each worker service. The configuration examples in `examples/config/` are the authoritative starting point for production JSON files. Protect these files with filesystem ACLs and keep them outside the release package.
+Each tenant has a fixed instance GUID, one SQL database, a web app, and one runtime service configuration. The configuration examples in `examples/config/` are the authoritative starting point for production JSON files. Protect these files with filesystem ACLs and keep them outside the release package.
 
 ## Tenant settings
 
-`tenant.example.json` supplies the tenant web and scheduler settings:
+`tenant.example.json` supplies the tenant web settings:
 
 | Setting | Purpose |
 | --- | --- |
-| `Tenant.InstanceId` | Stable tenant GUID, matching `-InstanceId` and every worker config. |
+| `Tenant.InstanceId` | Stable tenant GUID, matching `-InstanceId` in the runtime configuration. |
 | `Tenant.Sql.Host`, `Tenant.Sql.Port`, `Tenant.Sql.Database` | SQL Server endpoint and tenant database. Use a DNS name or IP without an instance suffix. |
 | `Tenant.Sql.User`, `Tenant.Sql.PasswordReference` | Restricted runtime login and logical password reference resolved by the configured vault. Never store the password in config. |
 | `Tenant.Adapter` | Production SQL adapter (`Sql`). Memory mode is Development-only. |
@@ -16,11 +16,11 @@ Each tenant has a fixed instance GUID, one SQL database and separate runtime con
 | `Access.RequiredManagementRole`, `Access.RoleClaimType` | Optional case-sensitive role required for management; default role claim is `roles`. |
 | `DataProtection.KeyDirectory` | Absolute, persistent directory protected for the IIS application identity. |
 | `Health.CredentialReference` | Uppercase logical reference used by the tenant `/health/ready` credential check. |
-| `Retention.ArchiveRoot` | Optional absolute archive directory writable by the scheduler identity. |
+| `Retention.ArchiveRoot` | Optional absolute archive directory writable by the runtime service identity. |
 
-`worker.example.json` supplies per-service settings. Its `Tenant.InstanceId` and five `Tenant.Sql` fields must target the same tenant database as the web and scheduler. `Worker.InstallationId` is a stable, unique GUID per worker service; `CatalogDigest` is the SHA-256 aggregate for the reviewed installed template catalog; `HostCeiling` sets that process's maximum host capacity; `DrainSeconds` accepts 1–60 seconds. `Executor.Path` must point to the selected release's executor binary. `Executor.Arguments` is deployment-owned. The scheduler reads the same tenant SQL settings and is not separately configured as a worker.
+`worker.example.json` supplies the single runtime service settings. Its `Tenant.InstanceId` and five `Tenant.Sql` fields must target the same tenant database as the web app. `Worker.CatalogDigest` is the SHA-256 aggregate for the reviewed installed template catalog; `Worker.HostCeiling` sets the maximum concurrent child count from 1 through 1000; `Worker.DrainSeconds` accepts 1–60 seconds. `Executor.Path` must point to the selected release's executor binary. `Executor.Arguments` is deployment-owned. A tenant-scoped mutex rejects a second runtime service for that tenant.
 
-Your deployment tooling should copy protected JSON files to the configured host paths and preserve them across releases. Make configuration changes to the deployed protected file and restart the affected process. Each additional worker receives its own JSON file and unique installation ID.
+Your deployment tooling should copy protected JSON files to the configured host paths and preserve them across releases. Make configuration changes to the deployed protected file and restart the affected process. Use one runtime service configuration per tenant.
 
 Configuration can also be supplied through .NET environment variables, where `__` represents a section separator: for example `Tenant__InstanceId`, `Tenant__Sql__Host`, `Tenant__Sql__Port`, `Tenant__Sql__Database`, `Tenant__Sql__User`, and `Tenant__Sql__PasswordReference`. Deployment tooling loads protected JSON configuration; service environment variables must be set in the service's protected environment by deployment tooling. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in the host trust store. Do not place credentials in command lines, shell history or source control. Restart affected hosts after rotating a password in the vault.
 
@@ -49,4 +49,4 @@ The production center must provide its own `ISecretVault` implementation in the 
 
 ## Separate identity and storage
 
-Give each tenant its own Entra app registration, SQL database, runtime identity and Data Protection key directory. Give the center its own Entra app registration, protected state directory, Data Protection key directory, and vault identity. Web, scheduler and worker service identities only read their respective configs and key material as required. Use a tenant-specific SQL runtime principal assigned to `WorkerDockRuntime`; the center has no SQL runtime principal. Only the separately controlled migration credential needs tenant schema creation rights. See [SQL setup](setup-sql-server.md) for migrations and runtime grants.
+Give each tenant its own Entra app registration, SQL database, runtime identity and Data Protection key directory. Give the center its own Entra app registration, protected state directory, Data Protection key directory, and vault identity. Web and runtime service identities only read their respective configs and key material as required. Use a tenant-specific SQL runtime principal assigned to `WorkerDockRuntime`; the center has no SQL runtime principal. Only the separately controlled migration credential needs tenant schema creation rights. See [SQL setup](setup-sql-server.md) for migrations and runtime grants.

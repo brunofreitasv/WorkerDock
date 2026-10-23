@@ -1,31 +1,22 @@
 # Database objects
 
-WorkerDock's only runtime SQL schema is the tenant schema in `database/tenant`. Tenant migrations have `.up.sql` and `.down.sql` files listed in a checksummed manifest. Prepare tenant migrations with `scripts/Invoke-TenantMigration.ps1`, explicitly selecting the target migration. The optional script uses the reviewed Web and Infrastructure assemblies; do not execute an individual runtime script by hand or edit an applied migration. New schema changes use a new migration pair.
+WorkerDock's only runtime SQL schema is the tenant schema in `database/tenant`. The manifest contains one checksummed fresh-install baseline, `0001_initial`, with a guarded rollback. Apply it to a new tenant database with `scripts/Invoke-TenantMigration.ps1`; do not execute an individual runtime script by hand or edit the baseline. There are no deployed tenant databases and no upgrade converter.
 
-All tenant-owned objects are under `[workerdock]`. Tenant application connections use the restricted runtime role created by tenant migrations. Current Control Center state is held in protected files, not SQL objects, and it has no SQL runtime principal. `database/tenant/permissions.sql` only adds an existing tenant database user or group to `WorkerDockRuntime`; it does not create roles, schemas, tables, procedures, or grants.
+All tenant-owned objects are under `[workerdock]`. Tenant application connections use the restricted runtime role created by the fresh-install baseline. Current Control Center state is held in protected files, not SQL objects, and it has no SQL runtime principal. `database/tenant/permissions.sql` only adds an existing tenant database user or group to `WorkerDockRuntime`; it does not create roles, schemas, tables, procedures, or grants.
 
 ## Runtime tenant schema
 
-| Migration | Main objects |
+| Area | Main objects |
 | --- | --- |
-| `0001_bootstrap` | `TenantSettings`, `SchemaHistory`, append-only `AuditEvents`, `Outbox`, and `WorkerDockRuntime` role |
-| `0002_quartz` | Quartz 4.5.1 scheduler and execution-publisher table sets, each with a distinct `WDS_` or `WDE_` prefix |
-| `0003_execution` | `TemplateCatalog`, `TemplatePolicies`, `Jobs`, `JobRevisions`, `Workers`, `WorkerCapabilities`, `ServiceHealth`, `PolicyRevisions`, `Executions`, `Attempts`, `JobPermits`, `Commands`, `ManualRequestDedup` |
-| `0003a_projection` | projection/review indexes and bounded outbox publication metadata |
-| `0003b_attempts` | `AttemptStatusEvents` and attempt ownership/stop markers |
-| `0003c_capacity` | capacity/admission metadata and supporting indexes |
-| `0003d_dispatch` | `ProjectionMaintenance` and dispatch indexes |
-| `0004_templates` | template definitions and template policy extensions |
-| `0004a_profiles` | `ConnectionProfiles`, `ConnectionProfileRevisions` |
-| `0004b_integration_settings` | `IntegrationSettings`, `TenantEgressPolicies`, `IntegrationSettingsRevisions` |
-| `0005_scheduling` | `Schedules`, `ScheduleRecoveryEvents`, `ScheduleRuleScanState` |
-| `0006_observability` | `ExecutionEvents`, `ExecutionMetricAggregates`, aggregation index |
-| `0007_alerts` | alert sinks/rules and revisions, incidents, deliveries, delivery attempts, evaluation state |
-| `0008_retention` | retention policy, archive batches/items, request tombstones, purge audit, guarded purge procedures |
+| Tenant and security | `TenantSettings`, `SchemaHistory`, append-only `AuditEvents`, `WorkerDockRuntime` role |
+| Jobs and executions | `TemplateCatalog`, `TemplatePolicies`, `Jobs`, `JobRevisions`, `Executions`, `Attempts`, `Commands`, manual request deduplication and active-work state |
+| Scheduling | `Schedules`, occurrence cursors, recovery events and uniqueness constraints |
+| Runtime and capacity | singleton `RuntimeStatus`, tenant host ceiling, per-template/job limits and execution holds |
+| Connections and egress | connection profiles and revisions, integration settings, outbound policies |
+| Monitoring and alerts | typed `OperationalEvents`, metric aggregates, alert rules/revisions, incidents, durable deliveries and delivery attempts |
+| Retention | retention settings, archive batches/items, request tombstones, purge audit and guarded purge procedures |
 
-Quartz schema is included in tenant migration `0002_quartz`; the source SQL Server script is preserved with its license and notices in `database/upstream/quartz-4.5.1/`. WorkerDock changes its table prefixes and schema to `[workerdock]`, and creates separate stores for scheduling and execution publishing. Do not install the upstream script independently. The paired down migration refuses to drop populated stores.
-
-`database/tenant/current-state.sql` is a convenience snapshot for provisioning a fresh, empty tenant database only. Never apply it to an existing database or use it for upgrades; use the ordered, checksummed migrations instead. `scripts/Invoke-TenantMigration.ps1` requires an explicit migration target. The `database/tenant/permissions.sql` script assigns an existing principal to the runtime role; `permissions.rollback.sql` removes that membership.
+The baseline creates no third-party scheduler schema. Queued executions, schedule cursors, and alert deliveries are ordinary tenant SQL rows claimed by the runtime service. `database/tenant/current-state.sql` provisions the same schema for a fresh, empty tenant database only; it cannot update an existing database. The `database/tenant/permissions.sql` script assigns an existing principal to the restricted runtime role; `permissions.rollback.sql` removes that membership.
 
 ## Test-only SQL objects
 
@@ -34,10 +25,8 @@ These SQL files exist only to support disposable integration fixtures and are no
 | Location | Purpose |
 | --- | --- |
 | `tests/sql/target-fixture.up.sql` and `.down.sql` | Creates/drops the `[workerdock].SqlTemplateTarget` table, test procedures, and `WorkerDockSqlTarget` role in the fixture database. |
-| `tests/WorkerDock.IntegrationTests/Sql/quartz-probe.up.sql` and `.down.sql` | Creates/drops a Quartz process test probe's state/event tables and its restricted runtime user in a generated test database. |
+| `tests/WorkerDock.IntegrationTests/Sql` | Supporting objects used only by disposable integration fixtures. |
 
-`SqlDatabaseFixture` chooses a generated `WorkerDock_Test_<32 hex digits>` database, sets compatibility level 160, and drops that database at disposal. Target fixture scripts and Quartz probe scripts run only inside that generated database. Do not copy these scripts into a tenant installation.
-
-`database/upstream/quartz-4.5.1/sql-server.sql` is attributed upstream source retained for provenance. It is neither a deployment migration nor a test fixture; do not run it in addition to `0002_quartz`.
+`SqlDatabaseFixture` chooses a generated `WorkerDock_Test_<32 hex digits>` database, sets compatibility level 160, and drops that database at disposal. Fixture scripts run only inside that generated database. Do not copy them into a tenant installation.
 
 For exact provisioning, least-privilege identity setup, test prerequisites, and rollback commands, see [Set up SQL Server](../how-to/setup-sql-server.md).

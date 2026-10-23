@@ -80,7 +80,6 @@ Generated from all repository `packages.lock.json` files and the corresponding N
 | Microsoft.SqlServer.Server | 1.0.0 | expression: MIT | Microsoft | https://aka.ms/sqlclientproject |
 | Microsoft.TestPlatform.ObjectModel | 18.10.0 | expression: MIT | Microsoft | https://github.com/microsoft/vstest |
 | Microsoft.TestPlatform.TestHost | 18.10.0 | expression: MIT | Microsoft | https://github.com/microsoft/vstest |
-| Quartz | 4.5.1 | expression: Apache-2.0 | Marko Lahma, Quartz.NET | https://www.quartz-scheduler.net/ |
 | System.Configuration.ConfigurationManager | 9.0.18 | expression: MIT | Microsoft | https://dot.net/ |
 | System.Diagnostics.EventLog | 10.0.13 | expression: MIT | Microsoft | https://dot.net/ |
 | System.Diagnostics.EventLog | 9.0.18 | expression: MIT | Microsoft | https://dot.net/ |

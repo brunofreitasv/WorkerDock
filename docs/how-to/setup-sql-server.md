@@ -7,35 +7,34 @@ WorkerDock tenant databases require SQL Server 2022 or newer with database compa
 ```mermaid
 flowchart LR
     Operator["Operator chooses a preparation path"]
-    Manifest["Versioned tenant migration manifest"] --> MigrationScript["Explicit target via Invoke-TenantMigration.ps1"]
+    Manifest["0001_initial fresh-install baseline"] --> MigrationScript["Explicit target via Invoke-TenantMigration.ps1"]
     Snapshot["Fresh-only current-state.sql snapshot"]
     Operator --> MigrationScript
     Operator --> Snapshot
-    MigrationScript --> TenantDb[("Tenant database<br/>[workerdock] + Quartz tables")]
+    MigrationScript --> TenantDb[("Tenant database<br/>[workerdock]")]
     Snapshot --> TenantDb
-    TenantApps["Tenant web, scheduler, workers"] -->|"restricted WorkerDockRuntime role"| TenantDb
+    TenantApps["Tenant web and one runtime service"] -->|"restricted WorkerDockRuntime role"| TenantDb
     CenterApp["Optional Control Center"] --> CenterFiles[("Protected state directory")]
     subgraph Tests["Disposable SQL integration tests only"]
         Fixtures["tests/sql + integration fixture scripts"] --> TestDb[("Generated WorkerDock_Test_* database")]
     end
 ```
 
-For a tenant database, the operator chooses one preparation path: apply the
-ordered, checksummed migrations listed in `database/tenant/manifest.json` with
-an explicit target using `scripts/Invoke-TenantMigration.ps1`, or apply
-`database/tenant/current-state.sql` to a fresh empty database. The snapshot is
-fresh-install-only and must never be applied to an existing tenant or used as
-an upgrade. These paths are design alternatives; live SQL parity has not been
-verified. The `tests/sql` scripts create only fixture objects in generated
-disposable databases; never apply them to a runtime tenant. Quartz's attributed
-upstream source is retained for provenance and is not installed independently.
+For a new tenant database, apply the single checksummed `0001_initial` baseline using
+`scripts/Invoke-TenantMigration.ps1`, or apply
+`database/tenant/current-state.sql` to a fresh empty database. Both create the
+same final schema. Neither is an upgrade path; no tenant databases are deployed
+and no upgrade converter is provided. The `tests/sql` scripts create only
+fixture objects in generated disposable databases; never apply them to a
+runtime tenant. SQL behavior remains unverified until run against a disposable
+SQL Server 2022+ instance.
 The in-memory tutorial needs none of these SQL objects.
 
 ### Fresh database snapshot
 
 Use `database/tenant/current-state.sql` only for a newly created, empty tenant
 database at compatibility level 160 or later. Generate the stable tenant GUID
-that Web, Scheduler, and Worker will share. In a working copy of the snapshot,
+that Web and runtime service will share. In a working copy of the snapshot,
 replace every `__WORKERDOCK_INSTANCE_ID__` token with that GUID. If the runtime
 SQL login already exists on the server, edit the marked `CREATE USER` and
 `ALTER ROLE WorkerDockRuntime ADD MEMBER` statements to bind its database user.
@@ -85,21 +84,16 @@ $assemblyDirectory = (Resolve-Path 'src/WorkerDock.Web/bin/Release/net10.0').Pat
   -Action Apply `
   -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 -Database '<TENANT_DATABASE>' `
   -Credential $credential -InstanceId '<stable-tenant-guid>' `
-  -TargetMigration '0010_remove_builtin_v1' `
+  -TargetMigration '0001_initial' `
   -ScriptsRoot (Resolve-Path 'database').Path `
   -AssemblyDirectory $assemblyDirectory
 ```
 
-Select the target appropriate for the reviewed release; do not copy an example
-ID without checking the manifest. The script applies earlier migrations in
-order, verifies script checksums and schema history, checks server version and
-compatibility level, and binds the database to the supplied instance ID. Keep
-the migration identity separate from the long-lived runtime identity and remove
-its temporary DDL grants after migration.
+The manifest contains only `0001_initial`. The script verifies its checksum, schema history, server version, compatibility level, and stable tenant instance ID. Keep the migration identity separate from the long-lived runtime identity and remove its temporary DDL grants after migration.
 
 `WORKERDOCK_DEVELOPMENT_VAULT` and its explicit secret map are for local Development only. Production must follow the organization's approved protected credential process for the migration identity. The script prompts through a PowerShell credential object; do not place credentials in command lines, shell history or source control.
 
-The script applies every earlier migration in `database/tenant/manifest.json`, verifies both script checksums, checks server version and compatibility level, records migration history, and binds the database to the supplied instance ID. For a later release, apply its newest manifest migration ID. The migration identity needs DDL rights only during migration.
+There are no tenant schema upgrades. A future schema change needs a separately reviewed upgrade design before deployment to any existing tenant database.
 
 After migration, ensure the tenant application identity is mapped to a
 database user, then add that principal to the runtime role. From the repository
@@ -112,7 +106,7 @@ sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
   -i .\database\tenant\permissions.sql
 ```
 
-`database/tenant/permissions.sql` adds a supplied tenant principal to `WorkerDockRuntime`; the tenant migration defines the grants. The tenant role contains the application's required data access, including DML for both Quartz stores. It does not grant schema changes. To remove an explicit role membership:
+`database/tenant/permissions.sql` adds a supplied tenant principal to `WorkerDockRuntime`; the tenant migration defines the grants. The tenant role contains the application's required data access and does not grant schema changes. To remove an explicit role membership:
 
 ```powershell
 sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
@@ -120,7 +114,7 @@ sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
   -i .\database\tenant\permissions.rollback.sql
 ```
 
-Configure each tenant web, scheduler and worker host with `Tenant:Adapter=Sql`, the same `Tenant:InstanceId`, and `Tenant:Sql:Host`, `Port`, `Database`, `User` and `PasswordReference`. Use the restricted application identity and an explicitly mapped logical reference. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in the host trust store. Do not enable trust-server-certificate bypasses. The deployment tooling configures services and hosts; SQL setup and migrations are an explicit operator step. Restart affected processes after rotating a vault password so new connections use it.
+Configure the tenant web and one runtime service with `Tenant:Adapter=Sql`, the same `Tenant:InstanceId`, and `Tenant:Sql:Host`, `Port`, `Database`, `User` and `PasswordReference`. Use the restricted application identity and an explicitly mapped logical reference. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in the host trust store. Do not enable trust-server-certificate bypasses. The deployment tooling configures services and hosts; SQL setup and migration are an explicit operator step. Restart affected processes after rotating a vault password so new connections use it.
 
 ## Optional current Control Center
 
@@ -135,23 +129,23 @@ tenant.
 
 ## Roll back a database
 
-Take and verify a backup first. Rollbacks run one migration at a time and are guarded against discarding populated state. Stop all web, scheduler, worker, and publisher processes before rollback. For a truly empty disposable tenant database, remove the runtime membership, then run:
+Take and verify a backup first. The `0001_initial` rollback is guarded against discarding populated state. Stop the web and runtime services before rollback. For a truly empty disposable tenant database, remove the runtime membership, then run:
 
 ```powershell
 $credential = Get-Credential '<TENANT_MIGRATION_LOGIN>'
 & scripts/Invoke-TenantMigration.ps1 `
   -Action Rollback -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 `
   -Database '<TENANT_DATABASE>' -Credential $credential `
-  -InstanceId '<same-tenant-guid>' -TargetMigration '<explicit-migration-id>' `
+  -InstanceId '<same-tenant-guid>' -TargetMigration '0001_initial' `
   -ScriptsRoot (Resolve-Path 'database').Path `
   -AssemblyDirectory (Resolve-Path 'src/WorkerDock.Web/bin/Release/net10.0').Path
 ```
 
-Continue with preceding IDs only when their down scripts' empty-state requirements are satisfied. For a populated database, restore a backup or perform a separately planned data migration; do not bypass a rollback guard. The Control Center has no SQL rollback because it stores its state in protected files.
+There are no preceding migration IDs. For a populated database, restore a backup or follow a separately reviewed recovery plan; do not bypass the rollback guard. The Control Center has no SQL rollback because it stores its state in protected files.
 
 ## SQL integration tests
 
-Only run SQL integration tests against an isolated, disposable SQL Server instance. The `WORKERDOCK_TEST_SQL` identity needs permission to create and drop databases in `master`; fixtures generate `WorkerDock_Test_<32 hex digits>`, set compatibility 160, and drop only that generated database. Quartz process tests additionally require a distinct restricted SQL login in `WORKERDOCK_TEST_SQL_RUNTIME`. SQL target-template tests use a third distinct restricted login in `WORKERDOCK_TEST_SQL_TARGET_RUNTIME`. All logins must point to the same disposable server. Never use a production server or a database that contains data to preserve.
+Only run SQL integration tests against an isolated, disposable SQL Server instance. The `WORKERDOCK_TEST_SQL` identity needs permission to create and drop databases in `master`; fixtures generate `WorkerDock_Test_<32 hex digits>`, set compatibility 160, and drop only that generated database. SQL target-template tests use a distinct restricted login in `WORKERDOCK_TEST_SQL_TARGET_RUNTIME`. All logins must point to the same disposable server. Never use a production server or a database that contains data to preserve.
 
 ```powershell
 $env:WORKERDOCK_TEST_SQL='<disposable-server-provisioner-connection-string>'
@@ -162,4 +156,4 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release
 
 The fixtures own their generated databases and test objects. Their test-only SQL lives under `tests/sql` and `tests/WorkerDock.IntegrationTests/Sql`; it is not part of runtime provisioning. Missing SQL configuration causes the SQL fixtures to report `SQL_TEST_BLOCKED`. Record actual runs in the [release evidence](../validation/release-evidence.md).
 
-See [database object reference](../reference/database-objects.md), [Control Center setup](configure-control-center.md), and [Quartz integration](../reference/quartz-integration.md) for object inventories and design details.
+See [database object reference](../reference/database-objects.md), [Control Center setup](configure-control-center.md), and [deployment model](../reference/deployment-model.md) for object inventories and runtime design details.

@@ -90,7 +90,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
       if (!id) throw new Error("JobIdUnavailable");
       operationJobId = id;
       let current = await read<EditorDto>(`/api/jobs/${id}/configuration`);
-      setJob({ jobId: id, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived, projectionPending: Boolean(saved.commandId) });
+      setJob({ jobId: id, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived });
       if (scheduleEnabled) {
         writingSchedule = true;
         setScheduleState("dirty");
@@ -123,7 +123,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
         setScheduleState("none");
         removingSchedule = false;
       }
-      setJob({ jobId: id, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived, projectionPending: Boolean(saved.commandId) || scheduleEnabled });
+      setJob({ jobId: id, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived });
       setStaleConflict(false);
       setMessage(t.draftSaved);
       return true;
@@ -188,7 +188,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
     try {
       await mutate(`/api/jobs/${job.jobId}/actions`, "POST", { action: "Enable" }, job.etag);
       const current = await read<EditorDto>(`/api/jobs/${job.jobId}/configuration`);
-      setJob({ ...job, etag: current.etag, enabled: current.data.enabled, projectionPending: true });
+      setJob({ ...job, etag: current.etag, enabled: current.data.enabled });
       setMessage(t.manualEnabled);
     } catch (error) {
       if (error instanceof ApiError && error.status === 412) recordStaleConflict();
@@ -213,7 +213,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
           setScheduleState("none"); setScheduleEnabled(false); setDeleteScheduleOpen(false); setMessage(t.scheduleDeleted);
         }
       }
-      setJob({ ...job, etag: current.etag, projectionPending: true });
+      setJob({ ...job, etag: current.etag });
     } catch (error) { setScheduleState("unknown"); setMessage(error instanceof ApiError && error.status === 412 ? t.staleDraftPreserved : t.scheduleRemovalUnconfirmed); }
     finally { setBusy(false); }
   };
@@ -225,7 +225,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
       const template = catalog.find(item => item.descriptor.id === current.data.revision.templateId && item.descriptor.version === current.data.revision.templateVersion);
       if (template) setSelected(template);
       setName(current.data.revision.name); setConfiguration(current.data.revision.configuration); setDynamicValues(current.data.revision.dynamicValues ?? (template && hasDynamicAnnotation(template.descriptor.configurationSchema) ? emptyDynamicPlan("UTC") : null)); setPolicy({ ...blankPolicy, ...current.data.revision.policy });
-      setJob({ jobId, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived, projectionPending: true });
+      setJob({ jobId, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived });
       let targetScheduleState: PersistedScheduleState = "unknown";
       try {
         const savedSchedule = await read<{ input: ScheduleEditorInputDto; policy: { mode: string } }>(`/api/jobs/${jobId}/schedule`);

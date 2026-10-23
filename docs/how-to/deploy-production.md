@@ -1,11 +1,11 @@
 # Deploy WorkerDock
 
-This guide describes operator-managed deployment for one tenant and, optionally, a separate Control Center. Worker and Executor currently require Windows because their process containment and IPC use Windows APIs. IIS and Windows Services are optional hosting choices; operators select their build, packaging, and process-management tools. A tenant has a Web process, Scheduler process, one or more Worker processes, and one tenant database. The Control Center is separate, stores its state in protected files, and does not host tenant work or provision tenants.
+This guide describes operator-managed deployment for one tenant and, optionally, a separate Control Center. The runtime and Executor require Windows because process containment and IPC use Windows APIs. IIS and Windows Services are optional hosting choices; operators select their build, packaging, and process-management tools. A tenant has a Web process, one runtime service, bounded execution child processes, and one tenant database. The Control Center is separate, stores its state in protected files, and does not host tenant work or provision tenants.
 
 Production readiness is still under validation. The repository does not include
 a production `ISecretVault` integration for the Control Center; its production
-host fails startup until a trusted adapter is registered. The tenant executor
-and scheduler currently call the development vault registration, which returns
+host fails startup until a trusted adapter is registered. The tenant runtime
+currently calls the development vault registration, which returns
 an unavailable provider unless the development-only environment mapping is
 enabled. Install and review your tenant vault adapter before relying on
 secret-backed jobs or alert sinks. These integration steps require code and deployment configuration; the repository does not include an enterprise vault.
@@ -22,15 +22,15 @@ Use a migration credential separate from the restricted runtime SQL identity. Pr
 
 Choose and review build and deployment tooling for your environment. WorkerDock leaves build and deployment tooling to the operator. For example, publish .NET services with `dotnet publish` and build the frontend with `npm.cmd --prefix frontend run build`, then assemble only reviewed release files. These are examples; package contents, signing, transfer, installation, configuration protection, and service registration are operator-selected.
 
-Create one dedicated tenant database per tenant at compatibility level 160. Use either ordered migrations through `scripts/Invoke-TenantMigration.ps1` with an explicit target, a reviewed Web assembly directory, and an operator-supplied migration credential, or `database/tenant/current-state.sql` for a fresh empty database only. The snapshot cannot be used to upgrade an existing database. These paths are design alternatives; live SQL parity has not been verified. Use the separate deployment identity for migration and `database/tenant/permissions.sql` to grant an existing runtime principal membership in `WorkerDockRuntime`.
+Create one dedicated tenant database per tenant at compatibility level 160. Apply the single `0001_initial` baseline through `scripts/Invoke-TenantMigration.ps1` with the reviewed Web assembly directory and operator-supplied migration credential, or run `database/tenant/current-state.sql` against a fresh empty database. Neither path upgrades an existing database; no tenant databases are deployed and no upgrade converter is provided. SQL parity remains unverified without the disposable SQL test environment. Use the separate deployment identity for migration and `database/tenant/permissions.sql` to grant the tenant runtime principal membership in `WorkerDockRuntime`.
 
 ## Deploy a tenant
 
-Prepare protected runtime files using `examples/config/tenant.example.json` and `worker.example.json`. Set the same stable `Tenant.InstanceId` and SQL database in Web, Scheduler, and each Worker configuration. Configure the restricted runtime identity, password reference, production vault adapter, TLS trust, Data Protection key directory, worker installation GUID and catalog digest. Keep secrets out of files and artifacts.
+Prepare protected runtime files using `examples/config/tenant.example.json` and `worker.example.json`. Set the same stable `Tenant.InstanceId` and SQL database in Web and runtime configuration. Configure the restricted runtime identity, password reference, production vault adapter, TLS trust, Data Protection key directory, template catalog digest, child ceiling, and drain period. Keep secrets out of files and artifacts.
 
-Before applying any migration, take and verify the operator-managed SQL backup. Block admission and dispatch, review and drain active executions, and stop Web, Scheduler, Worker and Executor processes. Apply the explicitly selected migration. Record migration result and checksums with the release evidence.
+Before applying the baseline, verify that the tenant database is new and empty. Stop Web and runtime services. Apply `0001_initial` and record its checksum with the release evidence.
 
-Assemble and deploy the chosen application binaries and frontend using organization-approved tooling. Preserve per-tenant configuration and stable instance IDs. Runtime configuration changes take effect after restarting affected processes. Start the processes and web host manually, then verify `/health/ready`, worker heartbeats, schedules, recent executions and logs before reopening admission. Use the release compatibility window and backup to guide recovery; see [upgrade and restore](upgrade-and-restore.md).
+Assemble and deploy the chosen application binaries and frontend using organization-approved tooling. Preserve per-tenant configuration and stable instance IDs. Runtime configuration changes take effect after restarting affected processes. Start the runtime service and web host manually, then verify `/health/ready`, the runtime heartbeat, child ceiling, schedules, recent executions and logs before opening access. See [upgrade and restore](upgrade-and-restore.md) for restore procedures.
 
 Windows Server and IIS are optional deployment examples. If used, configure bindings, TLS, service identities and ACLs through the selected tooling; no repository lifecycle scripts perform these steps.
 

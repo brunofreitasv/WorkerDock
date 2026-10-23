@@ -7,7 +7,6 @@ export function JobDetails({ job, canManage, onRefresh, onDuplicate, onStale, ac
     <Typography variant="h6">{job.name ?? "Job details"}</Typography>
     <Typography>{t.jobStatus}: {job.archived ? t.archived : job.enabled ? t.enabled : t.disabled}</Typography>
     {job.paused && <Alert severity="info">{t.schedulePaused}</Alert>}
-    {job.projectionPending && <Alert severity="info">{t.schedulePending} {t.effectiveStateMayLag}</Alert>}
     {job.recentExecution && <Typography>{t.executionHistory}: {job.recentExecution}</Typography>}
     {canManage && <JobActions job={job} onRefresh={onRefresh} onDuplicate={onDuplicate} onStale={onStale} blocked={actionsDisabled} safetyActions={safetyActions} t={t} />}
   </Stack></Paper>;

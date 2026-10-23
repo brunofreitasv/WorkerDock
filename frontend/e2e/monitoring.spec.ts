@@ -4,7 +4,7 @@ const dashboard = {
   instanceId: "11111111-1111-4111-8111-111111111111", observedUtc: "2026-10-18T12:00:00Z", overall: "Healthy",
   queued: 2, running: 1, needsReview: 0, succeeded24h: 4, failed24h: 1, longRunning: 0, upcoming: 0,
   readyWorkers: 1, totalWorkers: 1, desiredCapacityRevision: 3, effectiveCapacityRevision: 3,
-  capacityState: "Applied", pendingProjections: 0, upcomingItems: [],
+  capacityState: "Applied", upcomingItems: [],
   recentItems: [{ executionId: "22222222-2222-4222-8222-222222222222", jobId: "33333333-3333-4333-8333-333333333333", jobName: "Nightly report", state: "Succeeded", createdAtUtc: "2026-10-18T11:00:00Z", correlationId: "44444444-4444-4444-8444-444444444444" }],
 };
 
