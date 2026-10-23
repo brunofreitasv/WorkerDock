@@ -151,22 +151,16 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
         await using var command = Command(c, t, """
             SELECT e.JobId,e.JobRevision,e.IdempotencyKey,e.State,e.Certainty,e.AvailableAtUtc,e.ProfileRevisionId,
                 e.StopRequested,e.ForceStop,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.PolicyJson,
-                j.Enabled,j.Archived,cat.Enabled,CONVERT(bit,COALESCE(p.StartGateClosed,1)),o.EventId,o.PayloadJson,o.PayloadDigest,
-                CASE WHEN @direct=1 AND cat.Enabled=1 AND p.StartGateClosed=0 AND p.EffectiveLimit>0 THEN 1
-                    WHEN @direct=0 AND (@boot IS NULL OR EXISTS(SELECT 1 FROM [workerdock].Workers w JOIN [workerdock].WorkerCapabilities wc ON wc.InstallationId=w.InstallationId
-                    JOIN [workerdock].PolicyRevisions policy ON policy.PolicyKind=N'Capacity'
-                    WHERE w.BootId=@boot AND w.State=N'Ready' AND policy.State=N'Effective'
-                    AND w.CatalogDigest=policy.CatalogDigest AND w.AcknowledgedRevision=policy.EffectiveRevision
-                    AND p.EffectiveRevision=policy.EffectiveRevision AND p.EffectiveLimit>0
-                    AND w.LiveLimit>(SELECT COUNT(*) FROM [workerdock].Attempts active WHERE active.WorkerBootId=w.BootId AND active.State=N'Running')
-                    AND w.LastHeartbeatUtc>DATEADD(second,-60,SYSUTCDATETIME())
-                    AND wc.TemplateId=r.TemplateId AND wc.TemplateVersion=r.TemplateVersion)
-                    AND EXISTS(SELECT 1 FROM [workerdock].JobPermits permit WHERE permit.ExecutionId=e.ExecutionId)) THEN 1 ELSE 0 END,COALESCE(p.EffectiveRevision,-1),e.TriggerKind,e.ValueContextJson,
+                j.Enabled,j.Archived,cat.Enabled,CONVERT(bit,1),o.EventId,o.PayloadJson,o.PayloadDigest,
+                CASE WHEN @direct=1 AND cat.Enabled=1 AND cat.ConcurrencyLimit>0 THEN 1
+                    WHEN @direct=0 AND EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus runtime
+                        WHERE runtime.StateId=1 AND runtime.Ready=1 AND runtime.LastHeartbeatUtc>DATEADD(second,-30,SYSUTCDATETIME())
+                        AND runtime.HostCeiling>(SELECT COUNT(*) FROM [workerdock].Attempts active WHERE active.State=N'Running')
+                        AND e.HoldsJobSlot=1) THEN 1 ELSE 0 END,CONVERT(bigint,0),e.TriggerKind,e.ValueContextJson,
                 e.FirstStartedAtUtc,e.ValueSnapshotJson,e.ValueResolutionError,r.DynamicValuesJson
             FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
                 JOIN [workerdock].Jobs j ON j.JobId=e.JobId
                 LEFT JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
-                LEFT JOIN [workerdock].TemplatePolicies p ON p.TemplateId=r.TemplateId
                 OUTER APPLY (SELECT TOP(1) EventId,PayloadJson,PayloadDigest FROM [workerdock].Outbox WHERE EntityId=e.ExecutionId AND EventType=N'ExecutionDispatch'
                     ORDER BY COALESCE(TRY_CONVERT(int,JSON_VALUE(PayloadJson,'$.attemptOrdinal')),1) DESC,COALESCE(TRY_CONVERT(bigint,JSON_VALUE(PayloadJson,'$.capacityRevision')),-1) DESC,CreatedAtUtc DESC) o
             WHERE e.ExecutionId=@id
@@ -273,10 +267,10 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
     private static async ValueTask<bool> CanClaimAsync(DbConnection c, DbTransaction t, AttemptLifecycle data, Guid executionId, CancellationToken ct)
     {
         await using var limits = Command(c, t, """
-            SELECT j.ConcurrencyLimit,p.EffectiveLimit,e.State
+            SELECT j.ConcurrencyLimit,cat.ConcurrencyLimit,e.State
             FROM [workerdock].Executions e JOIN [workerdock].Jobs j ON j.JobId=e.JobId
             JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-            JOIN [workerdock].TemplatePolicies p ON p.TemplateId=r.TemplateId
+            JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
             WHERE e.ExecutionId=@id AND j.Enabled=1 AND j.Archived=0
             """);
         Add(limits, "@id", SqlDbType.UniqueIdentifier, executionId);
@@ -316,7 +310,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
                 UPDATE [workerdock].Executions SET State=N'Skipped' WHERE ExecutionId=@id AND State=N'Queued';
                 IF @@ROWCOUNT=1 INSERT INTO [workerdock].AttemptStatusEvents(EventId,ExecutionId,State,OccurredAtUtc)
                     VALUES(NEWID(),@id,@reason,SYSUTCDATETIME());
-                DELETE FROM [workerdock].JobPermits WHERE ExecutionId=@id;
+                UPDATE [workerdock].Executions SET HoldsJobSlot=0 WHERE ExecutionId=@id;
                 UPDATE [workerdock].Outbox SET ProjectionState=N'Retired' WHERE EntityId=@id AND EventType=N'ExecutionDispatch';
                 """);
             Add(skip, "@id", SqlDbType.UniqueIdentifier, executionId);
@@ -390,7 +384,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             }
             return;
         }
-        await using var update = Command(c, t, "UPDATE [workerdock].Executions SET State=@state,Certainty=@certainty,AvailableAtUtc=@due,StopRequested=@stop,ForceStop=@force WHERE ExecutionId=@id; IF @release=1 DELETE FROM [workerdock].JobPermits WHERE ExecutionId=@id;");
+        await using var update = Command(c, t, "UPDATE [workerdock].Executions SET State=@state,Certainty=@certainty,AvailableAtUtc=@due,StopRequested=@stop,ForceStop=@force,HoldsJobSlot=CASE WHEN @release=1 THEN 0 WHEN @state IN(N'Running',N'RetryWaiting',N'NeedsReview') THEN 1 ELSE HoldsJobSlot END WHERE ExecutionId=@id;");
         Add(update, "@id", SqlDbType.UniqueIdentifier, data.Descriptor.ExecutionId); Add(update, "@state", SqlDbType.NVarChar, data.State, 30);
         Add(update, "@certainty", SqlDbType.NVarChar, data.Uncertain ? "Unknown" : "Known", 10); Add(update, "@due", SqlDbType.DateTime2, data.Intent.DueUtc.UtcDateTime);
         Add(update, "@stop", SqlDbType.Bit, data.StopRequested); Add(update, "@force", SqlDbType.Bit, data.Force); Add(update, "@release", SqlDbType.Bit, !data.PermitRetained);

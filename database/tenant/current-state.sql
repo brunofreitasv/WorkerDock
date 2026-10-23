@@ -660,6 +660,7 @@ CREATE TABLE [workerdock].TemplateCatalog (
     CONSTRAINT PK_TemplateCatalog PRIMARY KEY (TemplateId, TemplateVersion),
     DescriptorJson nvarchar(max) NULL,
     Retired bit NOT NULL CONSTRAINT DF_TemplateCatalog_Retired DEFAULT 0,
+    ConcurrencyLimit int NOT NULL CONSTRAINT DF_TemplateCatalog_ConcurrencyLimit DEFAULT 1,
     CONSTRAINT CK_TemplateCatalog_Descriptor CHECK (DescriptorJson IS NULL OR ISJSON(DescriptorJson)=1),
     CONSTRAINT CK_TemplateCatalog_Retired CHECK (Retired=0 OR Enabled=0)
 );
@@ -770,6 +771,15 @@ CREATE TABLE [workerdock].Executions (
     FirstStartedAtUtc datetime2(7) NULL,
     ValueSnapshotJson nvarchar(max) NULL,
     ValueResolutionError nvarchar(80) NULL,
+    ManualActorScopeHash char(64) NULL,
+    ManualRequestKeyHash char(64) NULL,
+    ManualActorMode nvarchar(40) NULL,
+    ManualActorSubject nvarchar(300) NULL,
+    ManualRequestHash char(64) NULL,
+    ManualCommandId uniqueidentifier NULL,
+    ManualResponseState nvarchar(20) NULL,
+    ManualRequestExpiresAtUtc datetime2(7) NULL,
+    HoldsJobSlot bit NOT NULL CONSTRAINT DF_Executions_HoldsJobSlot DEFAULT(0),
     CONSTRAINT CK_Executions_ValueContextJson CHECK (ValueContextJson IS NULL OR ISJSON(ValueContextJson)=1),
     CONSTRAINT CK_Executions_ValueSnapshotJson CHECK (ValueSnapshotJson IS NULL OR ISJSON(ValueSnapshotJson)=1),
     CONSTRAINT CK_Executions_ValueSnapshotError CHECK (ValueSnapshotJson IS NULL OR ValueResolutionError IS NULL)
@@ -869,22 +879,10 @@ CREATE TABLE [workerdock].IntegrationSettings (
     ProviderId nvarchar(128) NOT NULL,
     PublicOptionsJson nvarchar(4000) NOT NULL,
     Version rowversion NOT NULL,
+    EgressPoliciesJson nvarchar(max) NOT NULL CONSTRAINT DF_IntegrationSettings_EgressPolicies DEFAULT(N''[]''),
     CONSTRAINT CK_IntegrationSettings_Singleton CHECK(SettingsId=1),
     CONSTRAINT CK_IntegrationSettings_Revision CHECK(VaultRevision>0),
     CONSTRAINT CK_IntegrationSettings_Options CHECK(ISJSON(PublicOptionsJson)=1 AND DATALENGTH(PublicOptionsJson)<=8000)
-);
-
-CREATE TABLE [workerdock].TenantEgressPolicies (
-    Name nvarchar(32) COLLATE Latin1_General_100_BIN2 NOT NULL CONSTRAINT PK_TenantEgressPolicies PRIMARY KEY,
-    Revision bigint NOT NULL,
-    HostsJson nvarchar(4000) NOT NULL,
-    PortsJson nvarchar(4000) NOT NULL,
-    PrivateCidrsJson nvarchar(4000) NOT NULL,
-    AllowHttp bit NOT NULL,
-    Version rowversion NOT NULL,
-    CONSTRAINT CK_TenantEgressPolicies_Revision CHECK(Revision>0),
-    CONSTRAINT CK_TenantEgressPolicies_Name CHECK(Name IN(N''tenant-jobs'',N''tenant-alerts'')),
-    CONSTRAINT CK_TenantEgressPolicies_Json CHECK(ISJSON(HostsJson)=1 AND ISJSON(PortsJson)=1 AND ISJSON(PrivateCidrsJson)=1)
 );
 
 CREATE TABLE [workerdock].IntegrationSettingsRevisions (
@@ -1320,6 +1318,8 @@ CREATE INDEX IX_Executions_JobStateTime ON [workerdock].Executions(JobId,State,A
 CREATE INDEX IX_Attempts_Lease ON [workerdock].Attempts(State,LeaseExpiresUtc) WHERE LeaseExpiresUtc IS NOT NULL;
 CREATE INDEX IX_JobPermits_Job ON [workerdock].JobPermits(JobId,AcquiredAtUtc);
 CREATE INDEX IX_ManualRequestDedup_Expiry ON [workerdock].ManualRequestDedup(ExpiresAtUtc);
+CREATE UNIQUE INDEX UX_Executions_ManualRequest ON [workerdock].Executions(JobId,ManualActorScopeHash,ManualRequestKeyHash)
+    WHERE ManualActorScopeHash IS NOT NULL AND ManualRequestKeyHash IS NOT NULL;
 CREATE INDEX IX_Outbox_Projection ON [workerdock].Outbox(ProjectionState,AvailableAtUtc,CreatedAtUtc) INCLUDE(EntityId,EntityRevision);
 CREATE INDEX IX_Outbox_Review ON [workerdock].Outbox(ProjectionState,ReviewAtUtc) INCLUDE(EventId,DispatchedAtUtc);
 CREATE INDEX IX_AttemptStatusEvents_Execution ON [workerdock].AttemptStatusEvents(ExecutionId,OccurredAtUtc,EventId);
@@ -1735,11 +1735,8 @@ VALUES(''c9188146-bcab-43ec-95ee-c4713f46f90d'',N''Capacity'',0,0,N''Pending'',S
 
 INSERT [workerdock].ProjectionMaintenance(Id,AfterJobId) VALUES(1,NULL);
 
-INSERT [workerdock].IntegrationSettings(SettingsId,VaultRevision,ProviderId,PublicOptionsJson)
-VALUES(1,1,N''workerdock.environment'',N''{}'');
-
-INSERT [workerdock].TenantEgressPolicies(Name,Revision,HostsJson,PortsJson,PrivateCidrsJson,AllowHttp)
-VALUES(N''tenant-jobs'',1,N''[]'',N''[443]'',N''[]'',0),(N''tenant-alerts'',1,N''[]'',N''[443]'',N''[]'',0);
+INSERT [workerdock].IntegrationSettings(SettingsId,VaultRevision,ProviderId,PublicOptionsJson,EgressPoliciesJson)
+VALUES(1,1,N''workerdock.environment'',N''{}'',N''[{"name":"tenant-jobs","revision":1,"hosts":[],"ports":[443],"privateCidrs":[],"allowHttp":false},{"name":"tenant-alerts","revision":1,"hosts":[],"ports":[443],"privateCidrs":[],"allowHttp":false}]'');
 
 INSERT [workerdock].IntegrationSettingsRevisions(RevisionId,SettingsKind,SettingsName,Revision,ConfigurationJson,CreatedAtUtc)
 VALUES(NEWID(),N''Vault'',N''vault'',1,N''{"providerId":"workerdock.environment","publicOptions":{}}'',SYSUTCDATETIME()),
@@ -1871,13 +1868,10 @@ GRANT UPDATE ON [workerdock].Schedules TO WorkerDockRuntime;
 GRANT SELECT ON [workerdock].SchemaHistory TO WorkerDockRuntime;
 GRANT INSERT ON [workerdock].TemplateCatalog TO WorkerDockRuntime;
 GRANT SELECT ON [workerdock].TemplateCatalog TO WorkerDockRuntime;
-GRANT UPDATE (DescriptorJson,MetadataDigest,Enabled,Retired) ON [workerdock].TemplateCatalog TO WorkerDockRuntime;
+GRANT UPDATE (DescriptorJson,MetadataDigest,Enabled,Retired,ConcurrencyLimit) ON [workerdock].TemplateCatalog TO WorkerDockRuntime;
 GRANT INSERT ON [workerdock].TemplatePolicies TO WorkerDockRuntime;
 GRANT SELECT ON [workerdock].TemplatePolicies TO WorkerDockRuntime;
 GRANT UPDATE ON [workerdock].TemplatePolicies TO WorkerDockRuntime;
-GRANT INSERT ON [workerdock].TenantEgressPolicies TO WorkerDockRuntime;
-GRANT SELECT ON [workerdock].TenantEgressPolicies TO WorkerDockRuntime;
-GRANT UPDATE ON [workerdock].TenantEgressPolicies TO WorkerDockRuntime;
 GRANT SELECT ON [workerdock].TenantSettings TO WorkerDockRuntime;
 GRANT UPDATE ON [workerdock].TenantSettings TO WorkerDockRuntime;
 GRANT DELETE ON [workerdock].WDE_QRTZ_BLOB_TRIGGERS TO WorkerDockRuntime;

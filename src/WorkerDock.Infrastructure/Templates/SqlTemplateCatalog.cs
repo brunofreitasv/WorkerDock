@@ -20,15 +20,6 @@ public sealed class SqlTemplateCatalog(TenantDatabaseOptions options,IReadOnlyLi
         await using var identity=Query(c,t,"SELECT InstanceId FROM [workerdock].TenantSettings");
         if((Guid?)await identity.ExecuteScalarAsync(ct)!=instanceId) throw new WorkerDockException("TenantInstanceMismatch");
     }
-    private static async ValueTask CloseGatesAsync(DbConnection c,DbTransaction t,CancellationToken ct)
-    {
-        await using var gates=Query(c,t,"""
-            UPDATE [workerdock].PolicyRevisions SET DesiredRevision=DesiredRevision+1,State=N'Pending',CatalogDigest=NULL WHERE PolicyKind=N'Capacity';
-            UPDATE [workerdock].TemplatePolicies SET StartGateClosed=1,DesiredRevision=(SELECT DesiredRevision FROM [workerdock].PolicyRevisions WHERE PolicyKind=N'Capacity');
-            UPDATE [workerdock].Workers SET State=N'Standby' WHERE State=N'Ready';
-            """);
-        await gates.ExecuteNonQueryAsync(ct);
-    }
     public async ValueTask<string> RegisterAsync(IReadOnlyList<TemplateDescriptor> descriptors,CancellationToken ct)
     {
         var prepared=admission.Prepare(descriptors);
@@ -36,7 +27,7 @@ public sealed class SqlTemplateCatalog(TenantDatabaseOptions options,IReadOnlyLi
         {
             return await new BusinessTransaction(options).RunAsync(async(c,t,token)=>
             {
-                await VerifyIdentityAsync(c,t,options.InstanceId,token); var changed=false;
+                await VerifyIdentityAsync(c,t,options.InstanceId,token);
                 foreach(var d in prepared)
                 {
                     await using var read=Query(c,t,"SELECT MetadataDigest,DescriptorJson FROM [workerdock].TemplateCatalog WHERE TemplateId=@id AND TemplateVersion=@version");
@@ -60,11 +51,8 @@ public sealed class SqlTemplateCatalog(TenantDatabaseOptions options,IReadOnlyLi
                         """);
                     Add(write,"@id",SqlDbType.NVarChar,d.Id,100); Add(write,"@version",SqlDbType.NVarChar,d.Version,40);
                     Add(write,"@digest",SqlDbType.Char,d.MetadataDigest,64); Add(write,"@json",SqlDbType.NVarChar,JsonSerializer.Serialize(d));
-                    await write.ExecuteNonQueryAsync(token); changed=true;
-                    await using var policy=Query(c,t,"IF NOT EXISTS(SELECT 1 FROM [workerdock].TemplatePolicies WHERE TemplateId=@id) INSERT [workerdock].TemplatePolicies(TemplateId) VALUES(@id);");
-                    Add(policy,"@id",SqlDbType.NVarChar,d.Id,100); await policy.ExecuteNonQueryAsync(token);
+                    await write.ExecuteNonQueryAsync(token);
                 }
-                if(changed) await CloseGatesAsync(c,t,token);
                 return TemplateMetadata.AggregateDigest(prepared);
             },ct);
         }
@@ -111,7 +99,7 @@ public sealed class SqlTemplateCatalog(TenantDatabaseOptions options,IReadOnlyLi
                     SELECT @@ROWCOUNT;
                     """);
                 Add(command,"@id",SqlDbType.NVarChar,id,100); Add(command,"@version",SqlDbType.NVarChar,version,40);
-                if(Convert.ToInt32(await command.ExecuteScalarAsync(token))>0) await CloseGatesAsync(c,t,token);
+                await command.ExecuteScalarAsync(token);
                 return true;
             },ct);
         }

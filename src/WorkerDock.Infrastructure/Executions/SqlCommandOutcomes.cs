@@ -21,7 +21,7 @@ internal static class SqlCommandOutcomes
                     OR EXISTS(SELECT 1 FROM [workerdock].Attempts a WHERE a.ExecutionId=e.ExecutionId)
                     OR EXISTS(SELECT 1 FROM [workerdock].Outbox o WHERE o.EntityId=e.ExecutionId AND o.EventType=N'ExecutionDispatch' AND o.DispatchedAtUtc IS NOT NULL))
                     OR c.CommandKind NOT IN(N'ManualRun',N'ProfileDiagnostic') AND e.State<>N'Running');
-            UPDATE d SET ResponseState=c.State FROM [workerdock].ManualRequestDedup d JOIN @changed c ON c.CommandId=d.CommandId;
+            UPDATE e SET ManualResponseState=c.State FROM [workerdock].Executions e JOIN @changed c ON c.TargetId=e.ExecutionId WHERE e.ManualCommandId=c.CommandId;
             INSERT [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson)
                 SELECT NEWID(),N'CommandSettled',N'workerdock',N'System',CommandId,SYSUTCDATETIME(),
                     (SELECT changed.CommandId AS commandId,changed.TargetId AS targetId,changed.State AS outcome FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)

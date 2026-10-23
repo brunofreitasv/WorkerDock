@@ -86,12 +86,6 @@ builder.Services.TryAddSingleton<IExecutionControls>(provider =>
     return config["Tenant:Adapter"] != "Memory"
         ? new SqlExecutionControls(provider.GetRequiredService<TenantSqlStartup>().Options) : new UnavailableExecutionControls();
 });
-builder.Services.TryAddSingleton<ICapacityStore>(provider =>
-{
-    var config=provider.GetRequiredService<IConfiguration>();
-    return config["Tenant:Adapter"] != "Memory"
-        ? new SqlCapacityStore(provider.GetRequiredService<TenantSqlStartup>().Options) : new UnavailableCapacityStore();
-});
 builder.Services.TryAddSingleton<ICapacityCommands>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
@@ -321,13 +315,8 @@ internal sealed class UnavailableCapacityCommands : ICapacityCommands
     private static ValueTask<CommandReceipt> Unavailable() => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
     public ValueTask<CommandReceipt> SetTemplateLimitAsync(string id,int limit,ActorContext actor,CancellationToken ct) => Unavailable();
     public ValueTask<CommandReceipt> SetJobLimitAsync(Guid id,int limit,ActorContext actor,CancellationToken ct) => Unavailable();
-    public ValueTask<CommandReceipt> SetWorkerLimitAsync(Guid id,int limit,ActorContext actor,CancellationToken ct) => Unavailable();
 }
 
-internal sealed class UnavailableCapacityStore : ICapacityStore
-{
-    public ValueTask<T> TransactAsync<T>(Func<CapacityState,DateTimeOffset,T> change,CancellationToken ct) => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
-}
 internal sealed class UnavailableScheduleCommands : IScheduleCommands
 {
     private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
@@ -343,7 +332,7 @@ internal sealed class UnavailableMonitoringQueries(Guid instanceId, TimeProvider
     public ValueTask<Page<JobSummaryDto>> JobsAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<JobSummaryDto>>();
     public ValueTask<ExecutionDetailsDto> ExecutionAsync(Guid executionId, CancellationToken ct) => Unavailable<ExecutionDetailsDto>();
     public ValueTask<Page<AuditSummaryDto>> AuditAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<AuditSummaryDto>>();
-    public ValueTask<IReadOnlyList<WorkerSummaryDto>> WorkersAsync(CancellationToken ct) => Unavailable<IReadOnlyList<WorkerSummaryDto>>();
+    public ValueTask<RuntimeStatusDto> WorkersAsync(CancellationToken ct) => Unavailable<RuntimeStatusDto>();
     public ValueTask<TenantHealthDto> HealthAsync(CancellationToken ct) => ValueTask.FromResult(new TenantHealthDto(instanceId, "Unavailable", new Dictionary<string,string> { ["web"] = "Healthy", ["database"] = "Unavailable" }, clock.GetUtcNow()));
 }
 internal sealed class UnavailableExecutionEventQueries : IExecutionEventQueries

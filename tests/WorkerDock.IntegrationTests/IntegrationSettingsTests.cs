@@ -18,7 +18,7 @@ public sealed class IntegrationSettingsTests
     {
         await using var database = new SqlDatabaseFixture(); await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0004b_integration_settings", default);
+        await runner.ApplyAsync("tenant", "0012_execution_manual_dedup", default);
         var settings = new SqlIntegrationSettings(new(database.ConnectionString, database.InstanceId));
         var actor = new ActorContext("manager", "test", Guid.NewGuid());
         var vault = await settings.GetVaultAsync(default);

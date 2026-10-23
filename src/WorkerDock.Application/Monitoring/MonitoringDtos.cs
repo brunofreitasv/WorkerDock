@@ -15,12 +15,9 @@ public sealed record DashboardDto(
     int Failed24h,
     int LongRunning,
     int Upcoming,
-    int ReadyWorkers,
-    int TotalWorkers,
-    long DesiredCapacityRevision,
-    long EffectiveCapacityRevision,
-    string CapacityState,
-    int PendingProjections,
+    bool RuntimeReady,
+    int HostCeiling,
+    DateTimeOffset? RuntimeHeartbeatUtc,
     IReadOnlyList<UpcomingJobDto> UpcomingItems,
     IReadOnlyList<RecentExecutionDto> RecentItems);
 
@@ -31,5 +28,5 @@ public sealed record ExecutionAttemptDto(Guid AttemptId, int AttemptNumber, Guid
 public sealed record ExecutionEventDto(Guid EventId, Guid? AttemptId, string State, DateTimeOffset OccurredAtUtc);
 public sealed record ExecutionDetailsDto(Guid ExecutionId, Guid JobId, string JobName, string TemplateId, string State, string Certainty, string TriggerKind, DateTimeOffset CreatedAtUtc, DateTimeOffset AvailableAtUtc, DateTimeOffset? ScheduledForUtc, Guid CorrelationId, bool StopRequested, bool ForceStop, IReadOnlyList<ExecutionAttemptDto> Attempts, IReadOnlyList<ExecutionEventDto> Timeline);
 public sealed record AuditSummaryDto(Guid EventId, string EventType, string ActorSubject, string AuthenticationMode, Guid CorrelationId, DateTimeOffset OccurredAtUtc);
-public sealed record WorkerSummaryDto(Guid InstallationId, string State, int CapacityCeiling, int LiveLimit, long AcknowledgedRevision, DateTimeOffset LastHeartbeatUtc, bool ReservationsRecovered, IReadOnlyList<string> Capabilities);
+public sealed record RuntimeStatusDto(Guid? BootId, bool Ready, int HostCeiling, DateTimeOffset? LastHeartbeatUtc);
 public sealed record TenantHealthDto(Guid InstanceId, string Overall, IReadOnlyDictionary<string, string> Components, DateTimeOffset ObservedUtc);

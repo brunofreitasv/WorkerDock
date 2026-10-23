@@ -42,16 +42,18 @@ public sealed class SqlIntegrationSettings(TenantDatabaseOptions options) : IInt
         var desired = IntegrationSettingsValidation.ValidateEgress(policy);
         return RunAsync(async (c, t, token) =>
         {
-            var current = await ReadEgressAsync(c, t, desired.Name, token);
-            if (desired.Version is null || !current.Version.AsSpan().SequenceEqual(desired.Version)) throw new WorkerDockException("StaleVersion");
-            var revision = await ScalarLongAsync(c, t, "SELECT Revision FROM [workerdock].TenantEgressPolicies WHERE Name=@name", token, ("@name", SqlDbType.NVarChar, desired.Name, 32));
+            var state = await ReadEgressStateAsync(c, t, token);
+            if (desired.Version is null || !state.Version.AsSpan().SequenceEqual(desired.Version)) throw new WorkerDockException("StaleVersion");
+            var records = state.Policies.ToList();
+            var prior = records.SingleOrDefault(x => x.Name == desired.Name) ?? throw new WorkerDockException("EgressPolicyNotFound");
+            var revision = prior.Revision;
             var next = checked(revision + 1);
             var config = JsonSerializer.Serialize(new { desired.Name, desired.Hosts, desired.Ports, desired.PrivateCidrs, desired.AllowHttp }, JsonOptions);
             await InsertRevisionAsync(c, t, "Egress", desired.Name, next, config, token);
-            await using var update = Command(c, t, "UPDATE [workerdock].TenantEgressPolicies SET Revision=@revision,HostsJson=@hosts,PortsJson=@ports,PrivateCidrsJson=@cidrs,AllowHttp=@http WHERE Name=@name AND Version=@version");
-            Add(update, "@revision", SqlDbType.BigInt, next); Add(update, "@hosts", SqlDbType.NVarChar, JsonSerializer.Serialize(desired.Hosts, JsonOptions), 4000);
-            Add(update, "@ports", SqlDbType.NVarChar, JsonSerializer.Serialize(desired.Ports, JsonOptions), 4000); Add(update, "@cidrs", SqlDbType.NVarChar, JsonSerializer.Serialize(desired.PrivateCidrs, JsonOptions), 4000);
-            Add(update, "@http", SqlDbType.Bit, desired.AllowHttp); Add(update, "@name", SqlDbType.NVarChar, desired.Name, 32); Add(update, "@version", SqlDbType.Binary, desired.Version, 8);
+            records[records.FindIndex(x => x.Name == desired.Name)] = new(desired.Name, next, desired.Hosts.ToArray(), desired.Ports.ToArray(), desired.PrivateCidrs.ToArray(), desired.AllowHttp);
+            await using var update = Command(c, t, "UPDATE [workerdock].IntegrationSettings SET EgressPoliciesJson=@policies WHERE SettingsId=1 AND Version=@version");
+            Add(update, "@policies", SqlDbType.NVarChar, JsonSerializer.Serialize(records, JsonOptions), -1);
+            Add(update, "@version", SqlDbType.Binary, desired.Version, 8);
             if (await update.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion");
             return await SqlConnectionProfiles.ReceiptAsync(c, t, options.InstanceId, "EgressSettingsSaved", actor, token, beforeRevision: revision, afterRevision: next);
         }, ct);
@@ -96,11 +98,18 @@ public sealed class SqlIntegrationSettings(TenantDatabaseOptions options) : IInt
     private static async ValueTask<EgressPolicyDto> ReadEgressAsync(DbConnection c, DbTransaction t, string name, CancellationToken ct)
     {
         if (!IntegrationSettingsValidation.Names.Contains(name, StringComparer.Ordinal)) throw new WorkerDockException("EgressPolicyNotFound");
-        await using var command = Command(c, t, "SELECT HostsJson,PortsJson,PrivateCidrsJson,AllowHttp,Version FROM [workerdock].TenantEgressPolicies WHERE Name=@name");
-        Add(command, "@name", SqlDbType.NVarChar, name, 32); await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) throw new WorkerDockException("EgressPolicyNotFound");
-        return IntegrationSettingsValidation.ValidateEgress(new(name, JsonSerializer.Deserialize<string[]>(reader.GetString(0), JsonOptions) ?? [], JsonSerializer.Deserialize<int[]>(reader.GetString(1), JsonOptions) ?? [],
-            JsonSerializer.Deserialize<string[]>(reader.GetString(2), JsonOptions) ?? [], reader.GetBoolean(3), reader.GetFieldValue<byte[]>(4)));
+        var state = await ReadEgressStateAsync(c, t, ct);
+        var policy = state.Policies.SingleOrDefault(x => x.Name == name) ?? throw new WorkerDockException("EgressPolicyNotFound");
+        return IntegrationSettingsValidation.ValidateEgress(new(policy.Name, policy.Hosts, policy.Ports, policy.PrivateCidrs, policy.AllowHttp, state.Version));
+    }
+
+    private static async ValueTask<EgressState> ReadEgressStateAsync(DbConnection c, DbTransaction t, CancellationToken ct)
+    {
+        await using var command = Command(c, t, "SELECT EgressPoliciesJson,Version FROM [workerdock].IntegrationSettings WHERE SettingsId=1");
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) throw new WorkerDockException("SettingsUnavailable");
+        var policies = JsonSerializer.Deserialize<EgressPolicyRecord[]>(reader.GetString(0), JsonOptions) ?? [];
+        return new(policies, reader.GetFieldValue<byte[]>(1));
     }
 
     private static async ValueTask InsertRevisionAsync(DbConnection c, DbTransaction t, string kind, string name, long revision, string config, CancellationToken ct)
@@ -115,6 +124,8 @@ public sealed class SqlIntegrationSettings(TenantDatabaseOptions options) : IInt
         await using var command = Command(c, t, sql); foreach (var arg in args) Add(command, arg.Name, arg.Type, arg.Value, arg.Size);
         var value = await command.ExecuteScalarAsync(ct); return value is long number ? number : throw new WorkerDockException("SettingsUnavailable");
     }
+    private sealed record EgressState(EgressPolicyRecord[] Policies, byte[] Version);
+    private sealed record EgressPolicyRecord(string Name, long Revision, string[] Hosts, int[] Ports, string[] PrivateCidrs, bool AllowHttp);
     private static SqlCommand Command(DbConnection c, DbTransaction t, string sql) => new(sql, (SqlConnection)c, (SqlTransaction)t) { CommandTimeout = 10 };
     private static void Add(SqlCommand command, string name, SqlDbType type, object? value, int size = 0) => command.Parameters.Add(new SqlParameter(name, type, size) { Value = value ?? DBNull.Value });
 }

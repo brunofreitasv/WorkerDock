@@ -146,8 +146,8 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                   AND NOT EXISTS(SELECT 1 FROM [workerdock].Attempts a WHERE a.ExecutionId=e.ExecutionId AND a.State=N'Running')
                   AND NOT EXISTS(SELECT 1 FROM [workerdock].ExecutionEvents v WHERE v.ExecutionId=e.ExecutionId AND v.AtUtc>@logCutoff)
                   AND NOT EXISTS(SELECT 1 FROM [workerdock].AttemptStatusEvents s WHERE s.ExecutionId=e.ExecutionId AND s.OccurredAtUtc>@logCutoff)
-                  AND NOT EXISTS(SELECT 1 FROM [workerdock].JobPermits p WHERE p.ExecutionId=e.ExecutionId)
-                  AND NOT EXISTS(SELECT 1 FROM [workerdock].ManualRequestDedup d WHERE d.ExecutionId=e.ExecutionId AND d.ExpiresAtUtc>=SYSUTCDATETIME())
+                  AND e.HoldsJobSlot=0
+                  AND (e.ManualRequestExpiresAtUtc IS NULL OR e.ManualRequestExpiresAtUtc<SYSUTCDATETIME())
                   AND NOT EXISTS(SELECT 1 FROM [workerdock].RetentionRequestTombstones d WHERE d.ExecutionId=e.ExecutionId AND d.ExpiresAtUtc>=SYSUTCDATETIME())
                   AND NOT EXISTS(SELECT 1 FROM [workerdock].Outbox o WHERE o.EntityId=e.ExecutionId AND o.EventType=N'ExecutionDispatch' AND o.ProjectionState<>N'Retired')
                   AND NOT EXISTS(SELECT 1 FROM [workerdock].AlertIncidents i WHERE i.SubjectKey=N'execution:'+CONVERT(nvarchar(36),e.ExecutionId) AND i.State IN(N'Open',N'Unknown'))
@@ -160,7 +160,7 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                 WHERE v.AtUtc<=@logCutoff AND EXISTS(SELECT 1 FROM [workerdock].Executions e WHERE e.ExecutionId=v.ExecutionId AND e.AggregatedAtUtc IS NOT NULL AND e.State IN(N'Succeeded',N'Failed',N'Stopped',N'TimedOut',N'Skipped'))
                   AND NOT EXISTS(SELECT 1 FROM @EligibleExecutions e WHERE e.ExecutionId=v.ExecutionId)
                 AND NOT EXISTS(SELECT 1 FROM [workerdock].Attempts a WHERE a.ExecutionId=v.ExecutionId AND a.State=N'Running')
-                AND NOT EXISTS(SELECT 1 FROM [workerdock].JobPermits p WHERE p.ExecutionId=v.ExecutionId)
+                AND NOT EXISTS(SELECT 1 FROM [workerdock].Executions e WHERE e.ExecutionId=v.ExecutionId AND e.HoldsJobSlot=1)
                 AND NOT EXISTS(SELECT 1 FROM [workerdock].AlertIncidents i WHERE i.SubjectKey=N'execution:'+CONVERT(nvarchar(36),v.ExecutionId) AND i.State IN(N'Open',N'Unknown'));
 
                 INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId)
@@ -174,8 +174,6 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                 SELECT @id,N'ExecutionEvent',v.EventId FROM [workerdock].ExecutionEvents v JOIN @EligibleExecutions e ON e.ExecutionId=v.ExecutionId
                 WHERE v.AtUtc<=@logCutoff
                 AND NOT EXISTS(SELECT 1 FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@id AND i.RecordKind=N'ExecutionEvent' AND i.RecordId=v.EventId);
-                INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId)
-                SELECT @id,N'ManualRequestDedup',d.CommandId FROM [workerdock].ManualRequestDedup d JOIN @EligibleExecutions e ON e.ExecutionId=d.ExecutionId;
                 INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId)
                 SELECT @id,N'ExecutionDispatchOutbox',o.EventId FROM [workerdock].Outbox o JOIN @EligibleExecutions e ON e.ExecutionId=o.EntityId
                 WHERE o.EventType=N'ExecutionDispatch' AND o.ProjectionState=N'Retired';
@@ -233,13 +231,11 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
             SELECT i.RecordKind,i.RecordId,
             CASE i.RecordKind
               WHEN N'AuditEvent' THEN (SELECT x.EventId,x.EventType,x.ActorSubject,x.AuthenticationMode,x.CorrelationId,x.OccurredAtUtc,JSON_QUERY(x.DetailsJson) Details FROM [workerdock].AuditEvents x WHERE x.EventId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
-              WHEN N'Execution' THEN (SELECT x.ExecutionId,x.JobId,x.JobRevision,x.ProfileRevisionId,x.TriggerKind,x.ScheduleId,x.ScheduleRevision,x.ScheduledForUtc,x.State,x.Certainty,x.AvailableAtUtc,x.CorrelationId,x.CreatedAtUtc,x.StopRequested,x.ForceStop,x.ValueContextJson,x.FirstStartedAtUtc,x.ValueSnapshotJson,x.ValueResolutionError FROM [workerdock].Executions x WHERE x.ExecutionId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
+              WHEN N'Execution' THEN (SELECT x.ExecutionId,x.JobId,x.JobRevision,x.ProfileRevisionId,x.TriggerKind,x.ScheduleId,x.ScheduleRevision,x.ScheduledForUtc,x.State,x.Certainty,x.AvailableAtUtc,x.CorrelationId,x.CreatedAtUtc,x.StopRequested,x.ForceStop,x.ValueContextJson,x.FirstStartedAtUtc,x.ValueSnapshotJson,x.ValueResolutionError,x.RequestKey,x.ManualActorScopeHash,x.ManualRequestKeyHash,x.ManualRequestHash,x.ManualCommandId,x.ManualResponseState,x.ManualRequestExpiresAtUtc FROM [workerdock].Executions x WHERE x.ExecutionId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
               WHEN N'ExecutionAttempt' THEN (SELECT x.AttemptId,x.ExecutionId,x.AttemptNumber,x.InstallationId,x.WorkerBootId,x.Generation,x.State,x.LeaseExpiresUtc,x.StartedAtUtc,x.DeadlineUtc,x.EndedAtUtc,x.SafeCode,x.LocalExitConfirmed,x.EffectsMayHaveOccurred FROM [workerdock].Attempts x WHERE x.AttemptId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
               WHEN N'ExecutionEvent' THEN (SELECT x.EventId,x.ExecutionId,x.AttemptId,x.Source,x.Sequence,x.AtUtc,x.Code,JSON_QUERY(x.SafeFieldsJson) SafeFields FROM [workerdock].ExecutionEvents x WHERE x.EventId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
               WHEN N'AttemptStatusEvent' THEN (SELECT x.EventId,x.ExecutionId,x.AttemptId,x.State,x.OccurredAtUtc FROM [workerdock].AttemptStatusEvents x WHERE x.EventId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
-              WHEN N'JobPermit' THEN (SELECT x.PermitId,x.JobId,x.ExecutionId,x.Mode,x.AcquiredAtUtc FROM [workerdock].JobPermits x WHERE x.PermitId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
               WHEN N'ExecutionDispatchOutbox' THEN (SELECT x.EventId,x.EventType,JSON_QUERY(x.PayloadJson) Payload,x.CreatedAtUtc,x.AvailableAtUtc,x.SchemaVersion,x.EntityId,x.EntityRevision,x.PayloadDigest,x.ProjectionState,x.DispatchedAtUtc FROM [workerdock].Outbox x WHERE x.EventId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
-              WHEN N'ManualRequestDedup' THEN (SELECT x.JobId,x.ActorScopeHash,x.RequestKeyHash,x.RequestHash,x.ExecutionId,x.CommandId,x.ResponseState,x.AcceptedAtUtc,x.ExpiresAtUtc FROM [workerdock].ManualRequestDedup x WHERE x.CommandId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
             END PayloadJson
             FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@id ORDER BY i.RecordKind,i.RecordId;
             """);

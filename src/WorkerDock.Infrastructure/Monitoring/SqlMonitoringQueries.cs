@@ -29,12 +29,9 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
                 (SELECT COUNT(*) FROM [workerdock].Executions WHERE State IN(N'Failed',N'TimedOut') AND CreatedAtUtc>=DATEADD(hour,-24,@now)),
                 (SELECT COUNT(*) FROM [workerdock].Executions e JOIN [workerdock].Attempts a ON a.ExecutionId=e.ExecutionId AND a.AttemptNumber=(SELECT MAX(a2.AttemptNumber) FROM [workerdock].Attempts a2 WHERE a2.ExecutionId=e.ExecutionId) WHERE e.State=N'Running' AND a.StartedAtUtc<DATEADD(minute,-5,@now)),
                 (SELECT COUNT(*) FROM [workerdock].Schedules s JOIN [workerdock].Jobs j ON j.JobId=s.JobId WHERE s.Removed=0 AND s.Paused=0 AND j.Enabled=1 AND s.Kind=N'Once' AND s.OneTimeUtc BETWEEN @now AND DATEADD(day,7,@now)),
-                (SELECT COUNT(*) FROM [workerdock].Workers WHERE State=N'Ready' AND LastHeartbeatUtc>=DATEADD(second,-60,@now)),
-                (SELECT COUNT(*) FROM [workerdock].Workers),
-                COALESCE((SELECT DesiredRevision FROM [workerdock].PolicyRevisions WHERE PolicyKind=N'Capacity'),0),
-                COALESCE((SELECT EffectiveRevision FROM [workerdock].PolicyRevisions WHERE PolicyKind=N'Capacity'),0),
-                COALESCE((SELECT State FROM [workerdock].PolicyRevisions WHERE PolicyKind=N'Capacity'),N'Unavailable'),
-                (SELECT COUNT(*) FROM [workerdock].Outbox WHERE ProjectionState IN(N'Pending',N'Held') AND CreatedAtUtc<DATEADD(second,-30,@now));
+                COALESCE((SELECT Ready FROM [workerdock].RuntimeStatus WHERE StateId=1),0),
+                COALESCE((SELECT HostCeiling FROM [workerdock].RuntimeStatus WHERE StateId=1),1),
+                (SELECT LastHeartbeatUtc FROM [workerdock].RuntimeStatus WHERE StateId=1);
             SELECT TOP(10) j.JobId,r.Name,r.TemplateId,s.OneTimeUtc
               FROM [workerdock].Schedules s JOIN [workerdock].Jobs j ON j.JobId=s.JobId
               JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision
@@ -49,16 +46,15 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         var observed = Utc(reader.GetDateTime(0)); var instanceId = reader.GetGuid(1);
         var queued = reader.GetInt32(2); var running = reader.GetInt32(3); var review = reader.GetInt32(4);
         var succeeded = reader.GetInt32(5); var failed = reader.GetInt32(6); var longRunning = reader.GetInt32(7); var upcoming = reader.GetInt32(8);
-        var readyWorkers = reader.GetInt32(9); var totalWorkers = reader.GetInt32(10); var desired = reader.GetInt64(11); var effective = reader.GetInt64(12);
-        var capacityState = reader.GetString(13); var pending = reader.GetInt32(14);
+        var runtimeReady = reader.GetBoolean(9); var hostCeiling = reader.GetInt32(10); var heartbeat = NullableUtc(reader, 11);
         await reader.NextResultAsync(ct);
         var upcomingItems = new List<UpcomingJobDto>();
         while (await reader.ReadAsync(ct)) upcomingItems.Add(new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), Utc(reader.GetDateTime(3)), "Scheduled"));
         await reader.NextResultAsync(ct);
         var recent = new List<RecentExecutionDto>();
         while (await reader.ReadAsync(ct)) recent.Add(new(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), Utc(reader.GetDateTime(4)), reader.GetGuid(5)));
-        var overall = readyWorkers == 0 || capacityState != "Effective" || pending > 0 ? "Degraded" : "Healthy";
-        return new(instanceId, observed, overall, queued, running, review, succeeded, failed, longRunning, upcoming, readyWorkers, totalWorkers, desired, effective, capacityState, pending, upcomingItems, recent);
+        var overall = runtimeReady && heartbeat >= observed.AddSeconds(-30) ? "Healthy" : "Degraded";
+        return new(instanceId, observed, overall, queued, running, review, succeeded, failed, longRunning, upcoming, runtimeReady, hostCeiling, heartbeat, upcomingItems, recent);
     }
 
     public async ValueTask<Page<JobSummaryDto>> JobsAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct)
@@ -137,27 +133,18 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         return new(items, hasMore ? EncodeCursor(items[^1].OccurredAtUtc, items[^1].EventId) : null);
     }
 
-    public async ValueTask<IReadOnlyList<WorkerSummaryDto>> WorkersAsync(CancellationToken ct)
+    public async ValueTask<RuntimeStatusDto> WorkersAsync(CancellationToken ct)
     {
         await using var connection = await OpenAsync(ct); await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT TOP(200) w.InstallationId,w.State,w.CapacityCeiling,w.LiveLimit,w.AcknowledgedRevision,w.LastHeartbeatUtc,w.ReservationsRecovered,c.TemplateId,c.TemplateVersion
-              FROM [workerdock].Workers w LEFT JOIN [workerdock].WorkerCapabilities c ON c.InstallationId=w.InstallationId
-             ORDER BY w.LastHeartbeatUtc DESC,w.InstallationId,c.TemplateId,c.TemplateVersion;
-            """;
-        var rows = new Dictionary<Guid, WorkerBuilder>();
+        command.CommandText = "SELECT BootId,Ready,HostCeiling,LastHeartbeatUtc FROM [workerdock].RuntimeStatus WHERE StateId=1;";
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            var id = reader.GetGuid(0);
-            if (!rows.TryGetValue(id, out var row)) rows[id] = row = new(id, reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3), reader.GetInt64(4), Utc(reader.GetDateTime(5)), reader.GetBoolean(6));
-            if (!reader.IsDBNull(7)) row.Capabilities.Add(reader.GetString(7) + "@" + reader.GetString(8));
-        }
-        return rows.Values.Select(x =>
-        {
-            TelemetryRegistration.RecordHeartbeatAge(clock.GetUtcNow() - x.Heartbeat);
-            return new WorkerSummaryDto(x.Id, x.State, x.Ceiling, x.LiveLimit, x.Revision, x.Heartbeat, x.Recovered, x.Capabilities);
-        }).ToArray();
+        if (!await reader.ReadAsync(ct)) return new(null, false, 1, null);
+        Guid? bootId = reader.IsDBNull(0) ? null : reader.GetGuid(0);
+        var heartbeat = NullableUtc(reader, 3);
+        var ready = reader.GetBoolean(1) && heartbeat >= clock.GetUtcNow().AddSeconds(-30);
+        var ceiling = reader.GetInt32(2);
+        if (heartbeat is not null) TelemetryRegistration.RecordHeartbeatAge(clock.GetUtcNow() - heartbeat.Value);
+        return new(bootId, ready, ceiling, heartbeat);
     }
 
     public async ValueTask<TenantHealthDto> HealthAsync(CancellationToken ct)
@@ -221,8 +208,4 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
     private static DateTimeOffset Utc(DateTime value) => new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
     private static DateTimeOffset? NullableUtc(SqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : Utc(reader.GetDateTime(ordinal));
     private sealed record ExecutionCore(Guid ExecutionId, Guid JobId, string JobName, string TemplateId, string State, string Certainty, string TriggerKind, DateTimeOffset CreatedAtUtc, DateTimeOffset AvailableAtUtc, DateTimeOffset? ScheduledForUtc, Guid CorrelationId, bool StopRequested, bool ForceStop);
-    private sealed class WorkerBuilder(Guid id, string state, int ceiling, int liveLimit, long revision, DateTimeOffset heartbeat, bool recovered)
-    {
-        public Guid Id { get; } = id; public string State { get; } = state; public int Ceiling { get; } = ceiling; public int LiveLimit { get; } = liveLimit; public long Revision { get; } = revision; public DateTimeOffset Heartbeat { get; } = heartbeat; public bool Recovered { get; } = recovered; public List<string> Capabilities { get; } = [];
-    }
 }

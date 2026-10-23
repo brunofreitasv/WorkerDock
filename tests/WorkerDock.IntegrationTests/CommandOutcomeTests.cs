@@ -165,3 +165,31 @@ public sealed class CommandOutcomeSqlTests
         Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{run.TargetId}' AND State=N'{(stopFirst ? "Stopped" : "Succeeded")}'"));
     }
 }
+
+[Trait("Store", "Sql")]
+public sealed class ManualRequestSqlTests
+{
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManualRequestRetry_ReturnsOriginalExecution(bool snapshot)
+    {
+        await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(snapshot);
+        await fixture.Runner.ApplyAsync("tenant", "0011_single_node_transition", default);
+        await fixture.Runner.ApplyAsync("tenant", "0012_execution_manual_dedup", default);
+        var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create()); var job = CommandOutcomeTests.Job();
+        await commands.SaveAsync(job, null, CommandOutcomeTests.Actor, default);
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
+
+        var first = await commands.RunNowAsync(job.JobId, "same-request", CommandOutcomeTests.Actor, default);
+        var expiresAfterSeconds = await fixture.Database.ScalarAsync($"SELECT DATEDIFF_BIG(second,CreatedAtUtc,ManualRequestExpiresAtUtc) FROM [workerdock].Executions WHERE ExecutionId='{first.TargetId}'");
+        var retry = await commands.RunNowAsync(job.JobId, "same-request", CommandOutcomeTests.Actor, default);
+
+        Assert.Equal(86_400, expiresAfterSeconds);
+        Assert.Equal(first.TargetId, retry.TargetId);
+        Assert.Equal(first.CommandId, retry.CommandId);
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Executions"));
+    }
+}

@@ -28,7 +28,7 @@ public sealed class SqlExecutionQueue(TenantDatabaseOptions options) : IExecutio
                         COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue') AS OverlapMode,
                         COALESCE(TRY_CONVERT(int,JSON_VALUE(r.PolicyJson,'$.BacklogLimit')),100) AS BacklogLimit,
                         COALESCE(TRY_CONVERT(int,JSON_VALUE(r.PolicyJson,'$.Priority')),0) AS Priority,
-                        p.EffectiveLimit,
+                        cat.ConcurrencyLimit,
                         (SELECT COUNT(*) FROM [workerdock].Executions active
                             WHERE active.JobId=e.JobId AND active.State IN(N'Running',N'RetryWaiting',N'NeedsReview')) AS ActiveJobSlots,
                         CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM [workerdock].Executions active
@@ -55,10 +55,9 @@ public sealed class SqlExecutionQueue(TenantDatabaseOptions options) : IExecutio
                     JOIN [workerdock].Jobs j ON j.JobId=e.JobId
                     JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
                     JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
-                    JOIN [workerdock].TemplatePolicies p ON p.TemplateId=r.TemplateId
                     WHERE e.State IN(N'Queued',N'RetryWaiting') AND e.AvailableAtUtc<=SYSUTCDATETIME()
                         AND e.StopRequested=0 AND j.Enabled=1 AND j.Archived=0 AND cat.Enabled=1
-                        AND p.StartGateClosed=0 AND p.EffectiveLimit>0
+                        AND cat.ConcurrencyLimit>0
                 )
                 SELECT TOP (@limit) candidate.ExecutionId
                 FROM Candidates candidate

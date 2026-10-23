@@ -35,17 +35,16 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
         if (!await jr.ReadAsync(ct)) throw new WorkerDockException("JobNotFound");
         var liveLimit = jr.GetBoolean(1) && !jr.GetBoolean(2) ? jr.GetInt32(0) : 0;
         await jr.CloseAsync();
-        await using var holders = Command(c, t, "SELECT COUNT(*),COALESCE(MAX(CASE WHEN Mode=N'Shared' THEN 0 ELSE 1 END),0) FROM [workerdock].JobPermits WHERE JobId=@job");
+        await using var holders = Command(c, t, "SELECT COUNT(*),COALESCE(MAX(CASE WHEN COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue')=N'Allow' THEN 0 ELSE 1 END),0) FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision WHERE e.JobId=@job AND e.HoldsJobSlot=1");
         Add(holders, "@job", SqlDbType.UniqueIdentifier, jobId);
         await using var hr = await holders.ExecuteReaderAsync(ct); await hr.ReadAsync(ct);
         var holderCount = hr.GetInt32(0); var exclusiveHeld = hr.GetInt32(1) != 0; await hr.CloseAsync();
         await using var read = Command(c, t, """
             SELECT TOP (10032) e.ExecutionId,COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue'),
                 COALESCE(TRY_CONVERT(int,JSON_VALUE(r.PolicyJson,'$.BacklogLimit')),100),
-                CONVERT(bit,CASE WHEN p.ExecutionId IS NULL THEN 0 ELSE 1 END)
+                e.HoldsJobSlot
             FROM [workerdock].Executions e WITH(INDEX(IX_Executions_AdmissionActive)) JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-            LEFT JOIN [workerdock].JobPermits p ON p.ExecutionId=e.ExecutionId
-            WHERE e.JobId=@id AND e.State IN(N'Queued',N'Running',N'RetryWaiting',N'NeedsReview') AND p.ExecutionId IS NULL
+            WHERE e.JobId=@id AND e.State IN(N'Queued',N'Running',N'RetryWaiting',N'NeedsReview') AND e.HoldsJobSlot=0
             ORDER BY e.AdmissionSequence
             """);
         Add(read, "@id", SqlDbType.UniqueIdentifier, jobId);
@@ -55,14 +54,13 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
         var decisions = Decide(rows, liveLimit, holderCount, exclusiveHeld);
         foreach (var id in decisions.Admit)
         {
-            await using var permit = Command(c, t, "INSERT [workerdock].JobPermits(PermitId,JobId,ExecutionId,Mode,AcquiredAtUtc) VALUES(NEWID(),@job,@id,@mode,SYSUTCDATETIME());");
-            Add(permit, "@job", SqlDbType.UniqueIdentifier, jobId); Add(permit, "@id", SqlDbType.UniqueIdentifier, id);
-            Add(permit, "@mode", SqlDbType.NVarChar, rows.Single(x => x.ExecutionId == id).Mode == "Allow" ? "Shared" : "Exclusive", 20); await permit.ExecuteNonQueryAsync(ct);
+            await using var hold = Command(c, t, "UPDATE [workerdock].Executions SET HoldsJobSlot=1 WHERE ExecutionId=@id;");
+            Add(hold, "@id", SqlDbType.UniqueIdentifier, id); await hold.ExecuteNonQueryAsync(ct);
         }
         foreach (var id in decisions.Skip)
         {
             await using var skip = Command(c, t, """
-                UPDATE [workerdock].Executions SET State=N'Skipped' WHERE ExecutionId=@id AND State=N'Queued';
+                UPDATE [workerdock].Executions SET State=N'Skipped',HoldsJobSlot=0 WHERE ExecutionId=@id AND State=N'Queued';
                 IF @@ROWCOUNT=1 INSERT [workerdock].AttemptStatusEvents(EventId,ExecutionId,State,OccurredAtUtc) VALUES(NEWID(),@id,@reason,SYSUTCDATETIME());
                 UPDATE [workerdock].Outbox SET ProjectionState=N'Retired' WHERE EntityId=@id AND EventType=N'ExecutionDispatch';
                 """);
@@ -72,14 +70,10 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
         await using var enable = Command(c, t, """
             UPDATE TOP (32) o SET ProjectionState=N'Pending',DispatchedAtUtc=NULL,ReviewAtUtc=NULL,RetryAtUtc=NULL
             FROM [workerdock].Outbox o JOIN [workerdock].Executions e ON e.ExecutionId=o.EntityId JOIN [workerdock].Jobs j ON j.JobId=e.JobId
-            JOIN [workerdock].JobPermits permit ON permit.ExecutionId=e.ExecutionId
             JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-            JOIN [workerdock].TemplatePolicies p ON p.TemplateId=r.TemplateId
-            WHERE e.JobId=@job AND j.Enabled=1 AND j.Archived=0 AND e.State IN(N'Queued',N'RetryWaiting')
-                AND p.StartGateClosed=0 AND p.EffectiveLimit>0 AND EXISTS(SELECT 1 FROM [workerdock].Workers w WHERE w.State=N'Ready' AND w.AcknowledgedRevision=p.EffectiveRevision
-            AND w.CatalogDigest=(SELECT CatalogDigest FROM [workerdock].PolicyRevisions WHERE PolicyKind=N'Capacity')
-            AND w.LastHeartbeatUtc>DATEADD(second,-60,SYSUTCDATETIME())
-            AND w.LiveLimit>(SELECT COUNT(*) FROM [workerdock].Attempts a WHERE a.WorkerBootId=w.BootId AND a.State=N'Running')) AND o.EventType=N'ExecutionDispatch' AND o.ProjectionState=N'Held'
+            JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
+            WHERE e.JobId=@job AND j.Enabled=1 AND j.Archived=0 AND e.State IN(N'Queued',N'RetryWaiting') AND e.HoldsJobSlot=1
+                AND cat.Enabled=1 AND cat.ConcurrencyLimit>0 AND EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus runtime WHERE runtime.StateId=1 AND runtime.Ready=1 AND runtime.LastHeartbeatUtc>DATEADD(second,-30,SYSUTCDATETIME())) AND o.EventType=N'ExecutionDispatch' AND o.ProjectionState=N'Held'
                 AND COALESCE(TRY_CONVERT(int,JSON_VALUE(o.PayloadJson,'$.attemptOrdinal')),1)=1+COALESCE((SELECT MAX(a.AttemptNumber) FROM [workerdock].Attempts a WHERE a.ExecutionId=e.ExecutionId),0);
             """);
         Add(enable, "@job", SqlDbType.UniqueIdentifier, jobId); await enable.ExecuteNonQueryAsync(ct);
@@ -92,19 +86,15 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
     {
         await using var read = Command(c, t, """
             SELECT TOP (32) o.EventId,e.ExecutionId,e.JobRevision,COALESCE(TRY_CONVERT(int,JSON_VALUE(o.PayloadJson,'$.attemptOrdinal')),1),
-                e.AvailableAtUtc,p.EffectiveRevision
+                e.AvailableAtUtc,CONVERT(bigint,0)
             FROM [workerdock].Outbox o JOIN [workerdock].Executions e ON e.ExecutionId=o.EntityId
-            JOIN [workerdock].Jobs j ON j.JobId=e.JobId JOIN [workerdock].JobPermits permit ON permit.ExecutionId=e.ExecutionId
+            JOIN [workerdock].Jobs j ON j.JobId=e.JobId
             JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-            JOIN [workerdock].TemplatePolicies p ON p.TemplateId=r.TemplateId
-            WHERE e.JobId=@job AND j.Enabled=1 AND j.Archived=0 AND e.State IN(N'Queued',N'RetryWaiting')
-                AND p.StartGateClosed=0 AND p.EffectiveLimit>0 AND EXISTS(SELECT 1 FROM [workerdock].Workers w WHERE w.State=N'Ready' AND w.AcknowledgedRevision=p.EffectiveRevision
-            AND w.CatalogDigest=(SELECT CatalogDigest FROM [workerdock].PolicyRevisions WHERE PolicyKind=N'Capacity')
-            AND w.LastHeartbeatUtc>DATEADD(second,-60,SYSUTCDATETIME())
-            AND w.LiveLimit>(SELECT COUNT(*) FROM [workerdock].Attempts a WHERE a.WorkerBootId=w.BootId AND a.State=N'Running')) AND o.EventType=N'ExecutionDispatch' AND o.ProjectionState<>N'Retired'
+            JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
+            WHERE e.JobId=@job AND j.Enabled=1 AND j.Archived=0 AND e.State IN(N'Queued',N'RetryWaiting') AND e.HoldsJobSlot=1
+                AND cat.Enabled=1 AND cat.ConcurrencyLimit>0 AND EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus runtime WHERE runtime.StateId=1 AND runtime.Ready=1 AND runtime.LastHeartbeatUtc>DATEADD(second,-30,SYSUTCDATETIME())) AND o.EventType=N'ExecutionDispatch' AND o.ProjectionState<>N'Retired'
                 AND COALESCE(TRY_CONVERT(int,JSON_VALUE(o.PayloadJson,'$.attemptOrdinal')),1)=1+COALESCE((SELECT MAX(a.AttemptNumber) FROM [workerdock].Attempts a WHERE a.ExecutionId=e.ExecutionId),0)
-                AND (TRY_CONVERT(bigint,JSON_VALUE(o.PayloadJson,'$.capacityRevision')) IS NULL
-                    OR TRY_CONVERT(bigint,JSON_VALUE(o.PayloadJson,'$.capacityRevision'))<>p.EffectiveRevision)
+                AND TRY_CONVERT(bigint,JSON_VALUE(o.PayloadJson,'$.capacityRevision'))<>0
             """);
         Add(read, "@job", SqlDbType.UniqueIdentifier, jobId);
         await using var reader = await read.ExecuteReaderAsync(ct);

@@ -16,9 +16,6 @@ public sealed class SqlCapacityCommands(TenantDatabaseOptions options) : ICapaci
         ChangeAsync("TemplateLimit", SqlCapacityStore.PolicyId, templateId, limit, actor, ct);
     public ValueTask<CommandReceipt> SetJobLimitAsync(Guid jobId, int limit, ActorContext actor, CancellationToken ct) =>
         ChangeAsync("JobLimit", jobId, null, limit, actor, ct);
-    public ValueTask<CommandReceipt> SetWorkerLimitAsync(Guid workerId, int limit, ActorContext actor, CancellationToken ct) =>
-        ChangeAsync("WorkerLimit", workerId, null, limit, actor, ct);
-
     private async ValueTask<CommandReceipt> ChangeAsync(string kind, Guid id, string? template, int limit, ActorContext actor, CancellationToken ct)
     {
         JobCommandValidation.ValidateActor(actor);
@@ -33,19 +30,16 @@ public sealed class SqlCapacityCommands(TenantDatabaseOptions options) : ICapaci
                 await using var update = Command(c, t, kind switch
                 {
                     "TemplateLimit" => """
-                        UPDATE [workerdock].TemplatePolicies SET DesiredLimit=@limit WHERE TemplateId=@template;
+                        UPDATE [workerdock].TemplateCatalog SET ConcurrencyLimit=@limit WHERE TemplateId=@template AND Enabled=1;
                         IF @@ROWCOUNT=0 THROW 51010,'UnknownTemplate',1;
-                        UPDATE [workerdock].PolicyRevisions SET DesiredRevision=DesiredRevision+1,State=N'Pending' WHERE PolicyId=@id;
-                        UPDATE [workerdock].TemplatePolicies SET StartGateClosed=1,DesiredRevision=(SELECT DesiredRevision FROM [workerdock].PolicyRevisions WHERE PolicyId=@id);
-                        UPDATE [workerdock].Workers SET State=N'Standby' WHERE State=N'Ready';
-                        SELECT DesiredRevision FROM [workerdock].PolicyRevisions WHERE PolicyId=@id;
+                        SELECT CAST(NULL AS bigint);
                         """,
                     "JobLimit" => "UPDATE [workerdock].Jobs SET ConcurrencyLimit=@limit WHERE JobId=@id AND Archived=0; IF @@ROWCOUNT=0 THROW 51011,'JobNotFound',1; SELECT CAST(NULL AS bigint);",
-                    _ => "UPDATE [workerdock].Workers SET LiveLimit=@limit WHERE InstallationId=@id AND @limit<=CapacityCeiling; IF @@ROWCOUNT=0 THROW 51012,'WorkerLimitInvalid',1; SELECT CAST(NULL AS bigint);"
+                    _ => throw new WorkerDockException("ValidationFailed", "limit")
                 });
                 Add(update, "@limit", SqlDbType.Int, limit); Add(update, "@id", SqlDbType.UniqueIdentifier, id); Add(update, "@template", SqlDbType.NVarChar, template, 100);
                 var revision = await update.ExecuteScalarAsync(token);
-                var receipt = new CommandReceipt(Guid.NewGuid(), id, kind == "TemplateLimit" ? "Pending" : "Applied");
+                var receipt = new CommandReceipt(Guid.NewGuid(), id, "Applied");
                 await using var command = Command(c, t, """
                     INSERT [workerdock].Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc,PolicyRevision) VALUES(@command,@id,@kind,@state,SYSUTCDATETIME(),@revision);
                     INSERT [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson)

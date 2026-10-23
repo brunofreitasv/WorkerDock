@@ -179,8 +179,8 @@ public sealed class IncidentEvaluator(TenantDatabaseOptions options) : IAlertEva
                 FROM [workerdock].ScheduleRecoveryEvents WHERE ScheduleId=@id AND CreatedAtUtc>=@from AND CreatedAtUtc<=@now;
                 """,
             "WorkerUnavailable" => """
-                SELECT CASE WHEN EXISTS(SELECT 1 FROM [workerdock].Workers
-                    WHERE InstallationId=@id AND LastHeartbeatUtc<=DATEADD(second,-@window,@now)) THEN 1 ELSE 0 END;
+                SELECT CASE WHEN EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus
+                    WHERE StateId=1 AND (Ready=0 OR LastHeartbeatUtc<=DATEADD(second,-@window,@now))) THEN 1 ELSE 0 END;
                 """,
             _ => throw new WorkerDockException("AlertRuleUnavailable")
         };
@@ -243,12 +243,11 @@ public sealed class IncidentEvaluator(TenantDatabaseOptions options) : IAlertEva
                 ORDER BY N'schedule:'+CONVERT(nvarchar(36),r.ScheduleId);
                 """,
             "WorkerUnavailable" => """
-                SELECT TOP(@limit) N'worker:'+CONVERT(nvarchar(36),w.InstallationId) SubjectKey,
-                    DATEADD(second,@window,w.LastHeartbeatUtc) DetectedAtUtc
-                FROM [workerdock].Workers w
-                WHERE w.LastHeartbeatUtc<=DATEADD(second,-@window,@now)
-                  AND (@after IS NULL OR N'worker:'+CONVERT(nvarchar(36),w.InstallationId)>@after)
-                ORDER BY N'worker:'+CONVERT(nvarchar(36),w.InstallationId);
+                SELECT TOP(@limit) N'runtime' SubjectKey,
+                    COALESCE(DATEADD(second,@window,LastHeartbeatUtc),@now) DetectedAtUtc
+                FROM [workerdock].RuntimeStatus
+                WHERE StateId=1 AND (Ready=0 OR LastHeartbeatUtc<=DATEADD(second,-@window,@now))
+                  AND (@after IS NULL OR N'runtime'>@after);
                 """,
             _ => throw new WorkerDockException("AlertRuleUnavailable")
         };
@@ -342,9 +341,8 @@ public sealed class IncidentEvaluator(TenantDatabaseOptions options) : IAlertEva
 
     private static async ValueTask<bool> WorkerTelemetryExistsAsync(SqlConnection c, SqlTransaction t, string subject, CancellationToken ct)
     {
-        if (!TrySubjectId(subject, "worker:", out var workerId)) return false;
-        await using var command = Command(c, t, "SELECT CASE WHEN EXISTS(SELECT 1 FROM [workerdock].Workers WHERE InstallationId=@id) THEN 1 ELSE 0 END");
-        Add(command, "@id", SqlDbType.UniqueIdentifier, workerId);
+        if (subject != "runtime") return false;
+        await using var command = Command(c, t, "SELECT CASE WHEN EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus WHERE StateId=1) THEN 1 ELSE 0 END");
         return Convert.ToInt32(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) == 1;
     }
 

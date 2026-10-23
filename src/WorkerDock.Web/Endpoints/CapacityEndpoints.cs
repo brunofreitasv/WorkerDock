@@ -1,5 +1,6 @@
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Workers;
+using WorkerDock.Application.Monitoring;
 using WorkerDock.Infrastructure.Authentication;
 namespace WorkerDock.Web.Endpoints;
 
@@ -8,21 +9,15 @@ public static class CapacityEndpoints
 {
     public static void MapCapacity(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/capacity",async (ICapacityStore store,CancellationToken ct) =>
+        app.MapGet("/api/capacity",async (IMonitoringQueries queries,CancellationToken ct) =>
         {
-            try
-            {
-                var view=await store.TransactAsync((state,_) => new { Policy=state.Snapshot,Workers=state.Workers.Values.ToArray() },ct);
-                return Results.Ok(view);
-            }
+            try { return Results.Ok(await queries.WorkersAsync(ct)); }
             catch(WorkerDockException e) { return Results.Problem(statusCode:503,extensions:new Dictionary<string,object?> { ["code"]=e.Code }); }
         }).RequireAuthorization(AccessPolicies.Read);
         app.MapPut("/api/templates/{id}/limit", (string id, SetCapacityRequest input, ICapacityCommands commands, HttpContext context, CancellationToken ct) =>
             Apply(() => commands.SetTemplateLimitAsync(id,input.Limit,SessionEndpoints.Actor(context),ct))).RequireAuthorization(AccessPolicies.Manage);
         app.MapPut("/api/jobs/{id:guid}/limit", (Guid id, SetCapacityRequest input, ICapacityCommands commands, HttpContext context, CancellationToken ct) =>
             Apply(() => commands.SetJobLimitAsync(id,input.Limit,SessionEndpoints.Actor(context),ct))).RequireAuthorization(AccessPolicies.Manage);
-        app.MapPut("/api/workers/{id:guid}/limit", (Guid id, SetCapacityRequest input, ICapacityCommands commands, HttpContext context, CancellationToken ct) =>
-            Apply(() => commands.SetWorkerLimitAsync(id,input.Limit,SessionEndpoints.Actor(context),ct))).RequireAuthorization(AccessPolicies.Manage);
     }
     private static async Task<IResult> Apply(Func<ValueTask<CommandReceipt>> action)
     {

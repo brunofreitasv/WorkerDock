@@ -152,7 +152,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 var keyHash = Hash(requestKey);
                 var requestHash = runOptions.ReferenceDateOverride is null ? Hash("RunNow|" + jobId.ToString("N")) : Hash("RunNow|" + jobId.ToString("N") + "|" + runOptions.ReferenceDateOverride.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
                 await using var dedup = Command(connection, transaction,
-                    "SELECT ActorMode,ActorSubject,RequestKey,RequestHash,ExecutionId,CommandId,ResponseState,ExpiresAtUtc FROM [workerdock].ManualRequestDedup WITH (UPDLOCK,HOLDLOCK) WHERE JobId=@job AND ActorScopeHash=@scope AND RequestKeyHash=@key");
+                    "SELECT ManualActorMode,ManualActorSubject,RequestKey,ManualRequestHash,ExecutionId,ManualCommandId,ManualResponseState,ManualRequestExpiresAtUtc FROM [workerdock].Executions WITH (UPDLOCK,HOLDLOCK) WHERE JobId=@job AND TriggerKind=N'Manual' AND ManualActorScopeHash=@scope AND ManualRequestKeyHash=@key");
                 Add(dedup, "@job", SqlDbType.UniqueIdentifier, jobId);
                 Add(dedup, "@scope", SqlDbType.Char, scopeHash, 64);
                 Add(dedup, "@key", SqlDbType.Char, keyHash, 64);
@@ -177,7 +177,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 if (oldExecution is not null)
                 {
                     await using var remove = Command(connection, transaction,
-                        "DELETE FROM [workerdock].ManualRequestDedup WHERE JobId=@job AND ActorScopeHash=@scope AND RequestKeyHash=@key");
+                        "UPDATE [workerdock].Executions SET ManualActorScopeHash=NULL,ManualRequestKeyHash=NULL,ManualRequestExpiresAtUtc=NULL WHERE JobId=@job AND TriggerKind=N'Manual' AND ManualActorScopeHash=@scope AND ManualRequestKeyHash=@key");
                     Add(remove, "@job", SqlDbType.UniqueIdentifier, jobId);
                     Add(remove, "@scope", SqlDbType.Char, scopeHash, 64);
                     Add(remove, "@key", SqlDbType.Char, keyHash, 64);
@@ -228,7 +228,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 var executionId = Guid.NewGuid();
                 var receipt = new CommandReceipt(Guid.NewGuid(), executionId, "Pending");
                 await using var execution = Command(connection, transaction,
-                    "INSERT INTO [workerdock].Executions(ExecutionId,JobId,JobRevision,ProfileRevisionId,TriggerKind,RequestKey,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc,ValueContextJson) VALUES (@execution,@job,@rev,@profileRevision,N'Manual',@key,@idempotency,N'Queued',N'Known',@now,@correlation,@now,@context)");
+                    "INSERT INTO [workerdock].Executions(ExecutionId,JobId,JobRevision,ProfileRevisionId,TriggerKind,RequestKey,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc,ValueContextJson,ManualActorScopeHash,ManualRequestKeyHash,ManualActorMode,ManualActorSubject,ManualRequestHash,ManualCommandId,ManualResponseState,ManualRequestExpiresAtUtc) VALUES (@execution,@job,@rev,@profileRevision,N'Manual',@key,@idempotency,N'Queued',N'Known',@now,@correlation,@now,@context,@scope,@keyHash,@mode,@subject,@hash,@command,@state,DATEADD(hour,24,@now))");
                 Add(execution, "@execution", SqlDbType.UniqueIdentifier, executionId);
                 Add(execution,"@profileRevision",SqlDbType.UniqueIdentifier,profileRevisionId ?? (object)DBNull.Value);
                 Add(execution, "@job", SqlDbType.UniqueIdentifier, jobId);
@@ -238,22 +238,15 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 Add(execution, "@now", SqlDbType.DateTime2, now);
                 Add(execution, "@correlation", SqlDbType.UniqueIdentifier, actor.CorrelationId);
                 Add(execution, "@context", SqlDbType.NVarChar, valueContext is null ? DBNull.Value : JsonSerializer.Serialize(valueContext), -1);
+                Add(execution, "@scope", SqlDbType.Char, scopeHash, 64);
+                Add(execution, "@keyHash", SqlDbType.Char, keyHash, 64);
+                Add(execution, "@mode", SqlDbType.NVarChar, actor.AuthenticationMode, 40);
+                Add(execution, "@subject", SqlDbType.NVarChar, actor.Subject, 300);
+                Add(execution, "@hash", SqlDbType.Char, requestHash, 64);
+                Add(execution, "@command", SqlDbType.UniqueIdentifier, receipt.CommandId);
+                Add(execution, "@state", SqlDbType.NVarChar, receipt.State, 20);
                 await execution.ExecuteNonQueryAsync(token);
                 await InsertCommandAsync(connection, transaction, receipt, "ManualRun", token);
-                await using var saveKey = Command(connection, transaction,
-                    "INSERT INTO [workerdock].ManualRequestDedup(JobId,ActorScopeHash,RequestKeyHash,ActorMode,ActorSubject,RequestKey,RequestHash,ExecutionId,CommandId,ResponseState,AcceptedAtUtc,ExpiresAtUtc) VALUES (@job,@scope,@keyHash,@mode,@subject,@key,@hash,@execution,@command,@state,@now,DATEADD(hour,24,@now))");
-                Add(saveKey, "@job", SqlDbType.UniqueIdentifier, jobId);
-                Add(saveKey, "@scope", SqlDbType.Char, scopeHash, 64);
-                Add(saveKey, "@keyHash", SqlDbType.Char, keyHash, 64);
-                Add(saveKey, "@mode", SqlDbType.NVarChar, actor.AuthenticationMode, 40);
-                Add(saveKey, "@subject", SqlDbType.NVarChar, actor.Subject, 300);
-                Add(saveKey, "@key", SqlDbType.NVarChar, requestKey, 200);
-                Add(saveKey, "@hash", SqlDbType.Char, requestHash, 64);
-                Add(saveKey, "@execution", SqlDbType.UniqueIdentifier, executionId);
-                Add(saveKey, "@command", SqlDbType.UniqueIdentifier, receipt.CommandId);
-                Add(saveKey, "@state", SqlDbType.NVarChar, receipt.State, 20);
-                Add(saveKey, "@now", SqlDbType.DateTime2, now);
-                await saveKey.ExecuteNonQueryAsync(token);
                 await InsertAuditAsync(connection, transaction, "ManualRunAccepted", executionId,
                     revision, revision, "Accepted", actor, token);
                 var payload = JsonSerializer.Serialize(new { executionId, jobRevision = revision });

@@ -12,6 +12,25 @@ namespace WorkerDock.IntegrationTests;
 [Trait("Store","Sql")]
 public sealed class CapacityPolicySqlTests
 {
+    [Fact]
+    public async Task Template_and_job_limits_are_applied_on_their_owner_rows()
+    {
+        await using var fixture = new QuartzProcessFixture(); await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0012_execution_manual_dedup", default);
+        var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        var actor = new ActorContext("manager", "Anonymous", Guid.NewGuid());
+        var jobs = new SqlJobCommands(options, JobCommandTestCatalog.Create());
+        var job = CommandOutcomeTests.Job();
+        await jobs.SaveAsync(job, null, actor, default);
+        var commands = new SqlCapacityCommands(options);
+
+        Assert.Equal("Applied", (await commands.SetTemplateLimitAsync("workerdock.http", 3, actor, default)).State);
+        Assert.Equal("Applied", (await commands.SetJobLimitAsync(job.JobId, 2, actor, default)).State);
+        Assert.Equal(3, await fixture.Database.ScalarAsync("SELECT ConcurrencyLimit FROM [workerdock].TemplateCatalog WHERE TemplateId=N'workerdock.http' AND TemplateVersion=N'1.1.0'"));
+        Assert.Equal(2, await fixture.Database.ScalarAsync($"SELECT ConcurrencyLimit FROM [workerdock].Jobs WHERE JobId='{job.JobId}'"));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
