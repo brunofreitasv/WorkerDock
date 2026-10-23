@@ -1,0 +1,1 @@
+DROP TABLE [workerdock].RuntimeStatus;

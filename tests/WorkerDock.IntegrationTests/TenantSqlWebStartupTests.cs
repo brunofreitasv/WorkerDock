@@ -7,11 +7,34 @@ using WorkerDock.Application.Monitoring;
 using WorkerDock.Contracts.Secrets;
 using WorkerDock.Infrastructure.Jobs;
 using WorkerDock.Infrastructure.Monitoring;
+using WorkerDock.Infrastructure.Migrations;
+using WorkerDock.Infrastructure.Persistence;
+using WorkerDock.Infrastructure.Runtime;
 
 namespace WorkerDock.IntegrationTests;
 
-public sealed class TenantSqlWebStartupTests
+public sealed class TenantSqlWebStartupTests : IDisposable
 {
+    private readonly List<string> _keyDirectories = [];
+
+    [Fact]
+    [Trait("Store", "Sql")]
+    public async Task Runtime_heartbeat_drives_ready_health()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
+            .ApplyAsync("tenant", "0011_single_node_transition", default);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        var status = new SqlRuntimeStatus(options, 2);
+        var boot = Guid.NewGuid();
+
+        await status.HeartbeatAsync(boot, true, default);
+        Assert.Equal("Healthy", (await new SqlMonitoringQueries(options, TimeProvider.System).HealthAsync(default)).Overall);
+        await status.HeartbeatAsync(boot, false, default);
+        Assert.NotEqual("Healthy", (await new SqlMonitoringQueries(options, TimeProvider.System).HealthAsync(default)).Overall);
+    }
+
     [Fact]
     public async Task Production_sql_uses_registered_vault_before_constructing_sql_services()
     {

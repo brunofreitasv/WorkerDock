@@ -2,11 +2,78 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using WorkerDock.Application.Common;
+using WorkerDock.Worker;
 
 namespace WorkerDock.ProcessTests;
 
 public sealed class TenantSqlHostStartupTests
 {
+    [Fact]
+    public async Task LostSqlHeartbeat_StopsNewAdmission()
+    {
+        var connected = true;
+        var admitted = 0;
+        var loops = new RuntimeLoops(_ => connected
+            ? ValueTask.CompletedTask
+            : ValueTask.FromException(new WorkerDockException("PersistenceUnavailable")));
+        await loops.PulseAsync(default);
+        await loops.RunWorkOnceAsync(_ => { admitted++; return ValueTask.CompletedTask; }, default);
+        connected = false;
+        await Assert.ThrowsAsync<WorkerDockException>(async () => await loops.PulseAsync(default));
+        await loops.RunWorkOnceAsync(_ => { admitted++; return ValueTask.CompletedTask; }, default);
+        Assert.Equal(1, admitted);
+        Assert.False(loops.Ready);
+    }
+
+    [Fact]
+    public async Task SecondRuntimeForTenant_IsRejected()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var instanceId = Guid.NewGuid();
+        using var first = StartMutexProbe(instanceId);
+        Assert.Equal("READY", await first.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15)));
+        try
+        {
+            using var second = StartMutexProbe(instanceId);
+            var secondProcess = await ReadProbeAsync(second);
+            Assert.Equal("RuntimeAlreadyRunning", secondProcess.SafeExitCode);
+        }
+        finally
+        {
+            first.StandardInput.Close();
+            await first.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+        }
+        using var restarted = StartMutexProbe(instanceId);
+        Assert.Equal("READY", await restarted.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15)));
+        restarted.StandardInput.Close();
+        await restarted.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.Equal(0, restarted.ExitCode);
+    }
+
+    private static Process StartMutexProbe(Guid instanceId)
+    {
+        var info = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        info.ArgumentList.Add(typeof(FixtureProgram).Assembly.Location);
+        info.ArgumentList.Add("runtime-mutex-probe");
+        info.ArgumentList.Add(instanceId.ToString());
+        return Process.Start(info)!;
+    }
+
+    private static async Task<(string SafeExitCode, int ExitCode)> ReadProbeAsync(Process process)
+    {
+        var code = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+        return (code ?? string.Empty, process.ExitCode);
+    }
+
     [Theory]
     [InlineData("Scheduler")]
     [InlineData("Worker")]

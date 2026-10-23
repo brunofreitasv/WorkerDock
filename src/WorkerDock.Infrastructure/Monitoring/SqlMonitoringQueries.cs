@@ -6,6 +6,7 @@ using WorkerDock.Application.Common;
 using WorkerDock.Application.Monitoring;
 using WorkerDock.Infrastructure.Persistence;
 using WorkerDock.Infrastructure.Observability;
+using WorkerDock.Infrastructure.Runtime;
 
 namespace WorkerDock.Infrastructure.Monitoring;
 
@@ -163,39 +164,19 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
     {
         var components = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["web"] = "Healthy", ["database"] = "Unknown", ["schema"] = "Unknown", ["schedulerStore"] = "Unknown",
-            ["executionStore"] = "Unknown", ["scheduler"] = "Unknown", ["workers"] = "Unknown", ["catalog"] = "Unknown",
-            ["capacity"] = "Unknown", ["projections"] = "Unknown"
+            ["web"] = "Healthy", ["database"] = "Unavailable", ["runtime"] = "Unavailable"
         };
         var observed = clock.GetUtcNow();
         try
         {
-            await using var connection = await OpenAsync(ct); observed = await DatabaseNowAsync(connection, ct);
+            var status = await new SqlRuntimeStatus(options, 1).ReadAsync(ct);
             components["database"] = "Healthy";
-            await using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT (SELECT COUNT(*) FROM [workerdock].SchemaHistory),
-                    (SELECT COUNT(*) FROM [workerdock].ServiceHealth WHERE ServiceKind=N'Scheduler' AND Ready=1 AND LastHeartbeatUtc>=DATEADD(second,-90,SYSUTCDATETIME())),
-                    (SELECT COUNT(*) FROM [workerdock].Workers WHERE State=N'Ready' AND LastHeartbeatUtc>=DATEADD(second,-60,SYSUTCDATETIME())),
-                    (SELECT COUNT(*) FROM [workerdock].TemplateCatalog WHERE Enabled=1),
-                    COALESCE((SELECT State FROM [workerdock].PolicyRevisions WHERE PolicyKind=N'Capacity'),N'Unavailable'),
-                    (SELECT COUNT(*) FROM [workerdock].Outbox WHERE ProjectionState IN(N'Pending',N'Held') AND CreatedAtUtc<DATEADD(second,-30,SYSUTCDATETIME())),
-                    (SELECT COUNT(*) FROM [workerdock].WDS_QRTZ_SCHEDULER_STATE),
-                    (SELECT COUNT(*) FROM [workerdock].WDE_QRTZ_SCHEDULER_STATE);
-                """;
-            await using var reader = await command.ExecuteReaderAsync(ct); await reader.ReadAsync(ct);
-            components["schema"] = reader.GetInt32(0) > 0 ? "Healthy" : "Unavailable";
-            components["scheduler"] = reader.GetInt32(1) > 0 ? "Healthy" : "Unavailable";
-            components["workers"] = reader.GetInt32(2) > 0 ? "Healthy" : "Degraded";
-            components["catalog"] = reader.GetInt32(3) > 0 ? "Healthy" : "Degraded";
-            components["capacity"] = reader.GetString(4) == "Effective" ? "Healthy" : "Degraded";
-            components["projections"] = reader.GetInt32(5) == 0 ? "Healthy" : "Degraded";
-            components["schedulerStore"] = reader.GetInt32(6) >= 0 ? "Healthy" : "Unavailable";
-            components["executionStore"] = reader.GetInt32(7) >= 0 ? "Healthy" : "Unavailable";
+            components["runtime"] = status is { Ready: true } &&
+                status.LastHeartbeatUtc >= observed.AddSeconds(-30) ? "Healthy" : "Unavailable";
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch { components["database"] = "Unavailable"; }
-        var overall = components.Values.Any(x => x == "Unavailable") ? "Unavailable" : components.Values.Any(x => x == "Degraded") ? "Degraded" : "Healthy";
+        catch { /* Readiness is closed when SQL or the status row cannot be read. */ }
+        var overall = components["runtime"] == "Healthy" ? "Healthy" : "Unavailable";
         return new(options.InstanceId, overall, components, observed);
     }
 

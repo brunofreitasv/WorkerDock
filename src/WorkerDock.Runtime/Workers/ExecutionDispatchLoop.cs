@@ -17,7 +17,7 @@ public sealed class ExecutionDispatchLoop(
     private readonly SemaphoreSlim dispatchGate = new(1, 1);
     private readonly CancellationTokenSource stopping = new();
     private readonly ConcurrentDictionary<Guid, Task> active = new();
-    private int reservedChildren;
+    private readonly SemaphoreSlim childSlots = new(Math.Clamp(maxChildren, 1, 1000));
     private int stopped;
 
     public async ValueTask<int> RunOnceAsync(CancellationToken ct)
@@ -28,7 +28,7 @@ public sealed class ExecutionDispatchLoop(
         {
             if (Volatile.Read(ref stopped) != 0) return 0;
             await attempts.ReviewExpiredAsync(100, ct);
-            var available = maxChildren - Volatile.Read(ref reservedChildren);
+            var available = childSlots.CurrentCount;
             if (available <= 0) return 0;
 
             var ready = await queue.ReadReadyAsync(available, ct);
@@ -36,7 +36,7 @@ public sealed class ExecutionDispatchLoop(
             foreach (var executionId in ready.Take(available))
             {
                 if (Volatile.Read(ref stopped) != 0) break;
-                Interlocked.Increment(ref reservedChildren);
+                if (!childSlots.Wait(0)) break;
                 var taskId = Guid.NewGuid();
                 var kickoff = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var task = Task.Run(async () =>
@@ -95,7 +95,7 @@ public sealed class ExecutionDispatchLoop(
         finally
         {
             active.TryRemove(taskId, out _);
-            Interlocked.Decrement(ref reservedChildren);
+            childSlots.Release();
         }
     }
 }

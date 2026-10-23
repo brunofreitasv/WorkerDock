@@ -10,12 +10,28 @@ using WorkerDock.Executor;
 using WorkerDock.Runtime.Ipc;
 using WorkerDock.Runtime.Processes;
 using WorkerDock.TestTemplates;
+using WorkerDock.Worker;
 
 namespace WorkerDock.ProcessTests;
 public static class FixtureProgram
 {
     public static async Task<int> Main(string[] args)
     {
+        if (args[0] == "runtime-mutex-probe")
+        {
+            try
+            {
+                using var runtime = RuntimeMutex.Acquire(Guid.Parse(args[1]));
+                Console.WriteLine("READY");
+                await Console.In.ReadLineAsync();
+                return 0;
+            }
+            catch (WorkerDock.Application.Common.WorkerDockException error)
+            {
+                Console.WriteLine(error.Code);
+                return 1;
+            }
+        }
         if (args[0] == "grandchild") { await Task.Delay(Timeout.InfiniteTimeSpan); return 0; }
         if (args[0] == "supervisor")
         {
