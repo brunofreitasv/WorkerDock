@@ -18,7 +18,6 @@ using WorkerDock.Application.Settings;
 using WorkerDock.Infrastructure.Settings;
 using WorkerDock.Application.Scheduling;
 using WorkerDock.Infrastructure.Scheduling;
-using WorkerDock.Quartz.Scheduling;
 using WorkerDock.Web.Endpoints;
 using WorkerDock.Templates.SqlServer;
 using WorkerDock.Templates.Http;
@@ -40,7 +39,7 @@ builder.Services.AddWorkerDockAccess();
 builder.Services.TryAddSingleton<TimeProvider>(TimeProvider.System);
 builder.Services.TryAddSingleton<ISecretVault>(provider => SecretVaultRegistration.CreateTenantSql(provider.GetRequiredService<IHostEnvironment>().IsDevelopment()));
 builder.Services.TryAddSingleton<TenantSqlStartup>();
-builder.Services.TryAddSingleton<IScheduleEvaluator, QuartzScheduleEvaluator>();
+builder.Services.TryAddSingleton<IScheduleEvaluator, FiveFieldScheduleEvaluator>();
 var trustedTemplates = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
 {
     new SqlTemplate("1.0.0").Descriptor,

@@ -1,14 +1,15 @@
 using WorkerDock.Application.Common;
 using WorkerDock.Domain.Scheduling;
-using WorkerDock.Quartz.Scheduling;
+using WorkerDock.Infrastructure.Scheduling;
 namespace WorkerDock.UnitTests;
 public sealed class ScheduleEvaluatorTests
 {
-    private readonly QuartzScheduleEvaluator evaluator = new();
+    private readonly FiveFieldScheduleEvaluator evaluator = new();
     private static DateTimeOffset U(string value) => DateTimeOffset.Parse(value);
     private static ScheduleDefinition Cron(string text, string zone = "Etc/UTC") => new(Guid.NewGuid(), 1, "Cron", text, zone, null, U("2026-01-01T00:00:00Z"));
 
     [Theory]
+    [InlineData("0 0 1 1 *", "Etc/UTC", "2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z")]
     [InlineData("30 2 * * *", "America/New_York", "2026-03-08T05:00:00Z", "2026-03-09T06:30:00Z")]
     [InlineData("30 1 * * *", "America/New_York", "2026-11-01T04:00:00Z", "2026-11-01T05:30:00Z")]
     [InlineData("30 1 * * *", "America/New_York", "2026-11-01T05:30:00Z", "2026-11-02T06:30:00Z")]
@@ -25,6 +26,24 @@ public sealed class ScheduleEvaluatorTests
     [InlineData("0 9-10 * * 1,3,5", "Etc/UTC", "2026-10-02T09:00:00Z", "2026-10-02T10:00:00Z")]
     public void Cron_policy_fixtures(string expression, string zone, string after, string expected) =>
         Assert.Equal(U(expected), Assert.Single(evaluator.Next(Cron(expression, zone), U(after), 1)));
+
+    [Fact]
+    public void Cron_next_results_are_strictly_after_cursor_and_utc_ordered()
+    {
+        var results = evaluator.Next(Cron("30 1 * * *", "America/New_York"), U("2026-10-31T00:00:00Z"), 3);
+
+        Assert.Equal(new[] { "2026-10-31T05:30:00Z", "2026-11-01T05:30:00Z", "2026-11-02T06:30:00Z" },
+            results.Select(x => x.ToString("yyyy-MM-ddTHH:mm:ssZ")));
+        Assert.All(results, result => Assert.Equal(TimeSpan.Zero, result.Offset));
+    }
+
+    [Fact]
+    public void Cron_near_datetime_limit_returns_the_next_available_occurrence()
+    {
+        var schedule = Cron("0 0 * * *") with { ActivatedUtc = U("9999-01-01T00:00:00Z") };
+
+        Assert.Equal(U("9999-01-02T00:00:00Z"), Assert.Single(evaluator.Next(schedule, schedule.ActivatedUtc, 1)));
+    }
 
     [Theory]
     [InlineData("0 0 0 * * *")]

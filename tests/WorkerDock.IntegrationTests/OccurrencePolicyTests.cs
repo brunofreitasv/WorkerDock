@@ -1,9 +1,24 @@
 using WorkerDock.Domain.Scheduling;
+using WorkerDock.Infrastructure.Scheduling;
 
 namespace WorkerDock.IntegrationTests;
 
 public sealed class OccurrencePolicyTests
 {
+    [Fact]
+    public void Five_field_occurrences_feed_missed_work_policy_in_utc_order()
+    {
+        var activation = new DateTimeOffset(2026, 10, 30, 0, 0, 0, TimeSpan.Zero);
+        var schedule = new ScheduleDefinition(Guid.NewGuid(), 1, "Cron", "30 1 * * *", "America/New_York", null, activation);
+        var due = new FiveFieldScheduleEvaluator().Next(schedule, activation, 4);
+        var selected = new MissedWorkPolicy("Coalesce", TimeSpan.FromSeconds(60), 0, TimeSpan.Zero)
+            .SelectOccurrences(due, activation, new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero));
+
+        Assert.Equal(new[] { "2026-10-30T05:30:00Z", "2026-10-31T05:30:00Z", "2026-11-01T05:30:00Z", "2026-11-02T06:30:00Z" },
+            due.Select(x => x.ToString("yyyy-MM-ddTHH:mm:ssZ")));
+        Assert.Equal([due[3]], selected);
+    }
+
     [Fact]
     public void Recovery_wakeup_applies_business_policy_once()
     {
