@@ -28,6 +28,8 @@ and no upgrade converter is provided. The `tests/sql` scripts create only
 fixture objects in generated disposable databases; never apply them to a
 runtime tenant. SQL behavior remains unverified until run against a disposable
 SQL Server 2022+ instance.
+This is a fresh-install-only baseline and does not convert an existing tenant
+database.
 The in-memory tutorial needs none of these SQL objects.
 
 ### Fresh database snapshot

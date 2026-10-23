@@ -27,12 +27,12 @@ public sealed class MigrationInputTests
         Assert.Contains("database/tenant/current-state.sql", tutorial, StringComparison.Ordinal);
         Assert.Contains("& scripts/Invoke-TenantMigration.ps1", tutorial, StringComparison.Ordinal);
         Assert.DoesNotContain("pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1", tutorial, StringComparison.Ordinal);
-        Assert.Contains("operator-managed SQL Server backup", upgrade, StringComparison.Ordinal);
+        Assert.Contains("verify the backup before proceeding", upgrade, StringComparison.Ordinal);
         Assert.DoesNotContain("package manifest", upgrade, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("schema compatibility window", upgrade, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("release compatibility evidence", upgrade, StringComparison.Ordinal);
         Assert.Contains("scripts/Invoke-TenantMigration.ps1", upgrade, StringComparison.Ordinal);
-        Assert.True(upgrade.IndexOf("operator-managed SQL Server backup", StringComparison.Ordinal) <
+        Assert.True(upgrade.IndexOf("verify the backup before proceeding", StringComparison.Ordinal) <
                     upgrade.IndexOf("scripts/Invoke-TenantMigration.ps1", StringComparison.Ordinal));
     }
 

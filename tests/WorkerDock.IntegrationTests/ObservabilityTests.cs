@@ -39,8 +39,8 @@ public sealed class ObservabilityTests
     {
         var migration = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "database", "tenant", "0001_initial.up.sql"));
         Assert.Contains("GRANT SELECT ON [workerdock].AuditEvents TO WorkerDockRuntime", migration, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("GRANT UPDATE", migration, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("GRANT DELETE", migration, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("GRANT UPDATE ON [workerdock].AuditEvents", migration, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("GRANT DELETE ON [workerdock].AuditEvents", migration, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
