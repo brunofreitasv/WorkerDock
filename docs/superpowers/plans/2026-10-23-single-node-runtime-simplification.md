@@ -96,21 +96,21 @@ During Tasks 2–8, keep the old tables available so each new path can be tested
 - [ ] Commit: `feat: materialize schedules directly from SQL`.
 ### Task 5: Direct alert evaluation and delivery
 
-**Files:** Create `src/WorkerDock.Infrastructure/Alerts/AlertDeliveryRunner.cs`; modify `src/WorkerDock.Application/Alerts/IAlertDeliveryStore.cs`, `src/WorkerDock.Infrastructure/Alerts/SqlAlertDeliveryStore.cs`, `src/WorkerDock.Infrastructure/Alerts/IncidentEvaluator.cs`, `tests/WorkerDock.IntegrationTests/AlertDeliveryTests.cs`, `tests/WorkerDock.IntegrationTests/AlertAccessTests.cs`.
+**Files:** Create `src/WorkerDock.Infrastructure/Alerts/AlertDeliveryRunner.cs`; modify `src/WorkerDock.Application/Alerts/IAlertDeliveryStore.cs`, `src/WorkerDock.Infrastructure/Alerts/SqlAlertDeliveryStore.cs`, `src/WorkerDock.Infrastructure/Alerts/IncidentEvaluator.cs`, and `tests/WorkerDock.IntegrationTests/AlertDeliveryTests.cs`.
 
 **Interfaces:** Add `DueAlertDelivery(Guid DeliveryId, int AttemptOrdinal)` and `IAlertDeliveryStore.ReadDueAsync(int limit, CancellationToken ct) : ValueTask<IReadOnlyList<DueAlertDelivery>>`; `AlertDeliveryRunner.RunAsync(DueAlertDelivery due, CancellationToken ct) : ValueTask` uses existing claim/renew/complete contracts.
 
 - [ ] Add `LeaseLostAfterSend_DoesNotCompleteDelivery`: `Assert.NotEqual("Succeeded", await fixture.DeliveryStateAsync(deliveryId));`. Cover direct incident-to-delivery insertion, duplicate claims, retry due time, stable delivery ID, and pinned sink revision.
 - [ ] Run `dotnet test tests/WorkerDock.IntegrationTests/WorkerDock.IntegrationTests.csproj --filter FullyQualifiedName~AlertDeliveryTests` with SQL; expect new tests to fail.
-- [ ] Move the Quartz delivery job's bounded send/lease logic into `AlertDeliveryRunner`; read due rows in batches and remove alert outbox publication.
-- [ ] Run alert delivery and access filters; expect pass.
+- [ ] Move bounded send/lease logic into `AlertDeliveryRunner`; read due rows in batches and remove alert outbox publication. Task 5 defines the runner and due-read contract; Task 6 supplies their production caller in the tenant runtime service.
+- [ ] Run the alert delivery filter and the alert delivery/access regression filters; expect pass.
 - [ ] Commit: `feat: deliver alerts from durable SQL rows`.
 
 ### Task 6: One tenant runtime service
 
 **Files:** Create `src/WorkerDock.Worker/TenantRuntimeService.cs`, `src/WorkerDock.Worker/RuntimeLoops.cs`, `src/WorkerDock.Worker/RuntimeMutex.cs`, `src/WorkerDock.Infrastructure/Runtime/SqlRuntimeStatus.cs`, `database/tenant/0011_single_node_transition.up.sql`, `database/tenant/0011_single_node_transition.down.sql`; modify `src/WorkerDock.Worker/Program.cs`, `src/WorkerDock.Worker/WorkerDock.Worker.csproj`, `database/tenant/manifest.json`, `database/tenant/current-state.sql`, `tests/WorkerDock.ProcessTests/TenantSqlHostStartupTests.cs`, `tests/WorkerDock.IntegrationTests/TenantSqlWebStartupTests.cs`.
 
-**Interfaces:** `RuntimeMutex.Acquire(Guid instanceId) : IDisposable`; `SqlRuntimeStatus.HeartbeatAsync(Guid bootId, bool ready, CancellationToken ct) : ValueTask`; `TenantRuntimeService : BackgroundService` composes Tasks 2–5 plus alert evaluation, metric aggregation, and retention. Enforce the configured tenant maximum child count with a local semaphore because this deployment runs one runtime service on one host and the tenant schema has no concurrency limit table. Use tenant-scoped `Global\\WorkerDock.<instanceId:N>` mutex held and released by the same dedicated thread for the service lifetime; fail closed if acquisition fails.
+**Interfaces:** `RuntimeMutex.Acquire(Guid instanceId) : IDisposable`; `SqlRuntimeStatus.HeartbeatAsync(Guid bootId, bool ready, CancellationToken ct) : ValueTask`; `TenantRuntimeService : BackgroundService` composes Tasks 2–5 plus alert evaluation, metric aggregation, and retention. Its bounded alert loop calls `IAlertDeliveryStore.ReadDueAsync` and invokes `AlertDeliveryRunner.RunAsync` for each returned delivery; this is the first production caller for the Task 5 contract. Enforce the configured tenant maximum child count with a local semaphore because this deployment runs one runtime service on one host and the tenant schema has no concurrency limit table. Use tenant-scoped `Global\\WorkerDock.<instanceId:N>` mutex held and released by the same dedicated thread for the service lifetime; fail closed if acquisition fails.
 
 - [ ] Add `SecondRuntimeForTenant_IsRejected` as a two-process test: `Assert.Equal("RuntimeAlreadyRunning", secondProcess.SafeExitCode);` while the first service holds the mutex. Cover restart after release, lost-SQL readiness, bounded shutdown, the local child semaphore ceiling, and a web health check that reads the heartbeat.
 - [ ] Run `dotnet test tests/WorkerDock.ProcessTests/WorkerDock.ProcessTests.csproj --filter FullyQualifiedName~TenantSqlHostStartupTests`; expect new tests to fail.
