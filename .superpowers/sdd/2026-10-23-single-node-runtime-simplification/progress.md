@@ -52,7 +52,7 @@ There are pre-existing uncommitted changes across application, tests, docs, fron
 | 7 | complete; fresh review approved; solution and tenant frontend builds passed; focused monitoring tests passed; SQL runtime unverified without `WORKERDOCK_TEST_SQL`; remaining legacy schema cleanup is assigned to Tasks 8/9 | `b237f00` |
 | 8 | complete; Task 8 review and two scoped fix re-reviews clean; static checks, archive-writer tests, and temp-output build passed; SQL behavior remains unverified without `WORKERDOCK_TEST_SQL` | `c2ce934`, `dab76ff`, `a7a044d` |
 | 9 | complete; fresh review and rollback fix re-review clean; solution build passed and database-independent inventory/permission checks passed; SQL migration/rollback behavior unverified without `WORKERDOCK_TEST_SQL`; one-baseline/no-Quartz cutover committed | `6aad622`, `a22b70b` |
-| 10 | pending | |
+| 10 | complete; fresh task review approved; frontend build and focused single-runtime E2E pass; full suites had SQL blockers/load-sensitive timeouts documented in the task report | `1c5191a` |
 
 Task 8: fix round 1/5 (1 addressed, 1 open — archive purge coverage moved onto durable batch state; commits c2ce934..dab76ff)
 Task 8: fix round 2/5 (1 addressed, 0 open — archive serialization filters operational-event safe fields and verifies secret exclusion; commits dab76ff..a7a044d)
@@ -61,3 +61,5 @@ Task 9: fix round 1/5 (rollback data-loss finding addressed; commits 6aad622..a2
 Task 9: Ruling: re-review questioned `@InstanceId` in the down script — `MigrationRunner.ExecuteScriptAsync` supplies the parameter on every batch; see [MigrationRunner.cs](/C:/Users/bruno/.codex/worktrees/template-max-properties/WorkerDock%202/src/WorkerDock.Infrastructure/Migrations/MigrationRunner.cs:224). No change was required.
 Ruling: the exact `Quartz` rg guard conflicts with its required `FreshInstall_HasNoQuartzObjects` literal test — preserved the test and reported its four expected lines; production/schema/project scan is clean.
 Ruling: pre-existing 0010 migration/preflight edits are migration-history-specific and have no target under the no-upgrader fresh-install design — represented their intended built-in v1 removal/v1.1 state in `0001_initial` and removed obsolete migration-only code.
+
+Task 10: minor (deferred): single-runtime.spec.ts could assert representative runtime content in addition to checking for obsolete terminology; final review to triage.
