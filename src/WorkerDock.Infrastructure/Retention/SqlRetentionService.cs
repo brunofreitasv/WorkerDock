@@ -116,9 +116,9 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
     {
         await using var command = Command(connection, transaction, """
             SELECT TOP(1) b.BatchId,b.RelativePath,b.Sha256,b.RowCount,b.EligibleThroughUtc,b.LogCutoffUtc,b.State,b.FinalizedAtUtc,
-                ISNULL((SELECT SUM(TRY_CONVERT(bigint,JSON_VALUE(a.DetailsJson,'$.purgedRowCount'))) FROM [workerdock].AuditEvents a WHERE a.EventType=N'RetentionPurge' AND TRY_CONVERT(uniqueidentifier,JSON_VALUE(a.DetailsJson,'$.archiveBatchId'))=b.BatchId),0) PurgedRows
+                b.PurgedRowCount
             FROM [workerdock].ArchiveBatches b
-            WHERE b.State IN(N'Writing',N'Failed') OR (b.State=N'Finalized' AND b.RowCount>ISNULL((SELECT SUM(TRY_CONVERT(bigint,JSON_VALUE(a.DetailsJson,'$.purgedRowCount'))) FROM [workerdock].AuditEvents a WHERE a.EventType=N'RetentionPurge' AND TRY_CONVERT(uniqueidentifier,JSON_VALUE(a.DetailsJson,'$.archiveBatchId'))=b.BatchId),0))
+            WHERE b.State IN(N'Writing',N'Failed') OR (b.State=N'Finalized' AND b.RowCount>b.PurgedRowCount)
             ORDER BY CASE WHEN b.State IN(N'Writing',N'Failed') THEN 0 ELSE 1 END,b.CreatedAtUtc,b.BatchId;
             """);
         await using var reader = await command.ExecuteReaderAsync(token);
@@ -316,10 +316,10 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                 SELECT TOP(100) b.BatchId
                 FROM [workerdock].ArchiveBatches b
                 WHERE b.State=N'Finalized' AND b.FinalizedAtUtc<@finalizedBefore
-                  AND b.RowCount<=ISNULL((SELECT SUM(TRY_CONVERT(bigint,JSON_VALUE(a.DetailsJson,'$.purgedRowCount'))) FROM [workerdock].AuditEvents a WHERE a.EventType=N'RetentionPurge' AND TRY_CONVERT(uniqueidentifier,JSON_VALUE(a.DetailsJson,'$.archiveBatchId'))=b.BatchId AND JSON_VALUE(a.DetailsJson,'$.purgeKind') IN(N'AuditEvents',N'RetentionItems',N'OperationalEvents')),0)
+                  AND b.RowCount<=b.PurgedRowCount
                   AND (b.ArchiveRemovedAtUtc IS NULL
                     OR EXISTS(SELECT 1 FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=b.BatchId)
-                    OR EXISTS(SELECT 1 FROM [workerdock].AuditEvents a WHERE a.EventType=N'RetentionPurge' AND TRY_CONVERT(uniqueidentifier,JSON_VALUE(a.DetailsJson,'$.archiveBatchId'))=b.BatchId))
+                    OR b.PurgedRowCount>0)
                 ORDER BY b.FinalizedAtUtc,b.BatchId;
                 """);
             Add(command, "@finalizedBefore", SqlDbType.DateTime2, finalizedBeforeUtc);
@@ -352,10 +352,10 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
             SELECT b.RelativePath,CONVERT(bit,CASE WHEN b.ArchiveRemovedAtUtc IS NULL THEN 0 ELSE 1 END)
             FROM [workerdock].ArchiveBatches b WITH(UPDLOCK,HOLDLOCK)
             WHERE b.BatchId=@id AND b.State=N'Finalized' AND b.FinalizedAtUtc<@finalizedBefore
-              AND b.RowCount<=ISNULL((SELECT SUM(TRY_CONVERT(bigint,JSON_VALUE(a.DetailsJson,'$.purgedRowCount'))) FROM [workerdock].AuditEvents a WHERE a.EventType=N'RetentionPurge' AND TRY_CONVERT(uniqueidentifier,JSON_VALUE(a.DetailsJson,'$.archiveBatchId'))=b.BatchId AND JSON_VALUE(a.DetailsJson,'$.purgeKind') IN(N'AuditEvents',N'RetentionItems',N'OperationalEvents')),0)
+              AND b.RowCount<=b.PurgedRowCount
               AND (b.ArchiveRemovedAtUtc IS NULL
                 OR EXISTS(SELECT 1 FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=b.BatchId)
-                OR EXISTS(SELECT 1 FROM [workerdock].AuditEvents a WHERE a.EventType=N'RetentionPurge' AND TRY_CONVERT(uniqueidentifier,JSON_VALUE(a.DetailsJson,'$.archiveBatchId'))=b.BatchId));
+                OR b.PurgedRowCount>0);
             """))
             {
                 Add(batchCommand, "@id", SqlDbType.UniqueIdentifier, batchId);
@@ -404,6 +404,8 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                     : null;
                 var batch = parameters.TryGetValue("@ArchiveBatchId", out var archiveBatch) ? archiveBatch as Guid?
                     : parameters.TryGetValue("@BatchId", out var batchId) ? batchId as Guid? : null;
+                if (batch is Guid coverageBatch && kind is ("AuditEvents" or "RetentionItems" or "OperationalEvents"))
+                    await RecordArchivePurgeProgressAsync(connection, transaction, coverageBatch, purged, token);
                 await RecordPurgeAsync(connection, transaction, kind, cutoff, purged, batch, token);
             }
             return purged;
@@ -422,6 +424,16 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
             Add(legacy, "@cutoff", SqlDbType.DateTime2, cutoff ?? DateTime.UtcNow); Add(legacy, "@purged", SqlDbType.Int, purged);
             Add(legacy, "@batch", SqlDbType.UniqueIdentifier, batchId); await legacy.ExecuteNonQueryAsync(ct);
         }
+    }
+
+    private static async ValueTask RecordArchivePurgeProgressAsync(DbConnection connection, DbTransaction transaction,
+        Guid batchId, int purged, CancellationToken ct)
+    {
+        await using var command = Command(connection, transaction,
+            "UPDATE [workerdock].ArchiveBatches SET PurgedRowCount=PurgedRowCount+@purged WHERE BatchId=@batch AND State=N'Finalized' AND PurgedRowCount+@purged<=RowCount");
+        Add(command, "@batch", SqlDbType.UniqueIdentifier, batchId);
+        Add(command, "@purged", SqlDbType.BigInt, (long)purged);
+        if (await command.ExecuteNonQueryAsync(ct) != 1) throw new WorkerDockException("ArchivePurgeCoverageMismatch");
     }
 
     private async ValueTask<T> RunAsync<T>(Func<DbConnection, DbTransaction, CancellationToken, ValueTask<T>> action, CancellationToken ct)

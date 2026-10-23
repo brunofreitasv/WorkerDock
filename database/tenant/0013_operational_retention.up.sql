@@ -16,6 +16,19 @@ ALTER TABLE [workerdock].AlertRules ADD LastEvaluatedAtUtc datetime2(7) NULL,Las
 UPDATE r SET LastEvaluatedAtUtc=s.LastEvaluatedAtUtc,LastSubjectKey=s.LastSubjectKey
 FROM [workerdock].AlertRules r CROSS JOIN [workerdock].AlertEvaluationState s WHERE s.StateId=1 AND s.LastRuleId=r.RuleId;
 
+ALTER TABLE [workerdock].ArchiveBatches ADD PurgedRowCount bigint NOT NULL
+    CONSTRAINT DF_ArchiveBatches_PurgedRowCount DEFAULT(0);
+ALTER TABLE [workerdock].ArchiveBatches ADD CONSTRAINT CK_ArchiveBatches_PurgedRowCount
+    CHECK(PurgedRowCount BETWEEN 0 AND RowCount);
+UPDATE b SET PurgedRowCount=CASE WHEN totals.PurgedRows>b.RowCount THEN b.RowCount ELSE totals.PurgedRows END
+FROM [workerdock].ArchiveBatches b
+CROSS APPLY
+(
+    SELECT COALESCE(SUM(CONVERT(bigint,a.PurgedRowCount)),0) PurgedRows
+    FROM [workerdock].RetentionPurgeAudit a
+    WHERE a.ArchiveBatchId=b.BatchId AND a.PurgeKind IN(N'AuditEvents',N'RetentionItems')
+) totals;
+
 CREATE TABLE [workerdock].OperationalEvents
 (
     EventId uniqueidentifier NOT NULL CONSTRAINT PK_OperationalEvents PRIMARY KEY,

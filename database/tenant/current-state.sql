@@ -2121,4 +2121,17 @@ END;
 GO
 GRANT EXECUTE ON [workerdock].PurgeOperationalEvents TO WorkerDockRuntime;
 
-INSERT [workerdock].SchemaHistory(MigrationId,UpChecksum,DownChecksum,AppliedAtUtc) VALUES(N'0013_operational_retention',N'E543B51B622F101E47AB13058A9DFA5ED0C56CD357D7491B79C3650007A902C4',N'197A49D3307F8F78F801BBEDC946E133D01F92B376719C42F3AB8C1CA0EDAD2E',SYSUTCDATETIME());
+ALTER TABLE [workerdock].ArchiveBatches ADD PurgedRowCount bigint NOT NULL
+    CONSTRAINT DF_ArchiveBatches_PurgedRowCount DEFAULT(0);
+ALTER TABLE [workerdock].ArchiveBatches ADD CONSTRAINT CK_ArchiveBatches_PurgedRowCount
+    CHECK(PurgedRowCount BETWEEN 0 AND RowCount);
+UPDATE b SET PurgedRowCount=CASE WHEN totals.PurgedRows>b.RowCount THEN b.RowCount ELSE totals.PurgedRows END
+FROM [workerdock].ArchiveBatches b
+CROSS APPLY
+(
+    SELECT COALESCE(SUM(CONVERT(bigint,a.PurgedRowCount)),0) PurgedRows
+    FROM [workerdock].RetentionPurgeAudit a
+    WHERE a.ArchiveBatchId=b.BatchId AND a.PurgeKind IN(N'AuditEvents',N'RetentionItems')
+) totals;
+
+INSERT [workerdock].SchemaHistory(MigrationId,UpChecksum,DownChecksum,AppliedAtUtc) VALUES(N'0013_operational_retention',N'DFA3A0366AD1627EB4D3A01D7949F8CD8CE3B278954DCEA67A889B1F40E2475C',N'3FC767CE18DAA735C8BE6FC60BC4ADBFF593AECC79C71977A6683EA28245B7C9',SYSUTCDATETIME());

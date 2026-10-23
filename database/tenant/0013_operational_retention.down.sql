@@ -1,5 +1,8 @@
 IF EXISTS(SELECT 1 FROM [workerdock].OperationalEvents)
     THROW 51090,'Operational event consolidation cannot be rolled back after new events are written',1;
+ALTER TABLE [workerdock].ArchiveBatches DROP CONSTRAINT CK_ArchiveBatches_PurgedRowCount;
+ALTER TABLE [workerdock].ArchiveBatches DROP CONSTRAINT DF_ArchiveBatches_PurgedRowCount;
+ALTER TABLE [workerdock].ArchiveBatches DROP COLUMN PurgedRowCount;
 REVOKE EXECUTE ON [workerdock].PurgeOperationalEvents FROM WorkerDockRuntime;
 DROP PROCEDURE [workerdock].PurgeOperationalEvents;
 ALTER TABLE [workerdock].ArchiveBatchItems DROP CONSTRAINT CK_ArchiveBatchItems_Kind;
