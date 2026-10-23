@@ -33,16 +33,6 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
                 var previous = data.Lease;
                 var previousState = data.AttemptState;
                 var now = await NowAsync(connection, transaction, token);
-                var intent = data.Intent with
-                {
-                    DeliveryId = Guid.NewGuid(),
-                    AttemptOrdinal = (previous?.Ordinal ?? 0) + 1,
-                    DueUtc = data.Intent.DueUtc,
-                    Priority = data.Policy.Priority,
-                    CapacityRevision = data.EffectiveCapacityRevision,
-                    PayloadDigest = ""
-                };
-                data.Intent = intent with { PayloadDigest = intent.ComputeDigest() };
                 if (!data.GateOpen || !data.DescriptorAvailable || data.StopRequested ||
                     data.State is not ("Queued" or "RetryWaiting") || data.Intent.DueUtc > now)
                     return new AttemptStart(data.State == "NeedsReview" ? "NeedsReview" : "Held", null);
@@ -299,18 +289,6 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
 
         // RetryWaiting already owns its admission slot, like a retained JobPermit.
         var holdsSlot = state == "RetryWaiting";
-        if (!holdsSlot)
-        {
-            await using var template = Command(c, t, """
-                SELECT COUNT(*) FROM [workerdock].Executions e
-                JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-                WHERE r.TemplateId=@template AND e.State IN(N'Running',N'RetryWaiting',N'NeedsReview')
-                """);
-            Add(template, "@template", SqlDbType.NVarChar, data.Descriptor.TemplateId, 100);
-            if (Convert.ToInt32(await template.ExecuteScalarAsync(ct)) >= templateLimit) return false;
-        }
-        else if (templateLimit == 0) return false;
-
         await using var admission = Command(c, t, """
             SELECT e.ExecutionId,e.State,COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue'),
                 COALESCE(TRY_CONVERT(int,JSON_VALUE(r.PolicyJson,'$.BacklogLimit')),100)
@@ -329,7 +307,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
                     candidateState is "Running" or "RetryWaiting" or "NeedsReview"));
             }
         }
-        if (holdsSlot) return true;
+        if (holdsSlot) return templateLimit > 0;
         var decision = JobAdmission.Decide(candidates, jobLimit);
         if (decision.SkipReasons.TryGetValue(executionId, out var reason))
         {
@@ -346,7 +324,14 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             await SqlCommandOutcomes.SettleAsync(c, t, executionId, ct);
             return false;
         }
-        return decision.Admit.Contains(executionId);
+        if (!decision.Admit.Contains(executionId)) return false;
+        await using var template = Command(c, t, """
+            SELECT COUNT(*) FROM [workerdock].Executions e
+            JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
+            WHERE r.TemplateId=@template AND e.State IN(N'Running',N'RetryWaiting',N'NeedsReview')
+            """);
+        Add(template, "@template", SqlDbType.NVarChar, data.Descriptor.TemplateId, 100);
+        return Convert.ToInt32(await template.ExecuteScalarAsync(ct)) < templateLimit;
     }
 
     private static async ValueTask SaveAsync(DbConnection c, DbTransaction t, AttemptLifecycle data,

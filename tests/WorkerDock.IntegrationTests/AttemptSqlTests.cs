@@ -121,6 +121,84 @@ public sealed class AttemptSqlTests
         await SetState(reviewHolder, "Queued");
     }
 
+    [Fact]
+    public async Task Due_retrying_execution_keeps_its_template_slot_at_limit_one()
+    {
+        await using var fixture = new QuartzProcessFixture();
+        await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        await SqlCapacityTestSetup.ReadyAsync(options, "boot-a");
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
+        var job = new JobRevision(Guid.NewGuid(), 0, "retry-slot", "workerdock.http", "1.1.0", JsonSerializer.SerializeToElement(new { }), null,
+            new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, "Allow", 10, 5));
+        var actor = new ActorContext("operator", "Anonymous", Guid.NewGuid());
+        await commands.SaveAsync(job, null, actor, default);
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
+        var run = await commands.RunNowAsync(job.JobId, "retry-slot", actor, default);
+        var store = new SqlAttemptStore(options);
+        var first = await store.BeginAsync(run.TargetId, "boot-a", default);
+        var result = new TemplateResult("TransientFailure", "Busy", false, JsonSerializer.SerializeToElement(new { }), TimeSpan.FromSeconds(2));
+        await store.CompleteAsync(first.Lease!, new(result, "Completed", true, false), default);
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET AvailableAtUtc=SYSUTCDATETIME() WHERE ExecutionId='{run.TargetId}'; UPDATE [workerdock].TemplatePolicies SET EffectiveLimit=1 WHERE TemplateId=N'workerdock.http'");
+
+        var queue = new SqlExecutionQueue(options);
+        Assert.Contains(run.TargetId, await queue.ReadReadyAsync(10, default));
+        Assert.Equal("Started", (await store.BeginAsync(run.TargetId, "boot-a", default)).Decision);
+    }
+
+    [Fact]
+    public async Task Ready_batch_skips_full_and_queued_jobs_to_reach_runnable_job()
+    {
+        await using var fixture = new QuartzProcessFixture();
+        await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        await SqlCapacityTestSetup.ReadyAsync(options, "boot-a");
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
+        var actor = new ActorContext("operator", "Anonymous", Guid.NewGuid());
+        async Task<(Guid JobId, Guid ExecutionId)> CreateRun(string name, string overlap)
+        {
+            var jobId = Guid.NewGuid();
+            var job = new JobRevision(jobId, 0, name, "workerdock.http", "1.1.0", JsonSerializer.SerializeToElement(new { }), null,
+                new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, overlap, 10, 5));
+            await commands.SaveAsync(job, null, actor, default);
+            await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{jobId}'");
+            var run = await commands.RunNowAsync(jobId, name + "-request", actor, default);
+            return (jobId, run.TargetId);
+        }
+        async Task SetState(Guid executionId, string state) =>
+            await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET State=N'{state}' WHERE ExecutionId='{executionId}'");
+        var (queueJob, queueHolder) = await CreateRun("queue-blocked", "Queue");
+        var queueCandidate = await commands.RunNowAsync(queueJob, "queue-blocked-second", actor, default);
+        var (fullJob, fullHolder) = await CreateRun("full-blocked", "Allow");
+        var fullCandidate = await commands.RunNowAsync(fullJob, "full-blocked-second", actor, default);
+        var runnable = await CreateRun("runnable", "Allow");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET State=N'Running' WHERE ExecutionId IN('{queueHolder}','{fullHolder}'); UPDATE [workerdock].TemplatePolicies SET EffectiveLimit=10 WHERE TemplateId=N'workerdock.http'");
+
+        var ready = await new SqlExecutionQueue(options).ReadReadyAsync(1, default);
+
+        Assert.Equal(runnable.ExecutionId, Assert.Single(ready));
+        Assert.DoesNotContain(queueCandidate.TargetId, ready);
+        Assert.DoesNotContain(fullCandidate.TargetId, ready);
+
+        var (skipJob, skipHolder) = await CreateRun("skip-overlap", "Skip");
+        var skipCandidate = await commands.RunNowAsync(skipJob, "skip-overlap-second", actor, default);
+        await SetState(skipHolder, "Running");
+        var (sharedJob, sharedHolder) = await CreateRun("allow-shared", "Allow");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET ConcurrencyLimit=2 WHERE JobId='{sharedJob}'");
+        var sharedCandidate = await commands.RunNowAsync(sharedJob, "allow-shared-second", actor, default);
+        await SetState(sharedHolder, "Running");
+        var candidates = await new SqlExecutionQueue(options).ReadReadyAsync(100, default);
+        Assert.Contains(skipCandidate.TargetId, candidates);
+        Assert.Contains(sharedCandidate.TargetId, candidates);
+        Assert.Equal("Held", (await new SqlAttemptStore(options).BeginAsync(skipCandidate.TargetId, "boot-a", default)).Decision);
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{skipCandidate.TargetId}' AND State=N'Skipped'"));
+        Assert.Equal("Started", (await new SqlAttemptStore(options).BeginAsync(sharedCandidate.TargetId, "boot-a", default)).Decision);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
