@@ -14,6 +14,7 @@ public sealed record AttemptSignal(bool Owned, bool StopRequested, bool Force);
 public interface IAttemptStore
 {
     ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct);
+    ValueTask<AttemptStart> BeginAsync(Guid executionId, string workerBootId, CancellationToken ct);
     ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct);
     ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct);
     ValueTask CompleteAsync(AttemptLease lease, AttemptCompletion completion, CancellationToken ct);

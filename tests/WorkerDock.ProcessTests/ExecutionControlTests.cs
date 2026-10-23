@@ -264,6 +264,7 @@ public sealed class ExecutionControlTests
         public readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) => inner.BeginAsync(intent, workerBootId, ct);
+        public ValueTask<AttemptStart> BeginAsync(Guid executionId, string workerBootId, CancellationToken ct) => inner.BeginAsync(executionId, workerBootId, ct);
         public ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct) => inner.GetDescriptorAsync(lease, ct);
         public async ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct)
         {

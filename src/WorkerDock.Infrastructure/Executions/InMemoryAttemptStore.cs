@@ -53,6 +53,25 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
             Notify(); return result;
         }
     }, ct);
+    public ValueTask<AttemptStart> BeginAsync(Guid executionId, string workerBootId, CancellationToken ct) =>
+        capacity is null ? Run(() => BeginDirect(executionId, workerBootId, clock.GetUtcNow()), ct) : capacity.TransactAsync((state, now) =>
+        {
+            lock (gate)
+            {
+                if (executionId != data.Descriptor.ExecutionId) throw new WorkerDockException("ExecutionNotFound");
+                data.GateOpen = state.CanStart(workerBootId, data.Descriptor.TemplateId, now);
+                data.EffectiveCapacityRevision = state.EffectiveRevision;
+                var intent = data.Intent with { DeliveryId = Guid.NewGuid(), CapacityRevision = state.EffectiveRevision, PayloadDigest = "" };
+                data.Intent = intent with { PayloadDigest = intent.ComputeDigest() };
+                var result = data.Begin(data.Intent, workerBootId, now);
+                Notify(); return result;
+            }
+        }, ct);
+    private AttemptStart BeginDirect(Guid executionId, string workerBootId, DateTimeOffset now)
+    {
+        if (executionId != data.Descriptor.ExecutionId) throw new WorkerDockException("ExecutionNotFound");
+        return data.Begin(data.Intent, workerBootId, now);
+    }
     public async ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct)
     {
         await descriptorRefresh.WaitAsync(ct);

@@ -9,6 +9,43 @@ public sealed class JobAdmissionTests
 {
     private static AdmissionCandidate Work(string mode = "Allow", bool held = false, int backlog = 10) => new(Guid.NewGuid(), mode, backlog, held);
     [Fact]
+    public async Task Direct_claim_starts_the_current_execution_without_a_dispatch_intent()
+    {
+        var descriptor = AttemptLifecycleTests.Descriptor();
+        var store = new InMemoryAttemptStore(new AttemptLifecycleTests.Clock(), descriptor, AttemptLifecycleTests.Policy());
+
+        var started = await store.BeginAsync(descriptor.ExecutionId, "worker", default);
+
+        Assert.Equal("Started", started.Decision);
+        Assert.Equal(descriptor.ExecutionId, started.Lease?.ExecutionId);
+        Assert.Equal(1, started.Lease?.Ordinal);
+        Assert.Equal("AlreadyOwned", (await store.BeginAsync(descriptor.ExecutionId, "other-worker", default)).Decision);
+    }
+
+    [Fact]
+    public async Task Direct_in_memory_claim_uses_worker_stop_state_and_retry_due_gates()
+    {
+        var clock = new AttemptLifecycleTests.Clock();
+        var descriptor = AttemptLifecycleTests.Descriptor();
+        var store = new InMemoryAttemptStore(clock, descriptor, AttemptLifecycleTests.Policy());
+        await Assert.ThrowsAsync<WorkerDockException>(async () => await store.BeginAsync(descriptor.ExecutionId, "", default));
+
+        var first = (await store.BeginAsync(descriptor.ExecutionId, "worker", default)).Lease!;
+        await store.CompleteAsync(first, new(new TemplateResult("TransientFailure", "Busy", false,
+            JsonSerializer.SerializeToElement(new { }), TimeSpan.FromSeconds(5)), "Completed", true, false), default);
+        var retry = Assert.Single(store.Retries);
+        Assert.Equal("Held", (await store.BeginAsync(descriptor.ExecutionId, "worker", default)).Decision);
+        clock.Now = retry.DueUtc;
+        var retried = await store.BeginAsync(descriptor.ExecutionId, "worker", default);
+        Assert.Equal("Started", retried.Decision);
+
+        var stoppedDescriptor = AttemptLifecycleTests.Descriptor();
+        var stopped = new InMemoryAttemptStore(new AttemptLifecycleTests.Clock(), stoppedDescriptor, AttemptLifecycleTests.Policy());
+        await stopped.StopAsync(stoppedDescriptor.ExecutionId, false, "stop before claim", new ActorContext("operator", "Anonymous", Guid.NewGuid()), default);
+        Assert.Equal("Completed", (await stopped.BeginAsync(stoppedDescriptor.ExecutionId, "worker", default)).Decision);
+    }
+
+    [Fact]
     public void Large_backlog_limits_each_commit_and_eventually_admits_in_order()
     {
         var queue = Enumerable.Range(0, 25000).Select(_ => Work("Queue", backlog: 10000)).ToList();

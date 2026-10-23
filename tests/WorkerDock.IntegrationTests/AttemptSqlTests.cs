@@ -13,6 +13,114 @@ namespace WorkerDock.IntegrationTests;
 [Trait("Store", "Sql")]
 public sealed class AttemptSqlTests
 {
+    [Fact]
+    public async Task ConcurrentClaims_StartOneAttemptWithoutDispatchOutbox()
+    {
+        await using var fixture = new QuartzProcessFixture();
+        await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
+        var job = new JobRevision(Guid.NewGuid(), 0, "direct-claim", "workerdock.http", "1.1.0", JsonSerializer.SerializeToElement(new { }), null,
+            new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, "Queue", 100, 5));
+        var actor = new ActorContext("operator", "Anonymous", Guid.NewGuid());
+        await commands.SaveAsync(job, null, actor, default);
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
+        await SqlCapacityTestSetup.ReadyAsync(options, "boot-a", "boot-b");
+        var run = await commands.RunNowAsync(job.JobId, "direct-claim", actor, default);
+        await fixture.Database.ExecuteAsync($"DELETE FROM [workerdock].JobPermits WHERE ExecutionId='{run.TargetId}'; DELETE FROM [workerdock].Outbox WHERE EntityId='{run.TargetId}' AND EventType=N'ExecutionDispatch';");
+
+        var queue = new SqlExecutionQueue(options);
+        Assert.Contains(run.TargetId, await queue.ReadReadyAsync(10, default));
+        var first = new SqlAttemptStore(options);
+        var second = new SqlAttemptStore(options);
+        var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task<AttemptStart> Claim(SqlAttemptStore store, string boot)
+        {
+            await barrier.Task;
+            return await store.BeginAsync(run.TargetId, boot, default);
+        }
+        var claims = new[] { Claim(first, "boot-a"), Claim(second, "boot-b") };
+        barrier.SetResult();
+        await Task.WhenAll(claims);
+
+        Assert.Single(claims.Select(x => x.Result), x => x.Decision == "Started");
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Attempts WHERE ExecutionId='{run.TargetId}'"));
+    }
+
+    [Fact]
+    public async Task Direct_claim_rechecks_job_execution_template_due_and_capacity_gates()
+    {
+        await using var fixture = new QuartzProcessFixture();
+        await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        await SqlCapacityTestSetup.ReadyAsync(options, "boot-a");
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
+        var actor = new ActorContext("operator", "Anonymous", Guid.NewGuid());
+        var store = new SqlAttemptStore(options);
+        var queue = new SqlExecutionQueue(options);
+
+        async Task<(Guid JobId, Guid ExecutionId)> CreateRun(string name, string overlap = "Allow")
+        {
+            var jobId = Guid.NewGuid();
+            var job = new JobRevision(jobId, 0, name, "workerdock.http", "1.1.0", JsonSerializer.SerializeToElement(new { }), null,
+                new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, overlap, 10, 5));
+            await commands.SaveAsync(job, null, actor, default);
+            await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{jobId}'");
+            var run = await commands.RunNowAsync(jobId, name + "-request", actor, default);
+            return (jobId, run.TargetId);
+        }
+        async Task SetState(Guid executionId, string state) =>
+            await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET State=N'{state}' WHERE ExecutionId='{executionId}'");
+        async Task AssertHeld(Guid executionId) =>
+            Assert.Equal("Held", (await store.BeginAsync(executionId, "boot-a", default)).Decision);
+
+        var disabled = await CreateRun("disabled");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=0 WHERE JobId='{disabled.JobId}'");
+        await AssertHeld(disabled.ExecutionId);
+
+        var archived = await CreateRun("archived");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Archived=1 WHERE JobId='{archived.JobId}'");
+        await AssertHeld(archived.ExecutionId);
+
+        var stopped = await CreateRun("stopped");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET StopRequested=1 WHERE ExecutionId='{stopped.ExecutionId}'");
+        await AssertHeld(stopped.ExecutionId);
+
+        var unavailable = await CreateRun("unavailable-template");
+        await fixture.Database.ExecuteAsync("UPDATE [workerdock].TemplateCatalog SET Enabled=0 WHERE TemplateId=N'workerdock.http' AND TemplateVersion=N'1.1.0'");
+        await AssertHeld(unavailable.ExecutionId);
+        await fixture.Database.ExecuteAsync("UPDATE [workerdock].TemplateCatalog SET Enabled=1 WHERE TemplateId=N'workerdock.http' AND TemplateVersion=N'1.1.0'");
+
+        var future = await CreateRun("future");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET AvailableAtUtc=DATEADD(hour,1,SYSUTCDATETIME()) WHERE ExecutionId='{future.ExecutionId}'");
+        Assert.DoesNotContain(future.ExecutionId, await queue.ReadReadyAsync(100, default));
+        await AssertHeld(future.ExecutionId);
+
+        var (templateHolderJob, templateHolder) = await CreateRun("template-holder");
+        var templateCandidate = await CreateRun("template-candidate");
+        await SetState(templateHolder, "Running");
+        await fixture.Database.ExecuteAsync("UPDATE [workerdock].TemplatePolicies SET EffectiveLimit=1 WHERE TemplateId=N'workerdock.http'");
+        await AssertHeld(templateCandidate.ExecutionId);
+        await fixture.Database.ExecuteAsync("UPDATE [workerdock].TemplatePolicies SET EffectiveLimit=3 WHERE TemplateId=N'workerdock.http'");
+        await SetState(templateHolder, "Queued");
+
+        var (jobHolderJob, jobHolder) = await CreateRun("job-holder", "Allow");
+        var jobCandidate = await commands.RunNowAsync(jobHolderJob, "job-holder-second", actor, default);
+        await SetState(jobHolder, "Running");
+        await AssertHeld(jobCandidate.TargetId);
+        await SetState(jobHolder, "Queued");
+
+        var (reviewJob, reviewHolder) = await CreateRun("review-holder", "Queue");
+        var reviewCandidate = await commands.RunNowAsync(reviewJob, "review-holder-second", actor, default);
+        await SetState(reviewHolder, "NeedsReview");
+        await AssertHeld(reviewCandidate.TargetId);
+        await SetState(reviewHolder, "Queued");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
