@@ -258,7 +258,10 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                 var payload = reader.GetString(2);
                 using var document = JsonDocument.Parse(payload);
                 jsonWriter.WriteStartObject(); jsonWriter.WriteString("kind", reader.GetString(0)); jsonWriter.WriteString("id", reader.GetGuid(1));
-                jsonWriter.WritePropertyName("record"); document.RootElement.WriteTo(jsonWriter); jsonWriter.WriteEndObject(); jsonWriter.Flush();
+                jsonWriter.WritePropertyName("record");
+                if (reader.GetString(0) == "OperationalEvent") WriteOperationalEventRecord(jsonWriter, document.RootElement);
+                else document.RootElement.WriteTo(jsonWriter);
+                jsonWriter.WriteEndObject(); jsonWriter.Flush();
                 stream.WriteByte((byte)'\n');
                 if (stream.Length > 268_435_456) throw new InvalidDataException("Archive batch exceeds the configured size limit.");
             }
@@ -267,6 +270,46 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
         }
         catch { await stream.DisposeAsync(); throw; }
     }, ct);
+
+    private static void WriteOperationalEventRecord(Utf8JsonWriter writer, JsonElement record)
+    {
+        writer.WriteStartObject();
+        foreach (var property in record.EnumerateObject())
+        {
+            if (property.NameEquals("SafeFields"))
+            {
+                writer.WritePropertyName(property.Name);
+                WriteSafeOperationalFields(writer, property.Value);
+            }
+            else property.WriteTo(writer);
+        }
+        writer.WriteEndObject();
+    }
+
+    private static void WriteSafeOperationalFields(Utf8JsonWriter writer, JsonElement fields)
+    {
+        writer.WriteStartObject();
+        if (fields.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var field in fields.EnumerateObject())
+            {
+                if (field.Value.ValueKind != JsonValueKind.String) continue;
+                var value = field.Value.GetString();
+                if (value is null || !IsSafeOperationalField(field.Name, value)) continue;
+                writer.WriteString(field.Name, value);
+            }
+        }
+        writer.WriteEndObject();
+    }
+
+    private static bool IsSafeOperationalField(string name, string value) => name switch
+    {
+        "executionId" or "attemptId" or "correlationId" => Guid.TryParseExact(value, "D", out _),
+        "durationMs" or "affectedRows" => long.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number) && number >= 0,
+        "outcome" => value is "Success" or "TransientFailure" or "PermanentFailure",
+        "safeCode" => value is "Success" or "SecretUnavailable" or "TemplateCancelled" or "TemplateExecutionFailed" or "TemplateConfigurationInvalid" or "ConnectivityFailed" or "AuthenticationFailed" or "DestinationUnavailable" or "CommandFailed" or "Timeout",
+        _ => false
+    };
 
     private async ValueTask MarkArchiveBatchFailedAsync(Guid batchId, CancellationToken ct)
     {

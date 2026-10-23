@@ -2,6 +2,8 @@ using WorkerDock.Application.Common;
 using WorkerDock.Application.Observability;
 using WorkerDock.Infrastructure.Observability;
 using WorkerDock.Infrastructure.Retention;
+using Microsoft.Data.SqlClient;
+using System.IO.Compression;
 
 namespace WorkerDock.IntegrationTests;
 
@@ -113,6 +115,57 @@ public sealed class RetentionSqlTests
     }
 
     [Fact]
+    public async Task RetentionArchive_ExcludesSecretFieldsFromOperationalEventRecords()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        await database.ApplyLatestSchemaAsync();
+
+        var batchId = Guid.NewGuid();
+        var eventId = Guid.NewGuid();
+        var executionId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var secret = "operational-archive-secret-sentinel";
+        await database.ExecuteAsync($$"""
+            UPDATE [workerdock].TenantSettings SET LogRetentionDays=1,ExecutionRetentionDays=365,AuditRetentionDays=365,
+                ArchiveBeforeDelete=1,ArchiveRetentionDays=90,RetentionVersion=RetentionVersion+1;
+            UPDATE [workerdock].RetentionPolicy SET LogDays=1,ExecutionDays=365,AuditDays=365,ArchiveBeforeDelete=1,ArchiveDays=90 WHERE PolicyId=1;
+            INSERT [workerdock].Jobs(JobId,CurrentRevision,Enabled,Archived,ConcurrencyLimit) VALUES('{{jobId}}',1,0,0,1);
+            INSERT [workerdock].JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc)
+            VALUES('{{jobId}}',1,N'archive-secret',N'workerdock.http',N'1.1.0',N'{}',NULL,N'{}',SYSUTCDATETIME());
+            INSERT [workerdock].Executions(ExecutionId,JobId,JobRevision,TriggerKind,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc,AggregatedAtUtc)
+            VALUES('{{executionId}}','{{jobId}}',1,N'Manual',N'archive-secret',N'Succeeded',N'Known',SYSUTCDATETIME(),NEWID(),DATEADD(day,-10,SYSUTCDATETIME()),DATEADD(day,-9,SYSUTCDATETIME()));
+            INSERT [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
+            VALUES('{{eventId}}',N'Execution','{{executionId}}',N'Handler',1,DATEADD(day,-5,SYSUTCDATETIME()),N'TemplateCompleted',N'{"password":"operational-archive-secret-sentinel","outcome":"Success"}');
+            INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc)
+            VALUES('{{batchId}}',N'{{batchId:N}}.archive.gz',REPLICATE('0',64),1,SYSUTCDATETIME(),DATEADD(day,-1,SYSUTCDATETIME()),N'Writing',DATEADD(minute,-1,SYSUTCDATETIME()));
+            INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId) VALUES('{{batchId}}',N'OperationalEvent','{{eventId}}');
+            """);
+
+        var archiveRoot = Path.Combine(Path.GetTempPath(), "workerdock-secret-archive-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(archiveRoot);
+        try
+        {
+            var service = new SqlRetentionService(new(database.ConnectionString, database.InstanceId), archiveRoot);
+            await service.RunBatchAsync(DateTimeOffset.UtcNow, 100, default);
+
+            var relativePath = batchId.ToString("N") + ".archive.gz";
+            var archivePath = Path.Combine(archiveRoot, relativePath);
+            await using var compressed = File.OpenRead(archivePath);
+            await using var gzip = new GZipStream(compressed, CompressionMode.Decompress);
+            using var reader = new StreamReader(gzip);
+            var archiveRecords = await reader.ReadToEndAsync();
+
+            Assert.DoesNotContain(secret, archiveRecords, StringComparison.Ordinal);
+            Assert.Contains("TemplateCompleted", archiveRecords, StringComparison.Ordinal);
+            var sha256 = await ReadArchiveHashAsync(database, batchId);
+            Assert.True(await new ArchiveWriter(archiveRoot).VerifyAsync(
+                new(batchId, relativePath, sha256, 1, DateTimeOffset.UtcNow), default));
+        }
+        finally { Directory.Delete(archiveRoot, true); }
+    }
+
+    [Fact]
     public async Task MetricAggregation_RecordsExecutionTotals()
     {
         await using var database = new SqlDatabaseFixture();
@@ -154,8 +207,20 @@ public sealed class RetentionSqlTests
         var sql = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "WorkerDock.Infrastructure", "Retention", "SqlRetentionService.cs"));
         Assert.Contains("b.PurgedRowCount", sql, StringComparison.Ordinal);
         Assert.Contains("SET PurgedRowCount=PurgedRowCount+@purged", sql, StringComparison.Ordinal);
+        Assert.Contains("WriteSafeOperationalFields(writer, property.Value)", sql, StringComparison.Ordinal);
+        Assert.Contains("private static bool IsSafeOperationalField", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("SUM(TRY_CONVERT(bigint,JSON_VALUE(a.DetailsJson,'$.purgedRowCount'))) FROM [workerdock].AuditEvents", sql, StringComparison.Ordinal);
     }
 
     private static async Task<bool> ExistsAsync(SqlDatabaseFixture database, string sql) => await database.ScalarAsync(sql) == 1;
+
+    private static async Task<string> ReadArchiveHashAsync(SqlDatabaseFixture database, Guid batchId)
+    {
+        await using var connection = new SqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Sha256 FROM [workerdock].ArchiveBatches WHERE BatchId=@batch";
+        command.Parameters.AddWithValue("@batch", batchId);
+        return Convert.ToString(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture)!.Trim();
+    }
 }
