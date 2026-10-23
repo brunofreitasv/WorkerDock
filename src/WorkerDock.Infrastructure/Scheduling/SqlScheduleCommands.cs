@@ -1,7 +1,5 @@
 using System.Data;
 using System.Data.Common;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
@@ -84,7 +82,6 @@ public sealed class SqlScheduleCommands(TenantDatabaseOptions options, ISchedule
                     : "UPDATE [workerdock].Schedules SET Revision=@revision,Kind=@kind,Cron=@cron,ZoneId=@zone,OneTimeUtc=@once,ActivatedUtc=@activated,Paused=@paused,PausedAtUtc=@pausedAt,Removed=0,CursorUtc=@activated,CatchUpRecoveryThroughUtc=NULL,CatchUpRecoveryCreated=0,MissedMode=@mode,LatenessToleranceMs=@tolerance,CatchUpCount=@count,CatchUpAgeMs=@age,ZoneRulesFingerprint=@fingerprint WHERE JobId=@job";
                 await using (var write = Command(connection, transaction, sql)) { Bind(write, saved, jobId, policy, fingerprint); if (revision > 1) { Add(write, "@paused", SqlDbType.Bit, paused); Add(write, "@pausedAt", SqlDbType.DateTime2, pausedAt ?? (object)DBNull.Value); } await write.ExecuteNonQueryAsync(token); }
                 await using (var bump = Command(connection, transaction, "UPDATE [workerdock].Jobs SET CurrentRevision=CurrentRevision WHERE JobId=@job AND Version=@version")) { Add(bump, "@job", SqlDbType.UniqueIdentifier, jobId); Add(bump, "@version", SqlDbType.Binary, version, 8); if (await bump.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion"); }
-                await OutboxAsync(connection, transaction, scheduleId, revision, JsonSerializer.Serialize(new { scheduleId, scheduleRevision = revision }), token);
                 var receipt = new CommandReceipt(Guid.NewGuid(), scheduleId, "Pending"); await CommandReceiptAsync(connection, transaction, receipt, "ScheduleSave", token);
                 await AuditAsync(connection, transaction, "ScheduleSaved", scheduleId, revision - 1, revision, actor, token); return receipt;
             }, ct);
@@ -108,7 +105,6 @@ public sealed class SqlScheduleCommands(TenantDatabaseOptions options, ISchedule
                 if (!version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
                 await using (var remove = Command(connection, transaction, "UPDATE [workerdock].Schedules SET Removed=1,Revision=@revision WHERE JobId=@job")) { Add(remove, "@job", SqlDbType.UniqueIdentifier, jobId); Add(remove, "@revision", SqlDbType.BigInt, revision); await remove.ExecuteNonQueryAsync(token); }
                 await using (var bump = Command(connection, transaction, "UPDATE [workerdock].Jobs SET CurrentRevision=CurrentRevision WHERE JobId=@job AND Version=@version")) { Add(bump, "@job", SqlDbType.UniqueIdentifier, jobId); Add(bump, "@version", SqlDbType.Binary, version, 8); if (await bump.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion"); }
-                await OutboxAsync(connection, transaction, id, revision, JsonSerializer.Serialize(new { scheduleId = id, scheduleRevision = revision, deleted = true }), token);
                 var receipt = new CommandReceipt(Guid.NewGuid(), id, "Pending"); await CommandReceiptAsync(connection, transaction, receipt, "ScheduleDelete", token);
                 await AuditAsync(connection, transaction, "ScheduleDeleted", id, revision - 1, revision, actor, token); return receipt;
             }, ct);
@@ -116,61 +112,8 @@ public sealed class SqlScheduleCommands(TenantDatabaseOptions options, ISchedule
         catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
     }
 
-    public async ValueTask<int> ReconcileZoneRuleChangesAsync(CancellationToken ct)
-    {
-        try
-        {
-            return await new BusinessTransaction(options).RunAsync(async (connection, transaction, token) =>
-            {
-                await CheckInstanceAsync(connection, transaction, token);
-                Guid? lastScheduleId;
-                await using (var state = Command(connection, transaction, "SELECT LastScheduleId FROM [workerdock].ScheduleRuleScanState WITH(UPDLOCK,HOLDLOCK) WHERE ScanId=1"))
-                { var value = await state.ExecuteScalarAsync(token); lastScheduleId = value is null or DBNull ? null : (Guid)value; }
-                List<(Guid ScheduleId, Guid JobId, long Revision, string ZoneId, string Fingerprint, byte[] JobVersion)> rows = [];
-                await using (var scan = Command(connection, transaction, "SELECT TOP (100) s.ScheduleId,s.JobId,s.Revision,s.ZoneId,s.ZoneRulesFingerprint,j.Version FROM [workerdock].Schedules s WITH(UPDLOCK,READPAST,ROWLOCK) JOIN [workerdock].Jobs j ON j.JobId=s.JobId WHERE s.Removed=0 AND (@last IS NULL OR s.ScheduleId>@last) ORDER BY s.ScheduleId"))
-                {
-                Add(scan, "@last", SqlDbType.UniqueIdentifier, lastScheduleId ?? (object)DBNull.Value);
-                await using (var reader = await scan.ExecuteReaderAsync(token))
-                    while (await reader.ReadAsync(token)) rows.Add((reader.GetGuid(0), reader.GetGuid(1), reader.GetInt64(2), reader.GetString(3), reader.GetString(4), reader.GetFieldValue<byte[]>(5)));
-                }
-                if (rows.Count == 0 && lastScheduleId is not null)
-                {
-                    await using var reset = Command(connection, transaction, "UPDATE [workerdock].ScheduleRuleScanState SET LastScheduleId=NULL WHERE ScanId=1"); await reset.ExecuteNonQueryAsync(token);
-                    await using var scan = Command(connection, transaction, "SELECT TOP (100) s.ScheduleId,s.JobId,s.Revision,s.ZoneId,s.ZoneRulesFingerprint,j.Version FROM [workerdock].Schedules s WITH(UPDLOCK,READPAST,ROWLOCK) JOIN [workerdock].Jobs j ON j.JobId=s.JobId WHERE s.Removed=0 ORDER BY s.ScheduleId");
-                    await using var reader = await scan.ExecuteReaderAsync(token);
-                    while (await reader.ReadAsync(token)) rows.Add((reader.GetGuid(0), reader.GetGuid(1), reader.GetInt64(2), reader.GetString(3), reader.GetString(4), reader.GetFieldValue<byte[]>(5)));
-                }
-                var nextScanId = rows.Count == 100 ? rows[^1].ScheduleId : (Guid?)null;
-                await using (var advance = Command(connection, transaction, "UPDATE [workerdock].ScheduleRuleScanState SET LastScheduleId=@last WHERE ScanId=1"))
-                { Add(advance, "@last", SqlDbType.UniqueIdentifier, nextScanId ?? (object)DBNull.Value); await advance.ExecuteNonQueryAsync(token); }
-
-                var changed = 0;
-                foreach (var row in rows)
-                {
-                    token.ThrowIfCancellationRequested();
-                    var current = rules.GetFingerprint(row.ZoneId);
-                    if (string.Equals(current, row.Fingerprint, StringComparison.Ordinal)) continue;
-                    var revision = checked(row.Revision + 1);
-                    await using (var update = Command(connection, transaction, "UPDATE [workerdock].Schedules SET Revision=@revision,ZoneRulesFingerprint=@fingerprint WHERE ScheduleId=@schedule AND Revision=@oldRevision AND Removed=0"))
-                    {
-                        Add(update, "@revision", SqlDbType.BigInt, revision); Add(update, "@fingerprint", SqlDbType.Char, current, 64); Add(update, "@schedule", SqlDbType.UniqueIdentifier, row.ScheduleId); Add(update, "@oldRevision", SqlDbType.BigInt, row.Revision);
-                        if (await update.ExecuteNonQueryAsync(token) != 1) continue;
-                    }
-                    await using (var bump = Command(connection, transaction, "UPDATE [workerdock].Jobs SET CurrentRevision=CurrentRevision WHERE JobId=@job AND Version=@version"))
-                    {
-                        Add(bump, "@job", SqlDbType.UniqueIdentifier, row.JobId); Add(bump, "@version", SqlDbType.Binary, row.JobVersion, 8);
-                        if (await bump.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion");
-                    }
-                    await OutboxAsync(connection, transaction, row.ScheduleId, revision, JsonSerializer.Serialize(new { scheduleId = row.ScheduleId, scheduleRevision = revision }), token);
-                    var systemActor = new ActorContext("system:timezone-rules", "System", row.ScheduleId);
-                    await AuditAsync(connection, transaction, "ScheduleZoneRulesChanged", row.ScheduleId, row.Revision, revision, systemActor, token);
-                    changed++;
-                }
-                return changed;
-            }, ct);
-        }
-        catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
-    }
+    public ValueTask<int> ReconcileZoneRuleChangesAsync(CancellationToken ct) =>
+        new SqlScheduleSweep(options, new OccurrenceWriter(options, evaluator), rules).RefreshZoneRulesAsync(100, ct);
 
     private static void Bind(DbCommand c, ScheduleDefinition s, Guid job, MissedWorkPolicy p, string fingerprint)
     {
@@ -180,14 +123,13 @@ public sealed class SqlScheduleCommands(TenantDatabaseOptions options, ISchedule
         Add(c,"@mode",SqlDbType.NVarChar,p.Mode,16); Add(c,"@tolerance",SqlDbType.BigInt,checked((long)p.LatenessTolerance.TotalMilliseconds)); Add(c,"@count",SqlDbType.Int,p.CatchUpCount);
         Add(c,"@age",SqlDbType.BigInt,checked((long)p.CatchUpAge.TotalMilliseconds)); Add(c,"@fingerprint",SqlDbType.Char,fingerprint,64);
     }
-    private static async ValueTask OutboxAsync(DbConnection c, DbTransaction t, Guid id, long revision, string payload, CancellationToken ct)
-    {
-        var digest = WorkerDock.Application.Dispatch.ProjectionEnvelope.ScheduleDigest(id,revision);
-        await using var cmd = Command(c,t,"INSERT [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState) VALUES(@event,N'ScheduleProjection',@payload,SYSUTCDATETIME(),SYSUTCDATETIME(),1,@entity,@revision,@digest,N'Pending')");
-        Add(cmd,"@event",SqlDbType.UniqueIdentifier,Guid.NewGuid()); Add(cmd,"@payload",SqlDbType.NVarChar,payload,-1); Add(cmd,"@entity",SqlDbType.UniqueIdentifier,id); Add(cmd,"@revision",SqlDbType.BigInt,revision); Add(cmd,"@digest",SqlDbType.Char,digest,64); await cmd.ExecuteNonQueryAsync(ct);
-    }
     private static async ValueTask CommandReceiptAsync(DbConnection c, DbTransaction t, CommandReceipt receipt, string kind, CancellationToken ct)
-    { await using var cmd=Command(c,t,"INSERT [workerdock].Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc) VALUES(@id,@target,@kind,@state,SYSUTCDATETIME())"); Add(cmd,"@id",SqlDbType.UniqueIdentifier,receipt.CommandId); Add(cmd,"@target",SqlDbType.UniqueIdentifier,receipt.TargetId); Add(cmd,"@kind",SqlDbType.NVarChar,kind,40); Add(cmd,"@state",SqlDbType.NVarChar,receipt.State,20); await cmd.ExecuteNonQueryAsync(ct); }
+    {
+        await using var cmd = Command(c, t, "INSERT [workerdock].Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc) VALUES(@id,@target,@kind,@state,SYSUTCDATETIME())");
+        Add(cmd, "@id", SqlDbType.UniqueIdentifier, receipt.CommandId); Add(cmd, "@target", SqlDbType.UniqueIdentifier, receipt.TargetId);
+        Add(cmd, "@kind", SqlDbType.NVarChar, kind, 40); Add(cmd, "@state", SqlDbType.NVarChar, receipt.State, 20);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
     private static async ValueTask AuditAsync(DbConnection c, DbTransaction t, string kind, Guid target, long before, long after, ActorContext actor, CancellationToken ct)
     { await using var cmd=Command(c,t,"INSERT [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson) VALUES(@id,@kind,@subject,@mode,@correlation,SYSUTCDATETIME(),@details)"); Add(cmd,"@id",SqlDbType.UniqueIdentifier,Guid.NewGuid()); Add(cmd,"@kind",SqlDbType.NVarChar,kind,100); Add(cmd,"@subject",SqlDbType.NVarChar,actor.Subject,300); Add(cmd,"@mode",SqlDbType.NVarChar,actor.AuthenticationMode,40); Add(cmd,"@correlation",SqlDbType.UniqueIdentifier,actor.CorrelationId); Add(cmd,"@details",SqlDbType.NVarChar,JsonSerializer.Serialize(new { targetId=target,beforeRevision=before,afterRevision=after,outcome="Applied" }),4000); await cmd.ExecuteNonQueryAsync(ct); }
     private async ValueTask CheckInstanceAsync(DbConnection c, DbTransaction? t, CancellationToken ct) { await using var cmd=c.CreateCommand(); cmd.Transaction=t; cmd.CommandText="SELECT InstanceId FROM [workerdock].TenantSettings"; if ((Guid?)await cmd.ExecuteScalarAsync(ct)!=options.InstanceId) throw new WorkerDockException("TenantInstanceMismatch"); }
