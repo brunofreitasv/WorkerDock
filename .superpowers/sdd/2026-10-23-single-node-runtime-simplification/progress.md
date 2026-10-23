@@ -50,6 +50,6 @@ There are pre-existing uncommitted changes across application, tests, docs, fron
 | 5 | complete; runner intentionally awaits Task 6 production caller; full build passed; access tests passed; SQL delivery unverified without `WORKERDOCK_TEST_SQL` | `ecebff8` |
 | 6 | complete; fresh review approved; Worker build and focused process tests passed; SQL health remains unverified without `WORKERDOCK_TEST_SQL` | `20e4b77` |
 | 7 | complete; fresh review approved; solution and tenant frontend builds passed; focused monitoring tests passed; SQL runtime unverified without `WORKERDOCK_TEST_SQL`; remaining legacy schema cleanup is assigned to Tasks 8/9 | `b237f00` |
-| 8 | pending | |
+| 8 | complete; typed operational timeline, tenant-owned retention policy and rule-owned alert cursor implemented; build passed; static guards passed; SQL-backed behavior remains unverified without `WORKERDOCK_TEST_SQL` | pending commit |
 | 9 | pending | |
 | 10 | pending | |

@@ -1,4 +1,6 @@
 using Microsoft.Data.SqlClient;
+using System.Text.Json;
+using WorkerDock.Infrastructure.Migrations;
 namespace WorkerDock.IntegrationTests;
 public sealed class SqlDatabaseFixture : IAsyncDisposable
 {
@@ -44,6 +46,12 @@ public sealed class SqlDatabaseFixture : IAsyncDisposable
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+    public async Task ApplyLatestSchemaAsync()
+    {
+        using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(ScriptsRoot, "tenant", "manifest.json")));
+        var target = manifest.RootElement.EnumerateArray().Last().GetProperty("id").GetString()!;
+        await new MigrationRunner(ConnectionString, InstanceId, ScriptsRoot).ApplyAsync("tenant", target, CancellationToken.None);
     }
     public async ValueTask DisposeAsync()
     {

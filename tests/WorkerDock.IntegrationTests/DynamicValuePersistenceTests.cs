@@ -20,8 +20,7 @@ public sealed class DynamicValuePersistenceTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
-        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        await database.ApplyLatestSchemaAsync();
         var now = DateTimeOffset.UtcNow;
         var jobId = Guid.NewGuid();
         var executionId = Guid.NewGuid();
@@ -38,6 +37,7 @@ public sealed class DynamicValuePersistenceTests
             INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc)
             VALUES('{{batchId}}',N'{{batchId:N}}.archive.gz',REPLICATE('0',64),1,SYSUTCDATETIME(),DATEADD(day,-365,SYSUTCDATETIME()),N'Writing',DATEADD(minute,-1,SYSUTCDATETIME()));
             INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId) VALUES('{{batchId}}',N'Execution','{{executionId}}');
+            UPDATE [workerdock].TenantSettings SET ArchiveBeforeDelete=1,ArchiveRetentionDays=90,ExecutionRetentionDays=1,RetentionVersion=RetentionVersion+1;
             UPDATE [workerdock].RetentionPolicy SET ArchiveBeforeDelete=1,ArchiveDays=90,ExecutionDays=1 WHERE PolicyId=1;
             """);
         var archiveRoot = Path.Combine(Path.GetTempPath(), "workerdock-task6-" + Guid.NewGuid().ToString("N"));

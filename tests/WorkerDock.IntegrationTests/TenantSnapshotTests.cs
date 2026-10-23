@@ -66,7 +66,7 @@ public sealed class TenantSnapshotTests
     [Theory]
     [InlineData("grant", "permissions", "REVOKE SELECT ON workerdock.TenantSettings FROM WorkerDockRuntime;")]
     [InlineData("trigger", "modules", "ALTER TRIGGER workerdock.AuditEvents_AppendOnly ON workerdock.AuditEvents AFTER UPDATE, DELETE AS BEGIN SET NOCOUNT ON; END;")]
-    [InlineData("seed", "data:RetentionPolicy", "UPDATE workerdock.RetentionPolicy SET LogDays=31 WHERE PolicyId=1;")]
+    [InlineData("seed", "data:TenantSettings", "UPDATE workerdock.TenantSettings SET LogRetentionDays=31 WHERE InstanceId=(SELECT InstanceId FROM workerdock.TenantSettings);")]
     [InlineData("history", "data:SchemaHistory", "UPDATE workerdock.SchemaHistory SET UpChecksum=REPLICATE('0',64) WHERE MigrationId=N'0001_bootstrap';")]
     public async Task Snapshot_drift_is_detected(string drift, string section, string mutation)
     {

@@ -17,7 +17,7 @@ public sealed class SqlAlertRules(TenantDatabaseOptions options) : IAlertRules, 
 
     public ValueTask<IReadOnlyList<AlertRuleEditorDto>> ListAsync(CancellationToken ct) => RunAsync<IReadOnlyList<AlertRuleEditorDto>>(async (connection, transaction, token) =>
     {
-        await using var command = Command(connection, transaction, "SELECT TOP(200) RuleId,Name,Condition,Threshold,WindowSeconds,GraceSeconds,ReminderSeconds,SinkId,Enabled,Version FROM [workerdock].AlertRules ORDER BY Name,RuleId");
+        await using var command = Command(connection, transaction, "SELECT TOP(200) RuleId,Name,Condition,Threshold,WindowSeconds,GraceSeconds,ReminderSeconds,SinkId,Enabled,CONVERT(binary(8),CurrentRevision) FROM [workerdock].AlertRules ORDER BY Name,RuleId");
         await using var reader = await command.ExecuteReaderAsync(token);
         var result = new List<AlertRuleEditorDto>();
         while (await reader.ReadAsync(token)) result.Add(ReadRule(reader));
@@ -26,7 +26,7 @@ public sealed class SqlAlertRules(TenantDatabaseOptions options) : IAlertRules, 
 
     public ValueTask<AlertRuleEditorDto> GetAsync(Guid id, CancellationToken ct) => RunAsync(async (connection, transaction, token) =>
     {
-        await using var command = Command(connection, transaction, "SELECT RuleId,Name,Condition,Threshold,WindowSeconds,GraceSeconds,ReminderSeconds,SinkId,Enabled,Version FROM [workerdock].AlertRules WHERE RuleId=@id");
+        await using var command = Command(connection, transaction, "SELECT RuleId,Name,Condition,Threshold,WindowSeconds,GraceSeconds,ReminderSeconds,SinkId,Enabled,CONVERT(binary(8),CurrentRevision) FROM [workerdock].AlertRules WHERE RuleId=@id");
         Add(command, "@id", SqlDbType.UniqueIdentifier, id);
         await using var reader = await command.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token)) throw new WorkerDockException("AlertRuleNotFound");
@@ -54,7 +54,7 @@ public sealed class SqlAlertRules(TenantDatabaseOptions options) : IAlertRules, 
             }
             else
             {
-                await using var update = Command(connection, transaction, "UPDATE [workerdock].AlertRules SET Name=@name,Condition=@condition,Threshold=@threshold,WindowSeconds=@window,GraceSeconds=@grace,ReminderSeconds=@reminder,SinkId=@sink,Enabled=@enabled,CurrentRevision=@revision WHERE RuleId=@id AND Version=@version");
+                await using var update = Command(connection, transaction, "UPDATE [workerdock].AlertRules SET Name=@name,Condition=@condition,Threshold=@threshold,WindowSeconds=@window,GraceSeconds=@grace,ReminderSeconds=@reminder,SinkId=@sink,Enabled=@enabled,CurrentRevision=@revision WHERE RuleId=@id AND CurrentRevision=CONVERT(bigint,@version)");
                 BindRule(update, rule, revision);
                 Add(update, "@version", SqlDbType.Binary, expectedVersion!, 8);
                 if (await update.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion");
@@ -148,7 +148,7 @@ public sealed class SqlAlertRules(TenantDatabaseOptions options) : IAlertRules, 
 
     private static async ValueTask<(long Revision, byte[] Version)?> ReadRuleRowAsync(DbConnection connection, DbTransaction transaction, Guid id, CancellationToken ct)
     {
-        await using var command = Command(connection, transaction, "SELECT CurrentRevision,Version FROM [workerdock].AlertRules WHERE RuleId=@id"); Add(command, "@id", SqlDbType.UniqueIdentifier, id);
+        await using var command = Command(connection, transaction, "SELECT CurrentRevision,CONVERT(binary(8),CurrentRevision) FROM [workerdock].AlertRules WHERE RuleId=@id"); Add(command, "@id", SqlDbType.UniqueIdentifier, id);
         await using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? (reader.GetInt64(0), reader.GetFieldValue<byte[]>(1)) : null;
     }

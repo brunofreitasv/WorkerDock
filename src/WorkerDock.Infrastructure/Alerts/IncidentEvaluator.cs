@@ -37,20 +37,13 @@ public sealed class IncidentEvaluator(TenantDatabaseOptions options) : IAlertEva
                     var hasMoreSubjects = rule.Enabled && observations.Count == limit;
                     var lastSubject = hasMoreSubjects ? observations.Keys.Order(StringComparer.Ordinal).Last() : null;
                     await using var updateCursor = Command(sqlConnection, sqlTransaction,
-                        "UPDATE [workerdock].AlertEvaluationState SET LastEvaluatedAtUtc=@now,LastRuleId=@rule,LastSubjectKey=@subject WHERE StateId=1");
+                        "UPDATE [workerdock].AlertRules SET LastEvaluatedAtUtc=SYSUTCDATETIME(),LastSubjectKey=@subject WHERE RuleId=@rule");
                     Add(updateCursor, "@now", SqlDbType.DateTime2, now);
                     Add(updateCursor, "@rule", SqlDbType.UniqueIdentifier, rule.Id);
                     Add(updateCursor, "@subject", SqlDbType.NVarChar, lastSubject is null ? DBNull.Value : lastSubject, 256);
                     await updateCursor.ExecuteNonQueryAsync(token);
                     processed++;
                     if (hasMoreSubjects) break;
-                }
-                if (rules.Count == 0)
-                {
-                    await using var reset = Command(sqlConnection, sqlTransaction,
-                        "UPDATE [workerdock].AlertEvaluationState SET LastEvaluatedAtUtc=@now,LastRuleId=NULL,LastSubjectKey=NULL WHERE StateId=1");
-                    Add(reset, "@now", SqlDbType.DateTime2, now);
-                    await reset.ExecuteNonQueryAsync(token);
                 }
                 return processed;
             }, ct);
@@ -176,7 +169,7 @@ public sealed class IncidentEvaluator(TenantDatabaseOptions options) : IAlertEva
                 """,
             "MissedExecution" => """
                 SELECT CASE WHEN COALESCE(SUM(COALESCE(ExactMissedCount,SkippedOccurrences)),0)>=@threshold THEN 1 ELSE 0 END
-                FROM [workerdock].ScheduleRecoveryEvents WHERE ScheduleId=@id AND CreatedAtUtc>=@from AND CreatedAtUtc<=@now;
+                FROM [workerdock].OperationalEvents WHERE EventKind=N'ScheduleRecovery' AND ScheduleId=@id AND AtUtc>=@from AND AtUtc<=@now;
                 """,
             "WorkerUnavailable" => """
                 SELECT CASE WHEN EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus
@@ -236,8 +229,8 @@ public sealed class IncidentEvaluator(TenantDatabaseOptions options) : IAlertEva
                 """,
             "MissedExecution" => """
                 SELECT TOP(@limit) N'schedule:'+CONVERT(nvarchar(36),r.ScheduleId) SubjectKey,MAX(r.CreatedAtUtc) DetectedAtUtc
-                FROM [workerdock].ScheduleRecoveryEvents r
-                WHERE r.CreatedAtUtc>=@from AND r.CreatedAtUtc<=@now
+                FROM [workerdock].OperationalEvents r
+                WHERE r.EventKind=N'ScheduleRecovery' AND r.AtUtc>=@from AND r.AtUtc<=@now
                   AND (@after IS NULL OR N'schedule:'+CONVERT(nvarchar(36),r.ScheduleId)>@after)
                 GROUP BY r.ScheduleId HAVING SUM(COALESCE(r.ExactMissedCount,r.SkippedOccurrences))>=@threshold
                 ORDER BY N'schedule:'+CONVERT(nvarchar(36),r.ScheduleId);
@@ -368,9 +361,9 @@ public sealed class IncidentEvaluator(TenantDatabaseOptions options) : IAlertEva
 
     private static async ValueTask<(DateTime? EvaluatedAtUtc, Guid? RuleId, string? SubjectKey)> ReadCursorAsync(SqlConnection c, SqlTransaction t, CancellationToken ct)
     {
-        await using var command = Command(c, t, "SELECT LastEvaluatedAtUtc,LastRuleId,LastSubjectKey FROM [workerdock].AlertEvaluationState WITH(UPDLOCK,HOLDLOCK) WHERE StateId=1");
+        await using var command = Command(c, t, "SELECT TOP(1) LastEvaluatedAtUtc,RuleId,LastSubjectKey FROM [workerdock].AlertRules WITH(UPDLOCK,HOLDLOCK) WHERE LastEvaluatedAtUtc IS NOT NULL ORDER BY LastEvaluatedAtUtc DESC,RuleId DESC");
         await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) throw new WorkerDockException("AlertEvaluationStateUnavailable");
+        if (!await reader.ReadAsync(ct)) return (null, null, null);
         return (reader.IsDBNull(0) ? null : reader.GetDateTime(0), reader.IsDBNull(1) ? null : reader.GetGuid(1), reader.IsDBNull(2) ? null : reader.GetString(2));
     }
 

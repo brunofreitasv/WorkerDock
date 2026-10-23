@@ -51,8 +51,9 @@ public sealed class CustomSqlSchemaTests
         var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "manifest.json")));
         var ids = manifest.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetString()!).ToArray();
-        Assert.Equal(new[] { "0001_bootstrap", "0002_quartz", "0003_execution", "0003a_projection", "0003b_attempts", "0003c_capacity", "0003d_dispatch", "0004_templates", "0004a_profiles", "0004b_integration_settings", "0005_scheduling", "0006_observability", "0007_alerts", "0008_retention", "0009_dynamic_values" }, ids);
-        Assert.Equal(ids.Length * 2, Directory.GetFiles(directory, "*.sql").Length);
+        Assert.Contains("0013_operational_retention", ids);
+        Assert.Equal(ids.Length, Directory.GetFiles(directory, "*.up.sql").Length);
+        Assert.Equal(ids.Length, Directory.GetFiles(directory, "*.down.sql").Length);
         foreach (var entry in manifest.RootElement.EnumerateArray())
         foreach (var direction in new[] { "up", "down" })
         {
@@ -94,6 +95,24 @@ public sealed class CustomSqlSchemaTests
         Assert.DoesNotContain("GRANT DELETE ON [workerdock].AuditEvents TO WorkerDockRuntime", up);
         Assert.DoesNotContain("GRANT SELECT,INSERT,UPDATE,DELETE ON [workerdock].RetentionRequestTombstones TO WorkerDockRuntime", up);
         Assert.Contains("Cannot remove populated retention state", down);
+    }
+
+    [Fact]
+    public void Operational_retention_transition_consolidates_event_and_policy_state()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
+        var up = File.ReadAllText(Path.Combine(directory, "0013_operational_retention.up.sql"));
+        var down = File.ReadAllText(Path.Combine(directory, "0013_operational_retention.down.sql"));
+
+        Assert.Contains("CREATE TABLE [workerdock].OperationalEvents", up);
+        Assert.Contains("PurgeOperationalEvents", up);
+        Assert.Contains("LastEvaluatedAtUtc", up);
+        Assert.Contains("ArchiveBeforeDelete", up);
+        Assert.Contains("AuditEvents", File.ReadAllText(Path.Combine(Root, "src", "WorkerDock.Infrastructure", "Retention", "SqlRetentionService.cs")));
+        Assert.Contains("Operational event consolidation cannot be rolled back", down);
+        Assert.DoesNotContain("DROP TABLE [workerdock].ArchiveBatches", down);
+        Assert.DoesNotContain("DROP TABLE [workerdock].ArchiveBatchItems", down);
+        Assert.DoesNotContain("DROP TABLE [workerdock].RetentionRequestTombstones", down);
     }
 
     [Fact]

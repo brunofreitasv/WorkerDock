@@ -47,10 +47,10 @@ public sealed class SqlExecutionEvents(TenantDatabaseOptions options) : IExecuti
                 await using (command)
                 {
                     command.CommandText = """
-                        IF NOT EXISTS(SELECT 1 FROM [workerdock].ExecutionEvents WITH(UPDLOCK,HOLDLOCK)
-                            WHERE ExecutionId=@execution AND AttemptScopeId=ISNULL(@attempt,CONVERT(uniqueidentifier,'00000000-0000-0000-0000-000000000000')) AND Source=@source AND Sequence=@sequence)
-                        INSERT [workerdock].ExecutionEvents(EventId,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
-                        VALUES(@event,@execution,@attempt,@source,@sequence,@at,@code,@fields);
+                        IF NOT EXISTS(SELECT 1 FROM [workerdock].OperationalEvents WITH(UPDLOCK,HOLDLOCK)
+                            WHERE EventKind=N'Execution' AND ExecutionId=@execution AND AttemptScopeId=ISNULL(@attempt,CONVERT(uniqueidentifier,'00000000-0000-0000-0000-000000000000')) AND Source=@source AND Sequence=@sequence)
+                        INSERT [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
+                        VALUES(@event,N'Execution',@execution,@attempt,@source,@sequence,@at,@code,@fields);
                         """;
                     Add(command, "@event", SqlDbType.UniqueIdentifier, Guid.NewGuid());
                     Add(command, "@execution", SqlDbType.UniqueIdentifier, item.ExecutionId);

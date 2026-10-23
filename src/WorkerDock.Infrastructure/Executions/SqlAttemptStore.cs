@@ -308,8 +308,8 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
         {
             await using var skip = Command(c, t, """
                 UPDATE [workerdock].Executions SET State=N'Skipped' WHERE ExecutionId=@id AND State=N'Queued';
-                IF @@ROWCOUNT=1 INSERT INTO [workerdock].AttemptStatusEvents(EventId,ExecutionId,State,OccurredAtUtc)
-                    VALUES(NEWID(),@id,@reason,SYSUTCDATETIME());
+                IF @@ROWCOUNT=1 INSERT INTO [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
+                    VALUES(NEWID(),N'Execution',@id,N'Lifecycle',0,SYSUTCDATETIME(),@reason,N'{}');
                 UPDATE [workerdock].Executions SET HoldsJobSlot=0 WHERE ExecutionId=@id;
                 UPDATE [workerdock].Outbox SET ProjectionState=N'Retired' WHERE EntityId=@id AND EventType=N'ExecutionDispatch';
                 """);
@@ -392,7 +392,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
         await SqlCommandOutcomes.SettleAsync(c, t, data.Descriptor.ExecutionId, ct);
         foreach (var state in data.Events)
         {
-            await using var ev = Command(c, t, "INSERT INTO [workerdock].AttemptStatusEvents(EventId,ExecutionId,AttemptId,State,OccurredAtUtc) VALUES(NEWID(),@id,@attempt,@state,SYSUTCDATETIME())");
+            await using var ev = Command(c, t, "INSERT INTO [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson) VALUES(NEWID(),N'Execution',@id,@attempt,N'Lifecycle',0,SYSUTCDATETIME(),@state,N'{}')");
             Add(ev, "@id", SqlDbType.UniqueIdentifier, data.Descriptor.ExecutionId); Add(ev, "@attempt", SqlDbType.UniqueIdentifier, data.Lease?.AttemptId); Add(ev, "@state", SqlDbType.NVarChar, state, 40);
             await ev.ExecuteNonQueryAsync(ct);
         }

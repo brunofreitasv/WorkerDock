@@ -32,17 +32,10 @@ public sealed class SqlExecutionEventQueries(TenantDatabaseOptions options) : IE
 
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            WITH Events AS
-            (
-                SELECT EventId,ExecutionId,AttemptId,CONVERT(nvarchar(20),N'Lifecycle') Source,CONVERT(bigint,0) Sequence,OccurredAtUtc AtUtc,State Code,CONVERT(nvarchar(2048),N'{}') SafeFieldsJson
-                  FROM [workerdock].AttemptStatusEvents WHERE ExecutionId=@id
-                UNION ALL
-                SELECT EventId,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson
-                  FROM [workerdock].ExecutionEvents WHERE ExecutionId=@id
-            )
             SELECT TOP(@take) EventId,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson
-              FROM Events
-             WHERE (@cursorAt IS NULL OR AtUtc>@cursorAt OR (AtUtc=@cursorAt AND EventId>@cursorId))
+              FROM [workerdock].OperationalEvents
+             WHERE EventKind=N'Execution' AND ExecutionId=@id
+               AND (@cursorAt IS NULL OR AtUtc>@cursorAt OR (AtUtc=@cursorAt AND EventId>@cursorId))
              ORDER BY AtUtc,EventId;
             """;
         command.Parameters.Add("@id", SqlDbType.UniqueIdentifier).Value = executionId;

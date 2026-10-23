@@ -42,4 +42,14 @@ public sealed class ObservabilityTests
         Assert.DoesNotContain("GRANT UPDATE", migration, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GRANT DELETE", migration, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Execution_timeline_reads_only_the_typed_operational_events_table()
+    {
+        var query = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "WorkerDock.Infrastructure", "Observability", "SqlExecutionEventQueries.cs"));
+
+        Assert.Contains("OperationalEvents", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("AttemptStatusEvents", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("ExecutionEvents", query, StringComparison.Ordinal);
+    }
 }

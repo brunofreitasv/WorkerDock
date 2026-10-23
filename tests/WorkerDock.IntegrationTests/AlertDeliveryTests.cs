@@ -14,8 +14,7 @@ public sealed class AlertDeliveryTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0007_alerts", default);
+        await database.ApplyLatestSchemaAsync();
 
         var sinkId = Guid.NewGuid();
         var sinkRevisionId = Guid.NewGuid();
@@ -65,8 +64,7 @@ public sealed class AlertDeliveryTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0007_alerts", default);
+        await database.ApplyLatestSchemaAsync();
 
         var sinkId = Guid.NewGuid();
         var sinkRevisionId = Guid.NewGuid();
@@ -117,8 +115,7 @@ public sealed class AlertDeliveryTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0007_alerts", default);
+        await database.ApplyLatestSchemaAsync();
 
         var sinkId = Guid.NewGuid();
         var sinkRevisionId = Guid.NewGuid();
