@@ -1,6 +1,6 @@
 # Observability
 
-WorkerDock persists bounded execution events in `workerdock.ExecutionEvents` and exposes them through `GET /api/monitoring/executions/{id}/events`. The Read policy applies. Pages default to 50 and cap at 100; the cursor is a stable timestamp/event-ID pair. Unknown executions return 404 and storage failures return 503. Lifecycle history is projected from `AttemptStatusEvents`; this remains the authoritative mandatory lifecycle stream.
+WorkerDock persists bounded execution and lifecycle events in `workerdock.OperationalEvents` and exposes them through `GET /api/monitoring/executions/{id}/events`. The Read policy applies. Pages default to 50 and cap at 100; the cursor is a stable timestamp/event-ID pair. Unknown executions return 404 and storage failures return 503. The same event table is the authoritative lifecycle stream.
 
 Optional supervisor events use a bounded in-memory channel (128 batches by default). The worker drops on full queue, database failure, or shutdown timeout; none of these conditions changes an execution result. Event writes are idempotent by execution/attempt/source/sequence. Payloads allow only a small event-code and field allowlist, with a 2 KiB JSON cap. `SafeExecutionLog` caps accepted entries and emits a single bounded drop marker. Authentication event storage is not wired because the current host does not expose authoritative authentication outcomes to the application; no synthetic events are emitted.
 
@@ -10,6 +10,6 @@ The `WorkerDock` `ActivitySource` emits an attempt span with execution/attempt i
 
 Metric aggregation claims terminal executions in bounded batches under `ReadCommitted`, using `UPDLOCK,READPAST,READCOMMITTEDLOCK`. The explicit read-committed lock hint keeps the claim compatible with databases using read-committed snapshot isolation while allowing concurrent workers to process separate rows.
 
-Migration `0006_observability` adds the event and aggregate tables and adds only `SELECT` on `AuditEvents` to `WorkerDockRuntime`, preserving its existing `INSERT` permission. It grants no audit `UPDATE` or `DELETE`. Rollback refuses to remove populated diagnostics or aggregates. Runtime processes do not run migrations; deployment applies the manifest-verified migration.
+The fresh-install baseline creates the event and aggregate tables and grants only `SELECT` on `AuditEvents` to `WorkerDockRuntime`, preserving its existing `INSERT` permission. It grants no audit `UPDATE` or `DELETE`. Rollback refuses to remove populated diagnostics or aggregates. Runtime processes do not run migrations; deployment applies the manifest-verified baseline.
 
 SQL-backed integration checks require `WORKERDOCK_TEST_SQL`; local SQL verification is blocked when it is unset. The in-memory web adapter does not provide persisted event history.

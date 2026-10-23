@@ -2,7 +2,6 @@ using WorkerDock.Application.Common;
 using WorkerDock.Application.Dispatch;
 using WorkerDock.Application.Executions;
 using WorkerDock.Application.Jobs;
-using WorkerDock.Application.Workers;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Contracts.Values;
 using WorkerDock.Domain.Jobs;
@@ -11,13 +10,12 @@ using System.Text.Json;
 
 namespace WorkerDock.Infrastructure.Executions;
 
-public sealed record AttemptSnapshot(string State, int Ordinal, bool PermitRetained, bool StopRequested,
+public sealed record AttemptSnapshot(string State, int Ordinal, bool HoldsJobSlot, bool StopRequested,
     string? AttemptState, bool EffectsMayHaveOccurred);
 public sealed record MemoryExecutionAudit(string Decision, string Reason, ActorContext Actor, DateTimeOffset OccurredUtc);
 public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IAttemptSignals
 {
     private readonly TimeProvider clock;
-    private readonly ICapacityStore? capacity;
     private readonly Action<AttemptSnapshot>? committed;
     private readonly Func<CancellationToken, ValueTask<JsonElement>>? integrationSnapshot;
     private readonly ExecutionValuePreparation values;
@@ -27,11 +25,11 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
     private readonly AttemptLifecycle data;
     private readonly List<DispatchIntent> retries = [];
     private readonly List<MemoryExecutionAudit> audits = [];
-    public InMemoryAttemptStore(TimeProvider clock, ExecutionDescriptor descriptor, ExecutionPolicy policy, ICapacityStore? capacity = null, Action<AttemptSnapshot>? committed = null,
+    public InMemoryAttemptStore(TimeProvider clock, ExecutionDescriptor descriptor, ExecutionPolicy policy, Action<AttemptSnapshot>? committed = null,
         Func<CancellationToken, ValueTask<JsonElement>>? integrationSnapshot = null,
         ExecutionValuePreparation? values = null, DynamicValuePlan? dynamicValues = null)
     {
-        this.clock = clock; this.capacity = capacity; this.committed = committed; this.integrationSnapshot = integrationSnapshot;
+        this.clock = clock; this.committed = committed; this.integrationSnapshot = integrationSnapshot;
         this.values = values ?? new ExecutionValuePreparation(new DynamicValueResolver());
         Intent = new(Guid.NewGuid(), descriptor.ExecutionId, 1, descriptor.TemplateId, clock.GetUtcNow(), policy.Priority, 1, "");
         Intent = Intent with { PayloadDigest = Intent.ComputeDigest() };
@@ -39,34 +37,14 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
     }
     public DispatchIntent Intent { get; }
     public ExecutionDescriptor AcceptedDescriptor => data.Descriptor;
-    public AttemptSnapshot Snapshot { get { lock (gate) return new(data.State, data.Ordinal, data.PermitRetained, data.StopRequested, data.AttemptState, data.Uncertain); } }
+    public AttemptSnapshot Snapshot { get { lock (gate) return new(data.State, data.Ordinal, data.HoldsJobSlot, data.StopRequested, data.AttemptState, data.Uncertain); } }
     public IReadOnlyList<DispatchIntent> Retries { get { lock (gate) return retries.ToArray(); } }
     public IReadOnlyList<MemoryExecutionAudit> Audits { get { lock (gate) return audits.ToArray(); } }
     public AttemptLease? CurrentLease { get { lock (gate) return data.Lease; } }
-    public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) => capacity is null ? Run(() => data.Begin(intent, workerBootId, clock.GetUtcNow()), ct) : capacity.TransactAsync((state, now) =>
-    {
-        lock (gate)
-        {
-            data.GateOpen = state.CanStart(workerBootId, intent.TemplateId, now);
-            data.EffectiveCapacityRevision = state.EffectiveRevision;
-            var result = data.Begin(intent, workerBootId, now);
-            Notify(); return result;
-        }
-    }, ct);
+    public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) =>
+        Run(() => data.Begin(intent, workerBootId, clock.GetUtcNow()), ct);
     public ValueTask<AttemptStart> BeginAsync(Guid executionId, string workerBootId, CancellationToken ct) =>
-        capacity is null ? Run(() => BeginDirect(executionId, workerBootId, clock.GetUtcNow()), ct) : capacity.TransactAsync((state, now) =>
-        {
-            lock (gate)
-            {
-                if (executionId != data.Descriptor.ExecutionId) throw new WorkerDockException("ExecutionNotFound");
-                data.GateOpen = state.CanStart(workerBootId, data.Descriptor.TemplateId, now);
-                data.EffectiveCapacityRevision = state.EffectiveRevision;
-                var intent = data.Intent with { DeliveryId = Guid.NewGuid(), CapacityRevision = state.EffectiveRevision, PayloadDigest = "" };
-                data.Intent = intent with { PayloadDigest = intent.ComputeDigest() };
-                var result = data.Begin(data.Intent, workerBootId, now);
-                Notify(); return result;
-            }
-        }, ct);
+        Run(() => BeginDirect(executionId, workerBootId, clock.GetUtcNow()), ct);
     private AttemptStart BeginDirect(Guid executionId, string workerBootId, DateTimeOffset now)
     {
         if (executionId != data.Descriptor.ExecutionId) throw new WorkerDockException("ExecutionNotFound");
@@ -126,7 +104,7 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
             return new CommandReceipt(Guid.NewGuid(), id, data.State == "Running" ? "Pending" : data.State == "NeedsReview" ? "Failed" : "Applied");
         }, ct);
     }
-    private void Notify() => committed?.Invoke(new(data.State, data.Ordinal, data.PermitRetained, data.StopRequested, data.AttemptState, data.Uncertain));
+    private void Notify() => committed?.Invoke(new(data.State, data.Ordinal, data.HoldsJobSlot, data.StopRequested, data.AttemptState, data.Uncertain));
     internal static void ValidateControl(Guid id, string reason, ActorContext actor)
     {
         JobCommandValidation.ValidateActor(actor);

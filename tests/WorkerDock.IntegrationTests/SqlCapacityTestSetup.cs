@@ -1,21 +1,19 @@
-using WorkerDock.Application.Workers;
+using Microsoft.Data.SqlClient;
+using System.Data;
 using WorkerDock.Infrastructure.Persistence;
-using WorkerDock.Infrastructure.Workers;
 namespace WorkerDock.IntegrationTests;
 internal static class SqlCapacityTestSetup
 {
     public static async Task ReadyAsync(TenantDatabaseOptions options,params string[] boots)
     {
-        var store=new SqlCapacityStore(options);
-        await store.TransactAsync((state,now) =>
-        {
-            foreach(var template in state.Limits.Keys.ToArray()) state.SetTemplateLimit(template,3);
-            foreach(var boot in boots.Length==0 ? new[] { "sql-fixture" } : boots)
-            {
-                var id=Guid.NewGuid(); state.Register(id,boot,state.CatalogDigest,3,now);
-                state.Acknowledge(id,boot,state.DesiredRevision,now);
-            }
-            Assert.True(state.Promote(now)); return true;
-        },default);
+        await using var connection = new SqlConnection(options.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE [workerdock].TemplateCatalog SET ConcurrencyLimit=3 WHERE Enabled=1";
+        await command.ExecuteNonQueryAsync();
+        command.Parameters.Clear();
+        command.CommandText = "UPDATE [workerdock].RuntimeStatus SET BootId=@boot,Ready=1,HostCeiling=1,LastHeartbeatUtc=SYSUTCDATETIME() WHERE StateId=1";
+        command.Parameters.Add(new SqlParameter("@boot",SqlDbType.UniqueIdentifier) { Value = Guid.NewGuid() });
+        await command.ExecuteNonQueryAsync();
     }
 }

@@ -24,11 +24,11 @@ public sealed class SqlExecutionQueue(TenantDatabaseOptions options) : IExecutio
             await using var command = new SqlCommand("""
                 WITH Candidates AS (
                     SELECT e.ExecutionId,e.JobId,e.State,e.AvailableAtUtc,e.CreatedAtUtc,e.AdmissionSequence,
-                        j.ConcurrencyLimit,r.TemplateId,r.TemplateVersion,
+                        j.ConcurrencyLimit AS JobConcurrencyLimit,r.TemplateId,r.TemplateVersion,
                         COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue') AS OverlapMode,
                         COALESCE(TRY_CONVERT(int,JSON_VALUE(r.PolicyJson,'$.BacklogLimit')),100) AS BacklogLimit,
                         COALESCE(TRY_CONVERT(int,JSON_VALUE(r.PolicyJson,'$.Priority')),0) AS Priority,
-                        cat.ConcurrencyLimit,
+                        cat.ConcurrencyLimit AS TemplateConcurrencyLimit,
                         (SELECT COUNT(*) FROM [workerdock].Executions active
                             WHERE active.JobId=e.JobId AND active.State IN(N'Running',N'RetryWaiting',N'NeedsReview')) AS ActiveJobSlots,
                         CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM [workerdock].Executions active
@@ -64,12 +64,12 @@ public sealed class SqlExecutionQueue(TenantDatabaseOptions options) : IExecutio
                 WHERE candidate.State=N'RetryWaiting'
                     OR candidate.OverlapMode=N'Skip'
                     OR (candidate.State=N'Queued' AND candidate.WaitingBefore>=candidate.BacklogLimit)
-                    OR (candidate.ActiveTemplateSlots<candidate.EffectiveLimit
+                    OR (candidate.ActiveTemplateSlots<candidate.TemplateConcurrencyLimit
                         AND ((candidate.State=N'Queued' AND candidate.OverlapMode=N'Queue'
                             AND candidate.ActiveJobSlots=0 AND candidate.EarlierQueued=0)
                         OR (candidate.State=N'Queued' AND candidate.OverlapMode=N'Allow'
-                            AND candidate.ActiveJobSlots<candidate.ConcurrencyLimit
-                            AND candidate.ActiveJobSlots+candidate.EarlierAllow<candidate.ConcurrencyLimit
+                            AND candidate.ActiveJobSlots<candidate.JobConcurrencyLimit
+                            AND candidate.ActiveJobSlots+candidate.EarlierAllow<candidate.JobConcurrencyLimit
                             AND candidate.ExclusiveJobSlot=0
                             AND NOT EXISTS(SELECT 1 FROM [workerdock].Executions prior
                                 JOIN [workerdock].JobRevisions priorRevision ON priorRevision.JobId=prior.JobId AND priorRevision.Revision=prior.JobRevision

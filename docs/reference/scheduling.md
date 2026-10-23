@@ -29,7 +29,7 @@ scans due rows and calls `OccurrenceWriter`, which rechecks current revisions
 and state before queuing an occurrence. Completed one-time schedules are
 excluded from future scans.
 
-`OccurrenceWriter` takes a SQL application lock per schedule, locks and rechecks the current schedule and job, and advances `CursorUtc` in the same transaction that inserts queued scheduled executions and calls job admission. Each execution stores its scheduled UTC instant and the job/profile revisions accepted at materialization. Its idempotency key is derived from schedule ID, schedule revision, and occurrence instant. Outbox delivery remains at least once; no exactly-once guarantee is made. Accepted executions survive later schedule edits or removal, while the admission/start path still checks current disable, archive, stop, and capacity controls.
+`OccurrenceWriter` takes a SQL application lock per schedule, locks and rechecks the current schedule and job, and advances `CursorUtc` in the same transaction that inserts queued scheduled executions and calls job admission. Each execution stores its scheduled UTC instant and the job/profile revisions accepted at materialization. Its idempotency key is derived from schedule ID, schedule revision, and occurrence instant. Queued executions are the durable dispatch source; the runtime claims them directly and attempt leases fence duplicate claims. Accepted executions survive later schedule edits or removal, while the admission/start path still checks current disable, archive, stop, and concurrency limits.
 
 Each materialization enumerates at most 100 evaluator candidates and produces
 at most 100 executions. When more are due, the cursor advances only through the

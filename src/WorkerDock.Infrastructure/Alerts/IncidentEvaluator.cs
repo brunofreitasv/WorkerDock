@@ -228,7 +228,7 @@ public sealed class IncidentEvaluator(TenantDatabaseOptions options) : IAlertEva
                 ORDER BY N'execution:'+CONVERT(nvarchar(36),e.ExecutionId);
                 """,
             "MissedExecution" => """
-                SELECT TOP(@limit) N'schedule:'+CONVERT(nvarchar(36),r.ScheduleId) SubjectKey,MAX(r.CreatedAtUtc) DetectedAtUtc
+                SELECT TOP(@limit) N'schedule:'+CONVERT(nvarchar(36),r.ScheduleId) SubjectKey,MAX(r.AtUtc) DetectedAtUtc
                 FROM [workerdock].OperationalEvents r
                 WHERE r.EventKind=N'ScheduleRecovery' AND r.AtUtc>=@from AND r.AtUtc<=@now
                   AND (@after IS NULL OR N'schedule:'+CONVERT(nvarchar(36),r.ScheduleId)>@after)

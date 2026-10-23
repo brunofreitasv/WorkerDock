@@ -21,6 +21,7 @@ IF EXISTS(SELECT 1 FROM sys.objects WHERE is_ms_shipped=0)
  OR EXISTS(SELECT 1 FROM sys.types WHERE is_user_defined=1) OR EXISTS(SELECT 1 FROM sys.assemblies WHERE is_user_defined=1)
  THROW 51071,'SnapshotRequiresEmptyDatabase',1;
 SET NOCOUNT ON;
+SET NOCOUNT ON;
 SET XACT_ABORT ON;
 SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
@@ -42,7 +43,7 @@ CREATE TABLE [workerdock].TenantSettings (
     CONSTRAINT CK_TenantSettings_Name CHECK (LEN(TRIM(DisplayName)) > 0),
     CONSTRAINT CK_TenantSettings_Zone CHECK (LEN(TRIM(DisplayTimeZone)) > 0)
 );
-INSERT INTO [workerdock].TenantSettings (InstanceId, DisplayName, DisplayTimeZone) VALUES (@InstanceId, N'WorkerDock', N'UTC');
+INSERT INTO [workerdock].TenantSettings (InstanceId, DisplayName, DisplayTimeZone) VALUES (TRY_CONVERT(uniqueidentifier,N'__WORKERDOCK_INSTANCE_ID__'), N'WorkerDock', N'UTC');
 
 CREATE TABLE [workerdock].SchemaHistory (
     MigrationId nvarchar(100) NOT NULL CONSTRAINT PK_SchemaHistory PRIMARY KEY,
@@ -69,17 +70,6 @@ BEGIN
 END;
 GO
 
-CREATE TABLE [workerdock].Outbox (
-    EventId uniqueidentifier NOT NULL CONSTRAINT PK_Outbox PRIMARY KEY,
-    EventType nvarchar(100) NOT NULL,
-    PayloadJson nvarchar(max) NOT NULL,
-    CreatedAtUtc datetime2(7) NOT NULL,
-    AvailableAtUtc datetime2(7) NOT NULL,
-    DispatchedAtUtc datetime2(7) NULL,
-    CONSTRAINT CK_Outbox_Json CHECK (ISJSON(PayloadJson) = 1)
-);
-CREATE INDEX IX_Outbox_Pending ON [workerdock].Outbox(AvailableAtUtc, CreatedAtUtc) WHERE DispatchedAtUtc IS NULL;
-
 CREATE ROLE WorkerDockRuntime;
 GRANT SELECT, UPDATE ON [workerdock].TenantSettings TO WorkerDockRuntime;
 GRANT INSERT ON [workerdock].AuditEvents TO WorkerDockRuntime;
@@ -97,16 +87,6 @@ INSERT INTO [workerdock].TemplateCatalog(TemplateId,TemplateVersion,MetadataDige
     (N'workerdock.sql-server',N'1.1.0',CONVERT(char(64),HASHBYTES('SHA2_256',N'workerdock.sql-server|1.1.0'),2)),
     (N'workerdock.http',N'1.1.0',CONVERT(char(64),HASHBYTES('SHA2_256',N'workerdock.http|1.1.0'),2));
 
-CREATE TABLE [workerdock].TemplatePolicies (
-    TemplateId nvarchar(100) NOT NULL CONSTRAINT PK_TemplatePolicies PRIMARY KEY,
-    DesiredLimit int NOT NULL CONSTRAINT DF_TemplatePolicies_Desired DEFAULT 0,
-    EffectiveLimit int NOT NULL CONSTRAINT DF_TemplatePolicies_Effective DEFAULT 0,
-    DesiredRevision bigint NOT NULL CONSTRAINT DF_TemplatePolicies_DesiredRevision DEFAULT 0,
-    EffectiveRevision bigint NOT NULL CONSTRAINT DF_TemplatePolicies_EffectiveRevision DEFAULT 0,
-    StartGateClosed bit NOT NULL CONSTRAINT DF_TemplatePolicies_Gate DEFAULT 1,
-    CONSTRAINT CK_TemplatePolicies_Limits CHECK (DesiredLimit >= 0 AND EffectiveLimit >= 0)
-);
-INSERT INTO [workerdock].TemplatePolicies(TemplateId) VALUES (N'workerdock.sql-server'),(N'workerdock.http');
 
 CREATE TABLE [workerdock].Jobs (
     JobId uniqueidentifier NOT NULL CONSTRAINT PK_Jobs PRIMARY KEY,
@@ -143,38 +123,6 @@ BEGIN
 END;
 GO
 
-CREATE TABLE [workerdock].Workers (
-    InstallationId uniqueidentifier NOT NULL CONSTRAINT PK_Workers PRIMARY KEY,
-    BootId nvarchar(100) NOT NULL,
-    CatalogDigest char(64) NOT NULL,
-    CapacityCeiling int NOT NULL,
-    LiveLimit int NOT NULL,
-    LastHeartbeatUtc datetime2(7) NOT NULL,
-    CONSTRAINT CK_Workers_Capacity CHECK (CapacityCeiling >= 0 AND LiveLimit BETWEEN 0 AND CapacityCeiling)
-);
-CREATE TABLE [workerdock].WorkerCapabilities (
-    InstallationId uniqueidentifier NOT NULL,
-    TemplateId nvarchar(100) NOT NULL,
-    TemplateVersion nvarchar(40) NOT NULL,
-    CONSTRAINT PK_WorkerCapabilities PRIMARY KEY (InstallationId,TemplateId,TemplateVersion),
-    CONSTRAINT FK_WorkerCapabilities_Worker FOREIGN KEY (InstallationId) REFERENCES [workerdock].Workers(InstallationId),
-    CONSTRAINT FK_WorkerCapabilities_Catalog FOREIGN KEY (TemplateId,TemplateVersion) REFERENCES [workerdock].TemplateCatalog(TemplateId,TemplateVersion)
-);
-CREATE TABLE [workerdock].ServiceHealth (
-    ServiceId uniqueidentifier NOT NULL CONSTRAINT PK_ServiceHealth PRIMARY KEY,
-    ServiceKind nvarchar(40) NOT NULL,
-    BootId nvarchar(100) NOT NULL,
-    LastHeartbeatUtc datetime2(7) NOT NULL,
-    Ready bit NOT NULL
-);
-CREATE TABLE [workerdock].PolicyRevisions (
-    PolicyId uniqueidentifier NOT NULL CONSTRAINT PK_PolicyRevisions PRIMARY KEY,
-    PolicyKind nvarchar(40) NOT NULL,
-    DesiredRevision bigint NOT NULL,
-    EffectiveRevision bigint NOT NULL,
-    State nvarchar(30) NOT NULL,
-    CreatedAtUtc datetime2(7) NOT NULL
-);
 
 CREATE TABLE [workerdock].Executions (
     ExecutionId uniqueidentifier NOT NULL CONSTRAINT PK_Executions PRIMARY KEY,
@@ -203,7 +151,6 @@ CREATE TABLE [workerdock].Attempts (
     AttemptId uniqueidentifier NOT NULL CONSTRAINT PK_Attempts PRIMARY KEY,
     ExecutionId uniqueidentifier NOT NULL,
     AttemptNumber int NOT NULL,
-    InstallationId uniqueidentifier NULL,
     WorkerBootId nvarchar(100) NULL,
     Generation bigint NOT NULL CONSTRAINT DF_Attempts_Generation DEFAULT 0,
     State nvarchar(30) NOT NULL,
@@ -213,23 +160,11 @@ CREATE TABLE [workerdock].Attempts (
     EndedAtUtc datetime2(7) NULL,
     SafeCode nvarchar(100) NULL,
     CONSTRAINT FK_Attempts_Execution FOREIGN KEY (ExecutionId) REFERENCES [workerdock].Executions(ExecutionId),
-    CONSTRAINT FK_Attempts_Worker FOREIGN KEY (InstallationId) REFERENCES [workerdock].Workers(InstallationId),
     CONSTRAINT UQ_Attempts_Ordinal UNIQUE (ExecutionId,AttemptNumber),
     CONSTRAINT CK_Attempts_Ordinal CHECK (AttemptNumber > 0)
 );
 CREATE INDEX IX_Attempts_Lease ON [workerdock].Attempts(State,LeaseExpiresUtc) WHERE LeaseExpiresUtc IS NOT NULL;
 
-CREATE TABLE [workerdock].JobPermits (
-    PermitId uniqueidentifier NOT NULL CONSTRAINT PK_JobPermits PRIMARY KEY,
-    JobId uniqueidentifier NOT NULL,
-    ExecutionId uniqueidentifier NOT NULL,
-    Mode nvarchar(20) NOT NULL,
-    AcquiredAtUtc datetime2(7) NOT NULL,
-    CONSTRAINT FK_JobPermits_Job FOREIGN KEY (JobId) REFERENCES [workerdock].Jobs(JobId),
-    CONSTRAINT FK_JobPermits_Execution FOREIGN KEY (ExecutionId) REFERENCES [workerdock].Executions(ExecutionId),
-    CONSTRAINT UQ_JobPermits_Execution UNIQUE (ExecutionId)
-);
-CREATE INDEX IX_JobPermits_Job ON [workerdock].JobPermits(JobId,AcquiredAtUtc);
 
 CREATE TABLE [workerdock].Commands (
     CommandId uniqueidentifier NOT NULL CONSTRAINT PK_Commands PRIMARY KEY,
@@ -258,14 +193,6 @@ CREATE TABLE [workerdock].ManualRequestDedup (
 );
 CREATE INDEX IX_ManualRequestDedup_Expiry ON [workerdock].ManualRequestDedup(ExpiresAtUtc);
 
-ALTER TABLE [workerdock].Outbox ADD
-    SchemaVersion int NOT NULL CONSTRAINT DF_Outbox_SchemaVersion DEFAULT 1,
-    EntityId uniqueidentifier NULL,
-    EntityRevision bigint NULL,
-    PayloadDigest char(64) NULL,
-    ProjectionState nvarchar(20) NOT NULL CONSTRAINT DF_Outbox_ProjectionState DEFAULT N'Pending',
-    RetryAtUtc datetime2(7) NULL;
-CREATE INDEX IX_Outbox_Projection ON [workerdock].Outbox(ProjectionState,AvailableAtUtc,CreatedAtUtc) INCLUDE(EntityId,EntityRevision);
 
 GRANT SELECT ON [workerdock].TemplateCatalog TO WorkerDockRuntime;
 GRANT SELECT ON [workerdock].JobRevisions TO WorkerDockRuntime;
@@ -274,12 +201,9 @@ GRANT INSERT ON [workerdock].JobRevisions TO WorkerDockRuntime;
 GRANT SELECT, INSERT, UPDATE ON [workerdock].Executions TO WorkerDockRuntime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON [workerdock].ManualRequestDedup TO WorkerDockRuntime;
 GRANT SELECT, INSERT, UPDATE ON [workerdock].Commands TO WorkerDockRuntime;
-GRANT SELECT, INSERT, UPDATE ON [workerdock].Outbox TO WorkerDockRuntime;
 
 GO
 -- 0003a_projection
-ALTER TABLE [workerdock].Outbox ADD LastErrorCode nvarchar(40) NULL, ReviewAtUtc datetime2(7) NULL;
-CREATE INDEX IX_Outbox_Review ON [workerdock].Outbox(ProjectionState,ReviewAtUtc) INCLUDE(EventId,DispatchedAtUtc);
 GRANT SELECT ON [workerdock].Attempts TO WorkerDockRuntime;
 
 GO
@@ -288,55 +212,18 @@ ALTER TABLE [workerdock].Executions ADD StopRequested bit NOT NULL CONSTRAINT DF
     ForceStop bit NOT NULL CONSTRAINT DF_Executions_Force DEFAULT 0;
 ALTER TABLE [workerdock].Attempts ADD LocalExitConfirmed bit NOT NULL CONSTRAINT DF_Attempts_Exit DEFAULT 0,
     EffectsMayHaveOccurred bit NOT NULL CONSTRAINT DF_Attempts_Effects DEFAULT 0;
-CREATE TABLE [workerdock].AttemptStatusEvents (
-    EventId uniqueidentifier NOT NULL CONSTRAINT PK_AttemptStatusEvents PRIMARY KEY,
-    ExecutionId uniqueidentifier NOT NULL,
-    AttemptId uniqueidentifier NULL,
-    State nvarchar(40) NOT NULL,
-    OccurredAtUtc datetime2(7) NOT NULL,
-    CONSTRAINT FK_AttemptStatusEvents_Execution FOREIGN KEY (ExecutionId) REFERENCES [workerdock].Executions(ExecutionId),
-    CONSTRAINT FK_AttemptStatusEvents_Attempt FOREIGN KEY (AttemptId) REFERENCES [workerdock].Attempts(AttemptId)
-);
-CREATE INDEX IX_AttemptStatusEvents_Execution ON [workerdock].AttemptStatusEvents(ExecutionId,OccurredAtUtc,EventId);
 GRANT SELECT,INSERT,UPDATE ON [workerdock].Attempts TO WorkerDockRuntime;
-GRANT SELECT,DELETE ON [workerdock].JobPermits TO WorkerDockRuntime;
-GRANT SELECT ON [workerdock].TemplatePolicies TO WorkerDockRuntime;
-GRANT SELECT ON [workerdock].Workers TO WorkerDockRuntime;
-GRANT SELECT ON [workerdock].WorkerCapabilities TO WorkerDockRuntime;
-GRANT SELECT,INSERT ON [workerdock].AttemptStatusEvents TO WorkerDockRuntime;
 
 GO
 -- 0003c_capacity
 ALTER TABLE [workerdock].Executions ADD AdmissionSequence bigint IDENTITY(1,1) NOT NULL;
 CREATE INDEX IX_Executions_Admission ON [workerdock].Executions(JobId,AdmissionSequence) INCLUDE(State);
-ALTER TABLE [workerdock].Workers ADD
-    AcknowledgedRevision bigint NOT NULL CONSTRAINT DF_Workers_Ack DEFAULT -1,
-    State nvarchar(30) NOT NULL CONSTRAINT DF_Workers_State DEFAULT N'Joining',
-    ReservationsRecovered bit NOT NULL CONSTRAINT DF_Workers_Recovered DEFAULT 0;
-CREATE UNIQUE INDEX UX_Workers_Boot ON [workerdock].Workers(BootId);
-ALTER TABLE [workerdock].PolicyRevisions ADD CatalogDigest char(64) NULL;
-ALTER TABLE [workerdock].Commands ADD PolicyRevision bigint NULL;
-INSERT [workerdock].PolicyRevisions(PolicyId,PolicyKind,DesiredRevision,EffectiveRevision,State,CreatedAtUtc)
-VALUES('c9188146-bcab-43ec-95ee-c4713f46f90d',N'Capacity',0,0,N'Pending',SYSUTCDATETIME());
-UPDATE [workerdock].TemplatePolicies SET StartGateClosed=1;
-GRANT SELECT,INSERT,UPDATE ON [workerdock].PolicyRevisions TO WorkerDockRuntime;
-GRANT INSERT,UPDATE ON [workerdock].TemplatePolicies TO WorkerDockRuntime;
-GRANT INSERT,UPDATE ON [workerdock].Workers TO WorkerDockRuntime;
-GRANT INSERT,DELETE ON [workerdock].WorkerCapabilities TO WorkerDockRuntime;
-GRANT INSERT ON [workerdock].JobPermits TO WorkerDockRuntime;
 
 GO
 -- 0003d_dispatch
-CREATE TABLE [workerdock].ProjectionMaintenance (
-    Id tinyint NOT NULL CONSTRAINT PK_ProjectionMaintenance PRIMARY KEY CONSTRAINT CK_ProjectionMaintenance_Id CHECK(Id=1),
-    AfterJobId uniqueidentifier NULL
-);
-INSERT [workerdock].ProjectionMaintenance(Id,AfterJobId) VALUES(1,NULL);
 CREATE INDEX IX_Executions_Maintenance ON [workerdock].Executions(JobId,AdmissionSequence) INCLUDE(State) WHERE State IN(N'Queued',N'RetryWaiting');
 CREATE INDEX IX_Commands_PendingTarget ON [workerdock].Commands(TargetId,CommandKind) INCLUDE(CommandId) WHERE State=N'Pending';
-GRANT SELECT,UPDATE ON [workerdock].ProjectionMaintenance TO WorkerDockRuntime;
 CREATE INDEX IX_Executions_AdmissionActive ON [workerdock].Executions(JobId,AdmissionSequence) INCLUDE(State,JobRevision) WHERE State IN(N'Queued',N'Running',N'RetryWaiting',N'NeedsReview');
-CREATE INDEX IX_Outbox_Execution ON [workerdock].Outbox(EntityId,EventType) INCLUDE(ProjectionState,DispatchedAtUtc,EntityRevision,PayloadDigest);
 
 GO
 -- 0004_templates
@@ -541,29 +428,6 @@ GO
 CREATE INDEX IX_Executions_Aggregation ON [workerdock].Executions(AggregatedAtUtc,CreatedAtUtc,ExecutionId)
     INCLUDE(JobId,JobRevision,State,AvailableAtUtc,ScheduledForUtc) WHERE AggregatedAtUtc IS NULL;
 GO
-CREATE TABLE [workerdock].ExecutionEvents
-(
-    EventId uniqueidentifier NOT NULL CONSTRAINT PK_ExecutionEvents PRIMARY KEY,
-    ExecutionId uniqueidentifier NOT NULL,
-    AttemptId uniqueidentifier NULL,
-    AttemptScopeId AS ISNULL(AttemptId,CONVERT(uniqueidentifier,'00000000-0000-0000-0000-000000000000')) PERSISTED,
-    Source nvarchar(20) NOT NULL,
-    Sequence bigint NOT NULL,
-    AtUtc datetime2(7) NOT NULL,
-    Code nvarchar(80) NOT NULL,
-    SafeFieldsJson nvarchar(2048) NOT NULL,
-    CONSTRAINT FK_ExecutionEvents_Execution FOREIGN KEY(ExecutionId) REFERENCES [workerdock].Executions(ExecutionId),
-    CONSTRAINT FK_ExecutionEvents_Attempt FOREIGN KEY(AttemptId) REFERENCES [workerdock].Attempts(AttemptId),
-    CONSTRAINT CK_ExecutionEvents_Source CHECK(Source IN(N'Lifecycle',N'Supervisor',N'Handler')),
-    CONSTRAINT CK_ExecutionEvents_Sequence CHECK(Sequence>0),
-    CONSTRAINT CK_ExecutionEvents_Code CHECK(LEN(Code)>0),
-    CONSTRAINT CK_ExecutionEvents_Json CHECK(ISJSON(SafeFieldsJson)=1),
-    CONSTRAINT UQ_ExecutionEvents_Scope UNIQUE(ExecutionId,AttemptScopeId,Source,Sequence)
-);
-GO
-CREATE INDEX IX_ExecutionEvents_Page ON [workerdock].ExecutionEvents(ExecutionId,AtUtc,EventId)
-    INCLUDE(AttemptId,Source,Sequence,Code,SafeFieldsJson);
-GO
 CREATE TABLE [workerdock].ExecutionMetricAggregates
 (
     WindowStartUtc datetime2(7) NOT NULL,
@@ -581,7 +445,6 @@ CREATE TABLE [workerdock].ExecutionMetricAggregates
 );
 GO
 GRANT SELECT ON [workerdock].AuditEvents TO WorkerDockRuntime;
-GRANT SELECT,INSERT ON [workerdock].ExecutionEvents TO WorkerDockRuntime;
 GRANT SELECT,INSERT,UPDATE ON [workerdock].ExecutionMetricAggregates TO WorkerDockRuntime;
 
 GO
@@ -762,21 +625,6 @@ GRANT SELECT,INSERT,UPDATE ON [workerdock].AlertEvaluationState TO WorkerDockRun
 
 GO
 -- 0008_retention
-CREATE TABLE [workerdock].RetentionPolicy
-(
-    PolicyId tinyint NOT NULL CONSTRAINT PK_RetentionPolicy PRIMARY KEY,
-    LogDays int NOT NULL,
-    ExecutionDays int NOT NULL,
-    AuditDays int NOT NULL,
-    ArchiveBeforeDelete bit NOT NULL,
-    ArchiveDays int NOT NULL,
-    Version rowversion NOT NULL,
-    CONSTRAINT CK_RetentionPolicy_Singleton CHECK(PolicyId=1),
-    CONSTRAINT CK_RetentionPolicy_Days CHECK(LogDays BETWEEN 1 AND 3650 AND ExecutionDays BETWEEN 1 AND 3650 AND AuditDays BETWEEN 1 AND 3650 AND ArchiveDays BETWEEN 0 AND 3650 AND (ArchiveBeforeDelete=0 OR ArchiveDays>0))
-);
-INSERT [workerdock].RetentionPolicy(PolicyId,LogDays,ExecutionDays,AuditDays,ArchiveBeforeDelete,ArchiveDays)
-VALUES(1,30,90,365,0,0);
-GO
 CREATE TABLE [workerdock].ArchiveBatches
 (
     BatchId uniqueidentifier NOT NULL CONSTRAINT PK_ArchiveBatches PRIMARY KEY,
@@ -789,10 +637,11 @@ CREATE TABLE [workerdock].ArchiveBatches
     CreatedAtUtc datetime2(7) NOT NULL,
     FinalizedAtUtc datetime2(7) NULL,
     ArchiveRemovedAtUtc datetime2(7) NULL,
+    PurgedRowCount bigint NOT NULL CONSTRAINT DF_ArchiveBatches_PurgedRowCount DEFAULT(0),
     CONSTRAINT UQ_ArchiveBatches_Path UNIQUE(RelativePath),
     CONSTRAINT CK_ArchiveBatches_Path CHECK(LEN(RelativePath)>0 AND LEFT(RelativePath,1)<>N'/' AND RelativePath NOT LIKE N'%..%'),
     CONSTRAINT CK_ArchiveBatches_Checksum CHECK(LEN(Sha256)=64 AND Sha256 NOT LIKE '%[^0-9A-Fa-f]%'),
-    CONSTRAINT CK_ArchiveBatches_Rows CHECK(RowCount>=0),
+    CONSTRAINT CK_ArchiveBatches_Rows CHECK(RowCount>=0 AND PurgedRowCount BETWEEN 0 AND RowCount),
     CONSTRAINT CK_ArchiveBatches_State CHECK((State=N'Writing' AND FinalizedAtUtc IS NULL) OR (State=N'Finalized' AND FinalizedAtUtc IS NOT NULL AND FinalizedAtUtc>=CreatedAtUtc) OR (State=N'Failed' AND FinalizedAtUtc IS NULL))
 );
 GO
@@ -805,7 +654,7 @@ CREATE TABLE [workerdock].ArchiveBatchItems
     RecordId uniqueidentifier NOT NULL,
     CONSTRAINT PK_ArchiveBatchItems PRIMARY KEY(BatchId,RecordKind,RecordId),
     CONSTRAINT FK_ArchiveBatchItems_Batch FOREIGN KEY(BatchId) REFERENCES [workerdock].ArchiveBatches(BatchId),
-    CONSTRAINT CK_ArchiveBatchItems_Kind CHECK(RecordKind IN(N'AuditEvent',N'Execution',N'ExecutionAttempt',N'ExecutionEvent',N'AttemptStatusEvent',N'JobPermit',N'ExecutionDispatchOutbox',N'ManualRequestDedup'))
+    CONSTRAINT CK_ArchiveBatchItems_Kind CHECK(RecordKind IN(N'AuditEvent',N'Execution',N'ExecutionAttempt',N'OperationalEvent',N'ManualRequestDedup'))
 );
 GO
 CREATE INDEX IX_ArchiveBatchItems_Record ON [workerdock].ArchiveBatchItems(RecordKind,RecordId,BatchId);
@@ -820,10 +669,7 @@ BEGIN
             (i.RecordKind=N'AuditEvent' AND EXISTS(SELECT 1 FROM [workerdock].AuditEvents r WHERE r.EventId=i.RecordId)) OR
             (i.RecordKind=N'Execution' AND EXISTS(SELECT 1 FROM [workerdock].Executions r WHERE r.ExecutionId=i.RecordId)) OR
             (i.RecordKind=N'ExecutionAttempt' AND EXISTS(SELECT 1 FROM [workerdock].Attempts r WHERE r.AttemptId=i.RecordId)) OR
-            (i.RecordKind=N'ExecutionEvent' AND EXISTS(SELECT 1 FROM [workerdock].ExecutionEvents r WHERE r.EventId=i.RecordId)) OR
-            (i.RecordKind=N'AttemptStatusEvent' AND EXISTS(SELECT 1 FROM [workerdock].AttemptStatusEvents r WHERE r.EventId=i.RecordId)) OR
-            (i.RecordKind=N'JobPermit' AND EXISTS(SELECT 1 FROM [workerdock].JobPermits r WHERE r.PermitId=i.RecordId)) OR
-            (i.RecordKind=N'ExecutionDispatchOutbox' AND EXISTS(SELECT 1 FROM [workerdock].Outbox r WHERE r.EventId=i.RecordId AND r.EventType=N'ExecutionDispatch')) OR
+            (i.RecordKind=N'OperationalEvent' AND EXISTS(SELECT 1 FROM [workerdock].OperationalEvents r WHERE r.EventId=i.RecordId)) OR
             (i.RecordKind=N'ManualRequestDedup' AND EXISTS(SELECT 1 FROM [workerdock].ManualRequestDedup r WHERE r.CommandId=i.RecordId) AND (SELECT COUNT(*) FROM [workerdock].ManualRequestDedup r WHERE r.CommandId=i.RecordId)=1)
         )
     ) THROW 51044,'Archive batch item does not identify a source row',1;
@@ -831,13 +677,10 @@ BEGIN
     (
         SELECT 1 FROM inserted i
         JOIN [workerdock].ArchiveBatches b ON b.BatchId=i.BatchId
-        WHERE (i.RecordKind=N'ExecutionEvent' AND EXISTS
-            (SELECT 1 FROM [workerdock].ExecutionEvents r WHERE r.EventId=i.RecordId AND r.AtUtc>b.LogCutoffUtc))
-           OR (i.RecordKind=N'AttemptStatusEvent' AND EXISTS
-            (SELECT 1 FROM [workerdock].AttemptStatusEvents r WHERE r.EventId=i.RecordId AND r.OccurredAtUtc>b.LogCutoffUtc))
+        WHERE (i.RecordKind=N'OperationalEvent' AND EXISTS
+            (SELECT 1 FROM [workerdock].OperationalEvents r WHERE r.EventId=i.RecordId AND r.AtUtc>b.LogCutoffUtc))
            OR (i.RecordKind=N'Execution' AND
-               (EXISTS(SELECT 1 FROM [workerdock].ExecutionEvents r WHERE r.ExecutionId=i.RecordId AND r.AtUtc>b.LogCutoffUtc)
-                OR EXISTS(SELECT 1 FROM [workerdock].AttemptStatusEvents r WHERE r.ExecutionId=i.RecordId AND r.OccurredAtUtc>b.LogCutoffUtc)))
+               EXISTS(SELECT 1 FROM [workerdock].OperationalEvents r WHERE r.ExecutionId=i.RecordId AND r.AtUtc>b.LogCutoffUtc))
     ) THROW 51045,'Archive log item is newer than the batch log cutoff',1;
     IF EXISTS(SELECT 1 FROM inserted i JOIN [workerdock].ArchiveBatches b ON b.BatchId=i.BatchId WHERE b.State<>N'Writing')
         THROW 51034,'Archive batch items are immutable after finalization',1;
@@ -863,7 +706,18 @@ BEGIN
                 AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.RowCount=d.RowCount
                 AND i.EligibleThroughUtc=d.EligibleThroughUtc AND i.LogCutoffUtc=d.LogCutoffUtc
                 AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
+                AND i.PurgedRowCount>=d.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
                 AND USER_NAME()=N'dbo' AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId
+          )
+          AND NOT EXISTS
+          (
+              SELECT 1 FROM inserted i
+              WHERE i.BatchId=d.BatchId AND d.PurgedRowCount<i.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
+                AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.RowCount=d.RowCount
+                AND i.EligibleThroughUtc=d.EligibleThroughUtc AND i.LogCutoffUtc=d.LogCutoffUtc
+                AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
+                AND i.ArchiveRemovedAtUtc=d.ArchiveRemovedAtUtc
+                AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId
           )
           AND NOT (d.ArchiveRemovedAtUtc IS NOT NULL AND USER_NAME()=N'dbo'
               AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId
@@ -875,11 +729,17 @@ BEGIN
     (
         SELECT 1 FROM inserted i JOIN deleted d ON d.BatchId=i.BatchId
         WHERE d.State=N'Finalized'
-          AND NOT (d.ArchiveRemovedAtUtc IS NULL AND i.ArchiveRemovedAtUtc IS NOT NULL
+          AND NOT ((d.ArchiveRemovedAtUtc IS NULL AND i.ArchiveRemovedAtUtc IS NOT NULL
               AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.RowCount=d.RowCount
               AND i.EligibleThroughUtc=d.EligibleThroughUtc AND i.LogCutoffUtc=d.LogCutoffUtc
               AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
+              AND i.PurgedRowCount>=d.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
               AND USER_NAME()=N'dbo' AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId)
+            OR (d.ArchiveRemovedAtUtc=i.ArchiveRemovedAtUtc AND d.PurgedRowCount<i.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
+              AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.RowCount=d.RowCount
+              AND i.EligibleThroughUtc=d.EligibleThroughUtc AND i.LogCutoffUtc=d.LogCutoffUtc
+              AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
+              AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId))
     ) THROW 51048,'Finalized manifest fields are immutable',1;
     IF EXISTS
     (
@@ -942,7 +802,7 @@ BEGIN
 
     DECLARE @ArchiveEnabled bit;
     BEGIN TRANSACTION;
-    SELECT @ArchiveEnabled=ArchiveBeforeDelete FROM [workerdock].RetentionPolicy WITH(UPDLOCK,HOLDLOCK) WHERE PolicyId=1;
+    SELECT @ArchiveEnabled=ArchiveBeforeDelete FROM [workerdock].TenantSettings WITH(UPDLOCK,HOLDLOCK);
     IF @ArchiveEnabled IS NULL THROW 51043,'Retention policy is missing',1;
     IF @ArchiveEnabled=1
     BEGIN
@@ -991,7 +851,7 @@ BEGIN
     DECLARE @ArchiveEnabled bit,@Remaining int,@Count int,@CoverCutoff datetime2(7);
     DECLARE @Purged TABLE(RecordId uniqueidentifier NOT NULL);
     BEGIN TRANSACTION;
-    SELECT @ArchiveEnabled=ArchiveBeforeDelete FROM [workerdock].RetentionPolicy WITH(UPDLOCK,HOLDLOCK) WHERE PolicyId=1;
+    SELECT @ArchiveEnabled=ArchiveBeforeDelete FROM [workerdock].TenantSettings WITH(UPDLOCK,HOLDLOCK);
     IF @ArchiveEnabled IS NULL THROW 51040,'Retention policy is missing',1;
     IF @BatchId IS NULL AND @ArchiveEnabled=1 THROW 51041,'Archive batch required by retention policy',1;
     IF @BatchId IS NOT NULL AND @ArchiveEnabled=0 THROW 51042,'Archive batch is not enabled by retention policy',1;
@@ -1006,38 +866,8 @@ BEGIN
     SET @PurgedRows=0;
 
     DELETE FROM @Purged;
-    DELETE TOP (@Remaining) FROM [workerdock].JobPermits
-        OUTPUT DELETED.PermitId INTO @Purged(RecordId)
-        WHERE (@BatchId IS NULL OR PermitId IN(SELECT i.RecordId FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@BatchId AND i.RecordKind=N'JobPermit'))
-          AND EXISTS(SELECT 1 FROM [workerdock].Executions e WHERE e.ExecutionId=JobPermits.ExecutionId AND e.CreatedAtUtc<=@ExecutionCutoffUtc AND e.AggregatedAtUtc IS NOT NULL AND e.State IN(N'Succeeded',N'Failed',N'Stopped',N'TimedOut',N'Skipped'))
-          AND (@BatchId IS NULL OR JobPermits.ExecutionId IN(SELECT i.RecordId FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@BatchId AND i.RecordKind=N'Execution'))
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].Attempts a WHERE a.ExecutionId=JobPermits.ExecutionId AND a.State=N'Running')
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].Outbox o WHERE o.EntityId=JobPermits.ExecutionId AND o.EventType=N'ExecutionDispatch' AND o.ProjectionState<>N'Retired')
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].AlertIncidents i WHERE i.SubjectKey=N'execution:'+CONVERT(nvarchar(36),JobPermits.ExecutionId) AND i.State IN(N'Open',N'Unknown'));
-    SELECT @Count=COUNT(*) FROM @Purged; SET @Remaining-=@Count; SET @PurgedRows+=@Count;
+    -- Lifecycle rows share OperationalEvents and are purged by PurgeOperationalEvents.
 
-    DELETE FROM @Purged;
-    DELETE TOP (@Remaining) FROM [workerdock].AttemptStatusEvents
-        OUTPUT DELETED.EventId INTO @Purged(RecordId)
-        WHERE OccurredAtUtc<=@LogCutoffUtc
-          AND (@BatchId IS NULL OR EventId IN(SELECT i.RecordId FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@BatchId AND i.RecordKind=N'AttemptStatusEvent'))
-          AND EXISTS(SELECT 1 FROM [workerdock].Executions e WHERE e.ExecutionId=AttemptStatusEvents.ExecutionId AND e.AggregatedAtUtc IS NOT NULL AND e.State IN(N'Succeeded',N'Failed',N'Stopped',N'TimedOut',N'Skipped'))
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].Attempts a WHERE a.ExecutionId=AttemptStatusEvents.ExecutionId AND a.State=N'Running')
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].JobPermits p WHERE p.ExecutionId=AttemptStatusEvents.ExecutionId)
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].AlertIncidents i WHERE i.SubjectKey=N'execution:'+CONVERT(nvarchar(36),AttemptStatusEvents.ExecutionId) AND i.State IN(N'Open',N'Unknown'));
-    SELECT @Count=COUNT(*) FROM @Purged; SET @Remaining-=@Count; SET @PurgedRows+=@Count;
-
-    DELETE FROM @Purged;
-    DELETE TOP (@Remaining) FROM [workerdock].ExecutionEvents
-        OUTPUT DELETED.EventId INTO @Purged(RecordId)
-        WHERE AtUtc<=@LogCutoffUtc
-          AND (@BatchId IS NULL OR EventId IN(SELECT i.RecordId FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@BatchId AND i.RecordKind=N'ExecutionEvent'))
-          AND EXISTS(SELECT 1 FROM [workerdock].Executions e WHERE e.ExecutionId=ExecutionEvents.ExecutionId AND e.AggregatedAtUtc IS NOT NULL AND e.State IN(N'Succeeded',N'Failed',N'Stopped',N'TimedOut',N'Skipped'))
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].Attempts a WHERE a.ExecutionId=ExecutionEvents.ExecutionId AND a.State=N'Running')
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].JobPermits p WHERE p.ExecutionId=ExecutionEvents.ExecutionId)
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].AlertIncidents i WHERE i.SubjectKey=N'execution:'+CONVERT(nvarchar(36),ExecutionEvents.ExecutionId) AND i.State IN(N'Open',N'Unknown'));
-    SELECT @Count=COUNT(*) FROM @Purged;
-    SET @Remaining-=@Count; SET @PurgedRows+=@Count;
     DELETE FROM @Purged;
     DELETE TOP (@Remaining) FROM [workerdock].Attempts
         OUTPUT DELETED.AttemptId INTO @Purged(RecordId)
@@ -1046,10 +876,7 @@ BEGIN
           -- Abandoned attempts are retained diagnostic history; purge them only with an old, aggregated terminal execution.
           AND State IN(N'Succeeded',N'Failed',N'Stopped',N'TimedOut',N'Skipped',N'Abandoned')
           AND EXISTS(SELECT 1 FROM [workerdock].Executions e WHERE e.ExecutionId=Attempts.ExecutionId AND e.CreatedAtUtc<=@ExecutionCutoffUtc AND e.AggregatedAtUtc IS NOT NULL AND e.State IN(N'Succeeded',N'Failed',N'Stopped',N'TimedOut',N'Skipped'))
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].JobPermits p WHERE p.ExecutionId=Attempts.ExecutionId)
           AND NOT EXISTS(SELECT 1 FROM [workerdock].AlertIncidents i WHERE i.SubjectKey=N'execution:'+CONVERT(nvarchar(36),Attempts.ExecutionId) AND i.State IN(N'Open',N'Unknown'))
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].ExecutionEvents ev WHERE ev.AttemptId=Attempts.AttemptId)
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].AttemptStatusEvents ev WHERE ev.AttemptId=Attempts.AttemptId);
     SELECT @Count=COUNT(*) FROM @Purged; SET @Remaining-=@Count; SET @PurgedRows+=@Count;
     DELETE FROM @Purged;
     DELETE TOP (@Remaining) FROM [workerdock].ManualRequestDedup
@@ -1058,27 +885,13 @@ BEGIN
           AND (@BatchId IS NULL OR (CommandId IN(SELECT i.RecordId FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@BatchId AND i.RecordKind=N'ManualRequestDedup') AND ExecutionId IN(SELECT i.RecordId FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@BatchId AND i.RecordKind=N'Execution')));
     SELECT @Count=COUNT(*) FROM @Purged; SET @Remaining-=@Count; SET @PurgedRows+=@Count;
     DELETE FROM @Purged;
-    DELETE TOP (@Remaining) FROM [workerdock].Outbox
-        OUTPUT DELETED.EventId INTO @Purged(RecordId)
-        WHERE EventType=N'ExecutionDispatch' AND ProjectionState=N'Retired'
-          AND (@BatchId IS NULL OR EventId IN(SELECT i.RecordId FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@BatchId AND i.RecordKind=N'ExecutionDispatchOutbox'))
-          AND (@BatchId IS NULL OR Outbox.EntityId IN(SELECT i.RecordId FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@BatchId AND i.RecordKind=N'Execution'))
-          AND EXISTS(SELECT 1 FROM [workerdock].Executions e WHERE e.ExecutionId=Outbox.EntityId AND e.CreatedAtUtc<=@ExecutionCutoffUtc AND e.AggregatedAtUtc IS NOT NULL AND e.State IN(N'Succeeded',N'Failed',N'Stopped',N'TimedOut',N'Skipped'))
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].JobPermits p WHERE p.ExecutionId=Outbox.EntityId)
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].AlertIncidents i WHERE i.SubjectKey=N'execution:'+CONVERT(nvarchar(36),Outbox.EntityId) AND i.State IN(N'Open',N'Unknown'));
-    SELECT @Count=COUNT(*) FROM @Purged; SET @Remaining-=@Count; SET @PurgedRows+=@Count;
-    DELETE FROM @Purged;
     DELETE TOP (@Remaining) FROM [workerdock].Executions
         OUTPUT DELETED.ExecutionId INTO @Purged(RecordId)
         WHERE CreatedAtUtc<=@ExecutionCutoffUtc AND AggregatedAtUtc IS NOT NULL AND State IN(N'Succeeded',N'Failed',N'Stopped',N'TimedOut',N'Skipped')
           AND (@BatchId IS NULL OR ExecutionId IN(SELECT i.RecordId FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@BatchId AND i.RecordKind=N'Execution'))
           AND NOT EXISTS(SELECT 1 FROM [workerdock].Attempts a WHERE a.ExecutionId=Executions.ExecutionId)
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].ExecutionEvents ev WHERE ev.ExecutionId=Executions.ExecutionId)
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].AttemptStatusEvents ev WHERE ev.ExecutionId=Executions.ExecutionId)
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].JobPermits p WHERE p.ExecutionId=Executions.ExecutionId)
           AND NOT EXISTS(SELECT 1 FROM [workerdock].ManualRequestDedup d WHERE d.ExecutionId=Executions.ExecutionId)
           AND NOT EXISTS(SELECT 1 FROM [workerdock].RetentionRequestTombstones t WHERE t.ExecutionId=Executions.ExecutionId AND t.ExpiresAtUtc>=SYSUTCDATETIME())
-          AND NOT EXISTS(SELECT 1 FROM [workerdock].Outbox o WHERE o.EntityId=Executions.ExecutionId AND o.EventType=N'ExecutionDispatch' AND o.ProjectionState<>N'Retired')
           AND NOT EXISTS(SELECT 1 FROM [workerdock].AlertIncidents i WHERE i.SubjectKey=N'execution:'+CONVERT(nvarchar(36),Executions.ExecutionId) AND i.State IN(N'Open',N'Unknown'));
     SELECT @Count=COUNT(*) FROM @Purged; SET @Remaining-=@Count; SET @PurgedRows+=@Count;
     INSERT [workerdock].RetentionPurgeAudit(PurgeId,PurgeKind,CutoffUtc,PurgedRowCount,PurgedAtUtc,ArchiveBatchId)
@@ -1124,7 +937,7 @@ BEGIN
     DECLARE @ArchiveDays int,@AuditDays int,@FinalizedAtUtc datetime2(7),@RowCount bigint,@ArchiveRemovedAtUtc datetime2(7);
     DECLARE @Remaining int=@MaxRows,@Count int;
     BEGIN TRANSACTION;
-    SELECT @ArchiveDays=ArchiveDays,@AuditDays=AuditDays FROM [workerdock].RetentionPolicy WITH(UPDLOCK,HOLDLOCK) WHERE PolicyId=1;
+    SELECT @ArchiveDays=ArchiveRetentionDays,@AuditDays=AuditRetentionDays FROM [workerdock].TenantSettings WITH(UPDLOCK,HOLDLOCK);
     IF @ArchiveDays IS NULL OR @AuditDays IS NULL THROW 51040,'Retention policy is missing',1;
     IF @FinalizedBeforeUtc>SYSUTCDATETIME() OR @AuditCutoffUtc>DATEADD(day,-@AuditDays,SYSUTCDATETIME())
         THROW 51050,'Archive or audit cutoff is newer than configured retention permits',1;
@@ -1165,7 +978,6 @@ BEGIN
     COMMIT TRANSACTION;
 END;
 GO
-GRANT SELECT,UPDATE ON [workerdock].RetentionPolicy TO WorkerDockRuntime;
 GRANT SELECT,INSERT,UPDATE ON [workerdock].ArchiveBatches TO WorkerDockRuntime;
 GRANT SELECT,INSERT ON [workerdock].ArchiveBatchItems TO WorkerDockRuntime;
 DENY DELETE ON [workerdock].ArchiveBatchItems TO WorkerDockRuntime;
@@ -1215,8 +1027,6 @@ UPDATE [workerdock].JobRevisions
 SET TemplateVersion=N'1.1.0'
 WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server');
 
-DELETE FROM [workerdock].WorkerCapabilities
-WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server');
 
 DELETE FROM [workerdock].TemplateCatalog
 WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server');
@@ -1226,8 +1036,6 @@ ENABLE TRIGGER [workerdock].TemplateCatalog_Immutable ON [workerdock].TemplateCa
 
 IF EXISTS(SELECT 1 FROM [workerdock].JobRevisions WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server'))
     THROW 51003,'LegacyTemplateRevisionRemains',1;
-IF EXISTS(SELECT 1 FROM [workerdock].WorkerCapabilities WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server'))
-    THROW 51003,'LegacyTemplateCapabilityRemains',1;
 IF EXISTS(SELECT 1 FROM [workerdock].TemplateCatalog WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server'))
     THROW 51003,'LegacyTemplateCatalogRemains',1;
 
@@ -1260,7 +1068,6 @@ ALTER TABLE [workerdock].Executions ADD
     HoldsJobSlot bit NOT NULL CONSTRAINT DF_Executions_HoldsJobSlot DEFAULT(0);
 ALTER TABLE [workerdock].TemplateCatalog ADD ConcurrencyLimit int NOT NULL CONSTRAINT DF_TemplateCatalog_ConcurrencyLimit DEFAULT(1);
 GRANT UPDATE (ConcurrencyLimit) ON [workerdock].TemplateCatalog TO WorkerDockRuntime;
-UPDATE cat SET ConcurrencyLimit=p.EffectiveLimit FROM [workerdock].TemplateCatalog cat JOIN [workerdock].TemplatePolicies p ON p.TemplateId=cat.TemplateId;
 ALTER TABLE [workerdock].IntegrationSettings ADD EgressPoliciesJson nvarchar(max) NOT NULL CONSTRAINT DF_IntegrationSettings_EgressPolicies DEFAULT(N'[]');
 UPDATE settings SET EgressPoliciesJson=(SELECT p.Name AS [name],p.Revision AS [revision],JSON_QUERY(p.HostsJson) AS [hosts],JSON_QUERY(p.PortsJson) AS [ports],
     JSON_QUERY(p.PrivateCidrsJson) AS [privateCidrs],p.AllowHttp AS [allowHttp] FROM [workerdock].TenantEgressPolicies p ORDER BY p.Name FOR JSON PATH)
@@ -1270,7 +1077,6 @@ UPDATE e SET ManualActorScopeHash=d.ActorScopeHash,ManualRequestKeyHash=d.Reques
     ManualActorMode=d.ActorMode,ManualActorSubject=d.ActorSubject,ManualRequestHash=d.RequestHash,
     ManualCommandId=d.CommandId,ManualResponseState=d.ResponseState,ManualRequestExpiresAtUtc=d.ExpiresAtUtc
 FROM [workerdock].Executions e JOIN [workerdock].ManualRequestDedup d ON d.ExecutionId=e.ExecutionId;
-UPDATE e SET HoldsJobSlot=1 FROM [workerdock].Executions e JOIN [workerdock].JobPermits p ON p.ExecutionId=e.ExecutionId;
 
 CREATE UNIQUE INDEX UX_Executions_ManualRequest ON [workerdock].Executions(JobId,ManualActorScopeHash,ManualRequestKeyHash)
     WHERE ManualActorScopeHash IS NOT NULL AND ManualRequestKeyHash IS NOT NULL;
@@ -1288,26 +1094,10 @@ ALTER TABLE [workerdock].TenantSettings ADD
 ALTER TABLE [workerdock].TenantSettings ADD CONSTRAINT CK_TenantSettings_Retention CHECK
     (LogRetentionDays BETWEEN 1 AND 3650 AND ExecutionRetentionDays BETWEEN 1 AND 3650 AND AuditRetentionDays BETWEEN 1 AND 3650
      AND ArchiveRetentionDays BETWEEN 0 AND 3650 AND RetentionVersion>0 AND (ArchiveBeforeDelete=0 OR ArchiveRetentionDays>0));
-UPDATE s SET LogRetentionDays=p.LogDays,ExecutionRetentionDays=p.ExecutionDays,AuditRetentionDays=p.AuditDays,
-    ArchiveBeforeDelete=p.ArchiveBeforeDelete,ArchiveRetentionDays=p.ArchiveDays
-FROM [workerdock].TenantSettings s CROSS JOIN [workerdock].RetentionPolicy p WHERE p.PolicyId=1;
 
 ALTER TABLE [workerdock].AlertRules ADD LastEvaluatedAtUtc datetime2(7) NULL,LastSubjectKey nvarchar(256) NULL;
 UPDATE r SET LastEvaluatedAtUtc=s.LastEvaluatedAtUtc,LastSubjectKey=s.LastSubjectKey
 FROM [workerdock].AlertRules r CROSS JOIN [workerdock].AlertEvaluationState s WHERE s.StateId=1 AND s.LastRuleId=r.RuleId;
-
-ALTER TABLE [workerdock].ArchiveBatches ADD PurgedRowCount bigint NOT NULL
-    CONSTRAINT DF_ArchiveBatches_PurgedRowCount DEFAULT(0);
-ALTER TABLE [workerdock].ArchiveBatches ADD CONSTRAINT CK_ArchiveBatches_PurgedRowCount
-    CHECK(PurgedRowCount BETWEEN 0 AND RowCount);
-UPDATE b SET PurgedRowCount=CASE WHEN totals.PurgedRows>b.RowCount THEN b.RowCount ELSE totals.PurgedRows END
-FROM [workerdock].ArchiveBatches b
-CROSS APPLY
-(
-    SELECT COALESCE(SUM(CONVERT(bigint,a.PurgedRowCount)),0) PurgedRows
-    FROM [workerdock].RetentionPurgeAudit a
-    WHERE a.ArchiveBatchId=b.BatchId AND a.PurgeKind IN(N'AuditEvents',N'RetentionItems')
-) totals;
 
 CREATE TABLE [workerdock].OperationalEvents
 (
@@ -1339,9 +1129,7 @@ CREATE TABLE [workerdock].OperationalEvents
     CONSTRAINT CK_OperationalEvents_Code CHECK(LEN(Code)>0)
 );
 INSERT [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
-SELECT EventId,N'Execution',ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson FROM [workerdock].ExecutionEvents;
 INSERT [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
-SELECT EventId,N'Execution',ExecutionId,AttemptId,N'Lifecycle',0,OccurredAtUtc,State,N'{}' FROM [workerdock].AttemptStatusEvents;
 INSERT [workerdock].OperationalEvents(EventId,EventKind,AtUtc,Code,ScheduleId,ScheduleRevision,FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount,SkippedOccurrences)
 SELECT RecoveryEventId,N'ScheduleRecovery',CreatedAtUtc,N'ScheduleRecovered',ScheduleId,ScheduleRevision,FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount,SkippedOccurrences
 FROM [workerdock].ScheduleRecoveryEvents;
@@ -1351,9 +1139,7 @@ CREATE INDEX IX_OperationalEvents_Recovery ON [workerdock].OperationalEvents(Eve
     INCLUDE(FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount,SkippedOccurrences);
 GRANT SELECT,INSERT ON [workerdock].OperationalEvents TO WorkerDockRuntime;
 GRANT UPDATE(LastEvaluatedAtUtc,LastSubjectKey) ON [workerdock].AlertRules TO WorkerDockRuntime;
-ALTER TABLE [workerdock].ArchiveBatchItems DROP CONSTRAINT CK_ArchiveBatchItems_Kind;
-ALTER TABLE [workerdock].ArchiveBatchItems ADD CONSTRAINT CK_ArchiveBatchItems_Kind CHECK
-    (RecordKind IN(N'AuditEvent',N'Execution',N'ExecutionAttempt',N'ExecutionEvent',N'AttemptStatusEvent',N'OperationalEvent',N'JobPermit',N'ExecutionDispatchOutbox',N'ManualRequestDedup'));
+GO
 CREATE PROCEDURE [workerdock].PurgeOperationalEvents
     @LogCutoffUtc datetime2(7),@MaxRows int,@BatchId uniqueidentifier=NULL,@PurgedRows int OUTPUT
 WITH EXECUTE AS OWNER
@@ -1388,6 +1174,4 @@ END;
 GO
 GRANT EXECUTE ON [workerdock].PurgeOperationalEvents TO WorkerDockRuntime;
 
-INSERT [workerdock].SchemaHistory(MigrationId,UpChecksum,DownChecksum,AppliedAtUtc) VALUES(N'0001_initial',N'CDF10AB85CD86F0A873A83484E09CD4D1D41DB59BC0CEE1D4D9D3DB48056C37A',N'548EB4A529828F45BFA504E13F3C78B19E4548628C8E763DE26E6427E17C4BCF',SYSUTCDATETIME());
-COMMIT TRANSACTION;
-SET IMPLICIT_TRANSACTIONS OFF;
+COMMIT;

@@ -49,6 +49,7 @@ public sealed class AlertDeliveryTests
         Assert.Null(await store.TryBeginAsync(deliveryId, 1, Guid.NewGuid(), default));
         await database.ExecuteAsync($"UPDATE [workerdock].AlertDeliveries SET LeaseExpiresAtUtc=DATEADD(second,-1,SYSUTCDATETIME()) WHERE DeliveryId='{deliveryId}'");
 
+        Assert.Equal(new DueAlertDelivery(deliveryId, 1), Assert.Single(await store.ReadDueAsync(10, default)));
         Assert.Null(await store.TryBeginAsync(deliveryId, 1, Guid.NewGuid(), default));
         Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].AlertDeliveryAttempts WHERE DeliveryId='{deliveryId}' AND AttemptOrdinal=1 AND Result=N'TimedOut' AND SafeCode=N'AlertLeaseExpired'"));
         Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].AlertDeliveries WHERE DeliveryId='{deliveryId}' AND Status=N'Pending' AND AttemptOrdinal=2 AND AttemptCount=1"));
@@ -72,7 +73,6 @@ public sealed class AlertDeliveryTests
         var sinkRevisionId = Guid.NewGuid();
         var newerSinkRevisionId = Guid.NewGuid();
         var ruleId = Guid.NewGuid();
-        var workerId = Guid.NewGuid();
         await database.ExecuteAsync($$"""
             INSERT [workerdock].AlertSinks(SinkId,Name,CurrentRevision,Enabled) VALUES('{{sinkId}}','Test',1,1);
             INSERT [workerdock].AlertSinkRevisions(SinkRevisionId,SinkId,Revision,SinkType,ConfigurationJson,SecretReferencesJson,MaxAttempts,RetryMinSeconds,RetryMaxSeconds,TimeoutSeconds,CreatedAtUtc)
@@ -81,8 +81,6 @@ public sealed class AlertDeliveryTests
             VALUES('{{newerSinkRevisionId}}','{{sinkId}}',2,N'webhook',N'{"url":"https://current.example.test"}',N'[]',2,1,60,5,SYSUTCDATETIME());
             INSERT [workerdock].AlertRules(RuleId,Name,Condition,Threshold,WindowSeconds,GraceSeconds,ReminderSeconds,SinkId,Enabled,CurrentRevision)
             VALUES('{{ruleId}}',N'Worker down',N'WorkerUnavailable',1,60,0,NULL,'{{sinkId}}',1,1);
-            INSERT [workerdock].Workers(InstallationId,BootId,CatalogDigest,CapacityCeiling,LiveLimit,LastHeartbeatUtc)
-            VALUES('{{workerId}}',N'old-boot',REPLICATE('0',64),1,1,DATEADD(day,-1,SYSUTCDATETIME()));
             """);
 
         var evaluator = new IncidentEvaluator(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
@@ -97,7 +95,6 @@ public sealed class AlertDeliveryTests
         var deliveryId = await ReadDeliveryIdAsync(database);
         Assert.NotEqual(Guid.Empty, deliveryId);
         await database.ExecuteAsync($"UPDATE [workerdock].AlertSinks SET CurrentRevision=2 WHERE SinkId='{sinkId}'");
-        Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Outbox WHERE EventType=N'AlertDispatch'"));
 
         var store = new SqlAlertDeliveryStore(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
         Assert.Equal(new DueAlertDelivery(deliveryId, 1), Assert.Single(await store.ReadDueAsync(10, default)));

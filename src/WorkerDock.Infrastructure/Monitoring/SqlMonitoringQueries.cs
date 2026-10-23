@@ -29,7 +29,7 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
                 (SELECT COUNT(*) FROM [workerdock].Executions WHERE State IN(N'Failed',N'TimedOut') AND CreatedAtUtc>=DATEADD(hour,-24,@now)),
                 (SELECT COUNT(*) FROM [workerdock].Executions e JOIN [workerdock].Attempts a ON a.ExecutionId=e.ExecutionId AND a.AttemptNumber=(SELECT MAX(a2.AttemptNumber) FROM [workerdock].Attempts a2 WHERE a2.ExecutionId=e.ExecutionId) WHERE e.State=N'Running' AND a.StartedAtUtc<DATEADD(minute,-5,@now)),
                 (SELECT COUNT(*) FROM [workerdock].Schedules s JOIN [workerdock].Jobs j ON j.JobId=s.JobId WHERE s.Removed=0 AND s.Paused=0 AND j.Enabled=1 AND s.Kind=N'Once' AND s.OneTimeUtc BETWEEN @now AND DATEADD(day,7,@now)),
-                COALESCE((SELECT Ready FROM [workerdock].RuntimeStatus WHERE StateId=1),0),
+                COALESCE((SELECT Ready FROM [workerdock].RuntimeStatus WHERE StateId=1),CONVERT(bit,0)),
                 COALESCE((SELECT HostCeiling FROM [workerdock].RuntimeStatus WHERE StateId=1),1),
                 (SELECT LastHeartbeatUtc FROM [workerdock].RuntimeStatus WHERE StateId=1);
             SELECT TOP(10) j.JobId,r.Name,r.TemplateId,s.OneTimeUtc
@@ -95,9 +95,9 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         command.CommandText = """
             SELECT e.ExecutionId,e.JobId,r.Name,r.TemplateId,e.State,e.Certainty,e.TriggerKind,e.CreatedAtUtc,e.AvailableAtUtc,e.ScheduledForUtc,e.CorrelationId,e.StopRequested,e.ForceStop
               FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision WHERE e.ExecutionId=@id;
-            SELECT a.AttemptId,a.AttemptNumber,a.InstallationId,a.State,a.StartedAtUtc,a.EndedAtUtc,a.DeadlineUtc,a.SafeCode,a.LocalExitConfirmed,a.EffectsMayHaveOccurred
+            SELECT a.AttemptId,a.AttemptNumber,a.State,a.StartedAtUtc,a.EndedAtUtc,a.DeadlineUtc,a.SafeCode,a.LocalExitConfirmed,a.EffectsMayHaveOccurred
               FROM [workerdock].Attempts a WHERE a.ExecutionId=@id ORDER BY a.AttemptNumber;
-            SELECT EventId,AttemptId,State,OccurredAtUtc FROM [workerdock].AttemptStatusEvents WHERE ExecutionId=@id ORDER BY OccurredAtUtc,EventId;
+            SELECT EventId,AttemptId,Code,AtUtc FROM [workerdock].OperationalEvents WHERE ExecutionId=@id AND EventKind=N'Execution' AND Source=N'Lifecycle' ORDER BY AtUtc,EventId;
             """;
         Add(command, "@id", SqlDbType.UniqueIdentifier, executionId);
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -105,7 +105,7 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         var detail = new ExecutionCore(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), Utc(reader.GetDateTime(7)), Utc(reader.GetDateTime(8)), reader.IsDBNull(9) ? null : Utc(reader.GetDateTime(9)), reader.GetGuid(10), reader.GetBoolean(11), reader.GetBoolean(12));
         await reader.NextResultAsync(ct);
         var attempts = new List<ExecutionAttemptDto>();
-        while (await reader.ReadAsync(ct)) attempts.Add(new(reader.GetGuid(0), reader.GetInt32(1), reader.IsDBNull(2) ? null : reader.GetGuid(2), reader.GetString(3), NullableUtc(reader, 4), NullableUtc(reader, 5), NullableUtc(reader, 6), reader.IsDBNull(7) ? null : reader.GetString(7), reader.GetBoolean(8), reader.GetBoolean(9)));
+        while (await reader.ReadAsync(ct)) attempts.Add(new(reader.GetGuid(0), reader.GetInt32(1), reader.GetString(2), NullableUtc(reader, 3), NullableUtc(reader, 4), NullableUtc(reader, 5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetBoolean(7), reader.GetBoolean(8)));
         await reader.NextResultAsync(ct);
         var timeline = new List<ExecutionEventDto>();
         while (await reader.ReadAsync(ct)) timeline.Add(new(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetGuid(1), reader.GetString(2), Utc(reader.GetDateTime(3))));

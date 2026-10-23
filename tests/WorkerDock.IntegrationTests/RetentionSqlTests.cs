@@ -51,7 +51,6 @@ public sealed class RetentionSqlTests
         await database.ExecuteAsync($$"""
             UPDATE [workerdock].TenantSettings SET LogRetentionDays=365,ExecutionRetentionDays=365,AuditRetentionDays=1,
                 ArchiveBeforeDelete=0,ArchiveRetentionDays=90,RetentionVersion=RetentionVersion+1;
-            UPDATE [workerdock].RetentionPolicy SET LogDays=365,ExecutionDays=365,AuditDays=1,ArchiveBeforeDelete=0,ArchiveDays=90 WHERE PolicyId=1;
             INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc,FinalizedAtUtc)
             VALUES('{{batchId}}',N'{{batchId:N}}.archive.gz',REPLICATE('A',64),0,DATEADD(day,-100,SYSUTCDATETIME()),DATEADD(day,-365,SYSUTCDATETIME()),N'Writing',DATEADD(day,-101,SYSUTCDATETIME()),NULL);
             INSERT [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson)
@@ -129,7 +128,6 @@ public sealed class RetentionSqlTests
         await database.ExecuteAsync($$"""
             UPDATE [workerdock].TenantSettings SET LogRetentionDays=1,ExecutionRetentionDays=365,AuditRetentionDays=365,
                 ArchiveBeforeDelete=1,ArchiveRetentionDays=90,RetentionVersion=RetentionVersion+1;
-            UPDATE [workerdock].RetentionPolicy SET LogDays=1,ExecutionDays=365,AuditDays=365,ArchiveBeforeDelete=1,ArchiveDays=90 WHERE PolicyId=1;
             INSERT [workerdock].Jobs(JobId,CurrentRevision,Enabled,Archived,ConcurrencyLimit) VALUES('{{jobId}}',1,0,0,1);
             INSERT [workerdock].JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc)
             VALUES('{{jobId}}',1,N'archive-secret',N'workerdock.http',N'1.1.0',N'{}',NULL,N'{}',SYSUTCDATETIME());

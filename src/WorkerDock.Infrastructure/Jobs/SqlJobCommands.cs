@@ -217,7 +217,7 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 var dynamicPlan = dynamicJson is null ? WorkerDock.Contracts.Values.DynamicValueJson.EmptyPlan : WorkerDock.Contracts.Values.DynamicValueJson.Read(dynamicJson.RootElement);
                 var descriptor = templateCatalog is null ? null : await templateCatalog.GetAsync(pinned.GetString(0), pinned.GetString(1), token);
                 var capable = descriptor is not null && ContainsDynamicAnnotation(descriptor.ConfigurationSchema);
-                if (runOptions.ReferenceDateOverride is not null && (!capable || pinned.GetString(1) == "1.0.0")) throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
+                if (runOptions.ReferenceDateOverride is not null && !capable) throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
                 if (dynamicPlan.Bindings.Any(binding => binding.Source == WorkerDock.Contracts.Values.DynamicValueSource.ScheduledTimestamp)) throw new WorkerDockException("ValidationFailed", "configuration.dynamicValues");
                 var valueContext = capable ? WorkerDock.Infrastructure.Values.ExecutionValueContextFactory.Manual(dynamicPlan, new DateTimeOffset(DateTime.SpecifyKind(now, DateTimeKind.Utc)), runOptions.ReferenceDateOverride) : null;
                 if (!WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration(pinned.GetString(0), pinned.GetString(1), json.RootElement, dynamicJson?.RootElement))
@@ -249,16 +249,6 @@ public sealed class SqlJobCommands(TenantDatabaseOptions options, ITemplateCatal
                 await InsertCommandAsync(connection, transaction, receipt, "ManualRun", token);
                 await InsertAuditAsync(connection, transaction, "ManualRunAccepted", executionId,
                     revision, revision, "Accepted", actor, token);
-                var payload = JsonSerializer.Serialize(new { executionId, jobRevision = revision });
-                await using var outbox = Command(connection, transaction,
-                    "INSERT INTO [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState) VALUES (@id,N'ExecutionDispatch',@payload,@now,@now,1,@execution,@revision,@digest,N'Pending')");
-                Add(outbox, "@id", SqlDbType.UniqueIdentifier, Guid.NewGuid());
-                Add(outbox, "@payload", SqlDbType.NVarChar, payload, -1);
-                Add(outbox, "@now", SqlDbType.DateTime2, now);
-                Add(outbox, "@execution", SqlDbType.UniqueIdentifier, executionId);
-                Add(outbox, "@revision", SqlDbType.BigInt, revision);
-                Add(outbox, "@digest", SqlDbType.Char, Hash("ExecutionDispatch|" + executionId.ToString("N") + "|" + revision), 64);
-                await outbox.ExecuteNonQueryAsync(token);
                 await WorkerDock.Infrastructure.Dispatch.JobAdmission.AdmitAsync(connection, transaction, jobId, token);
                 return receipt;
             }, ct);

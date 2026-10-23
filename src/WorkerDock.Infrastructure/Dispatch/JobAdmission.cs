@@ -8,7 +8,7 @@ using static WorkerDock.Infrastructure.Executions.SqlAttemptStore;
 
 namespace WorkerDock.Infrastructure.Dispatch;
 
-public sealed record AdmissionCandidate(Guid ExecutionId, string Mode, int BacklogLimit, bool HoldsPermit = false);
+public sealed record AdmissionCandidate(Guid ExecutionId, string Mode, int BacklogLimit, bool HoldsJobSlot = false);
 public sealed record AdmissionDecision(IReadOnlyList<Guid> Admit, IReadOnlyList<Guid> Skip, IReadOnlyDictionary<Guid,string> SkipReasons);
 public sealed class JobAdmission(TenantDatabaseOptions options)
 {
@@ -61,73 +61,22 @@ public sealed class JobAdmission(TenantDatabaseOptions options)
         {
             await using var skip = Command(c, t, """
                 UPDATE [workerdock].Executions SET State=N'Skipped',HoldsJobSlot=0 WHERE ExecutionId=@id AND State=N'Queued';
-                IF @@ROWCOUNT=1 INSERT [workerdock].AttemptStatusEvents(EventId,ExecutionId,State,OccurredAtUtc) VALUES(NEWID(),@id,@reason,SYSUTCDATETIME());
-                UPDATE [workerdock].Outbox SET ProjectionState=N'Retired' WHERE EntityId=@id AND EventType=N'ExecutionDispatch';
+                IF @@ROWCOUNT=1 INSERT [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
+                    VALUES(NEWID(),N'Execution',@id,N'Lifecycle',0,SYSUTCDATETIME(),@reason,N'{}');
                 """);
             Add(skip, "@reason", SqlDbType.NVarChar, decisions.SkipReasons[id],40); Add(skip, "@id", SqlDbType.UniqueIdentifier, id); await skip.ExecuteNonQueryAsync(ct);
             await WorkerDock.Infrastructure.Executions.SqlCommandOutcomes.SettleAsync(c, t, id, ct);
         }
-        await using var enable = Command(c, t, """
-            UPDATE TOP (32) o SET ProjectionState=N'Pending',DispatchedAtUtc=NULL,ReviewAtUtc=NULL,RetryAtUtc=NULL
-            FROM [workerdock].Outbox o JOIN [workerdock].Executions e ON e.ExecutionId=o.EntityId JOIN [workerdock].Jobs j ON j.JobId=e.JobId
-            JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-            JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
-            WHERE e.JobId=@job AND j.Enabled=1 AND j.Archived=0 AND e.State IN(N'Queued',N'RetryWaiting') AND e.HoldsJobSlot=1
-                AND cat.Enabled=1 AND cat.ConcurrencyLimit>0 AND EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus runtime WHERE runtime.StateId=1 AND runtime.Ready=1 AND runtime.LastHeartbeatUtc>DATEADD(second,-30,SYSUTCDATETIME())) AND o.EventType=N'ExecutionDispatch' AND o.ProjectionState=N'Held'
-                AND COALESCE(TRY_CONVERT(int,JSON_VALUE(o.PayloadJson,'$.attemptOrdinal')),1)=1+COALESCE((SELECT MAX(a.AttemptNumber) FROM [workerdock].Attempts a WHERE a.ExecutionId=e.ExecutionId),0);
-            """);
-        Add(enable, "@job", SqlDbType.UniqueIdentifier, jobId); await enable.ExecuteNonQueryAsync(ct);
-        await BindDeliveriesAsync(c, t, jobId, ct);
         return decisions.Admit.Count;
-    }
-
-    // A delivery epoch is immutable once a runtime can acquire it. Rebinding creates a new outbox identity.
-    private static async ValueTask BindDeliveriesAsync(DbConnection c, DbTransaction t, Guid jobId, CancellationToken ct)
-    {
-        await using var read = Command(c, t, """
-            SELECT TOP (32) o.EventId,e.ExecutionId,e.JobRevision,COALESCE(TRY_CONVERT(int,JSON_VALUE(o.PayloadJson,'$.attemptOrdinal')),1),
-                e.AvailableAtUtc,CONVERT(bigint,0)
-            FROM [workerdock].Outbox o JOIN [workerdock].Executions e ON e.ExecutionId=o.EntityId
-            JOIN [workerdock].Jobs j ON j.JobId=e.JobId
-            JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-            JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
-            WHERE e.JobId=@job AND j.Enabled=1 AND j.Archived=0 AND e.State IN(N'Queued',N'RetryWaiting') AND e.HoldsJobSlot=1
-                AND cat.Enabled=1 AND cat.ConcurrencyLimit>0 AND EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus runtime WHERE runtime.StateId=1 AND runtime.Ready=1 AND runtime.LastHeartbeatUtc>DATEADD(second,-30,SYSUTCDATETIME())) AND o.EventType=N'ExecutionDispatch' AND o.ProjectionState<>N'Retired'
-                AND COALESCE(TRY_CONVERT(int,JSON_VALUE(o.PayloadJson,'$.attemptOrdinal')),1)=1+COALESCE((SELECT MAX(a.AttemptNumber) FROM [workerdock].Attempts a WHERE a.ExecutionId=e.ExecutionId),0)
-                AND TRY_CONVERT(bigint,JSON_VALUE(o.PayloadJson,'$.capacityRevision'))<>0
-            """);
-        Add(read, "@job", SqlDbType.UniqueIdentifier, jobId);
-        await using var reader = await read.ExecuteReaderAsync(ct);
-        var rows = new List<(Guid Old, Guid Execution, long Revision, int Ordinal, DateTime Due, long Epoch)>();
-        while (await reader.ReadAsync(ct)) rows.Add((reader.GetGuid(0),reader.GetGuid(1),reader.GetInt64(2),reader.GetInt32(3),reader.GetDateTime(4),reader.GetInt64(5)));
-        await reader.CloseAsync();
-        foreach (var row in rows)
-        {
-            var delivery = WorkerDock.Application.Dispatch.DispatchIntent.CapacityDeliveryId(row.Execution,row.Ordinal,row.Epoch);
-            await using var bind = Command(c, t, """
-                IF EXISTS(SELECT 1 FROM [workerdock].Outbox WHERE EventId=@id AND
-                    (EntityId<>@execution OR EntityRevision<>@revision OR PayloadDigest<>@digest OR EventType<>N'ExecutionDispatch'))
-                    THROW 51013,'DispatchIntegrityError',1;
-                UPDATE [workerdock].Outbox SET ProjectionState=N'Retired' WHERE EventId=@old;
-                IF NOT EXISTS(SELECT 1 FROM [workerdock].Outbox WHERE EventId=@id)
-                INSERT [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState)
-                VALUES(@id,N'ExecutionDispatch',@payload,SYSUTCDATETIME(),@due,1,@execution,@revision,@digest,N'Pending');
-                """);
-            Add(bind, "@old", SqlDbType.UniqueIdentifier, row.Old); Add(bind, "@id", SqlDbType.UniqueIdentifier, delivery);
-            Add(bind, "@execution", SqlDbType.UniqueIdentifier, row.Execution); Add(bind, "@revision", SqlDbType.BigInt, row.Revision); Add(bind, "@due", SqlDbType.DateTime2, row.Due);
-            Add(bind, "@digest", SqlDbType.Char, WorkerDock.Application.Dispatch.ProjectionEnvelope.ExecutionDigest(row.Execution,row.Revision,row.Ordinal,row.Epoch),64);
-            Add(bind, "@payload", SqlDbType.NVarChar, JsonSerializer.Serialize(new { executionId=row.Execution,jobRevision=row.Revision,attemptOrdinal=row.Ordinal,capacityRevision=row.Epoch }),-1);
-            await bind.ExecuteNonQueryAsync(ct);
-        }
     }
     public static AdmissionDecision Decide(IReadOnlyList<AdmissionCandidate> ordered, int liveLimit, int heldCount = 0, bool exclusiveHeld = false)
     {
         if (liveLimit < 0) throw new ArgumentOutOfRangeException(nameof(liveLimit));
-        var holders = ordered.Where(x => x.HoldsPermit).ToArray();
+        var holders = ordered.Where(x => x.HoldsJobSlot).ToArray();
         var count = heldCount + holders.Length; var exclusive = exclusiveHeld || holders.Any(x => x.Mode != "Allow");
         var admit = new List<Guid>(); var skip = new List<Guid>(); var reasons = new Dictionary<Guid,string>();
         var waiting = 0; var blocked = false; var outstanding = count > 0;
-        foreach (var work in ordered.Where(x => !x.HoldsPermit).Take(MaximumCandidates))
+        foreach (var work in ordered.Where(x => !x.HoldsJobSlot).Take(MaximumCandidates))
         {
             if (work.Mode == "Skip" && outstanding) { skip.Add(work.ExecutionId); reasons[work.ExecutionId]="SkippedOverlap"; continue; }
             var canAdmit = !blocked && !exclusive && count < liveLimit && (work.Mode == "Allow" || count == 0);

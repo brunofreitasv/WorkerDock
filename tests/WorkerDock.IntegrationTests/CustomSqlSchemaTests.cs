@@ -56,11 +56,11 @@ public sealed class CustomSqlSchemaTests
         var reviewed = new[]
         {
             "AlertDeliveries", "AlertDeliveryAttempts", "AlertEvaluationState", "AlertIncidents", "AlertRuleRevisions", "AlertRules", "AlertSinkRevisions", "AlertSinks",
-            "ArchiveBatches", "ArchiveBatchItems", "Attempts", "AttemptStatusEvents", "AuditEvents", "Commands", "ConnectionProfileRevisions", "ConnectionProfiles",
-            "ExecutionEvents", "ExecutionMetricAggregates", "Executions", "IntegrationSettings", "IntegrationSettingsRevisions", "JobPermits", "JobRevisions", "Jobs",
-            "ManualRequestDedup", "OperationalEvents", "Outbox", "PolicyRevisions", "ProjectionMaintenance", "RetentionPolicy", "RetentionPurgeAudit", "RetentionRequestTombstones",
-            "RuntimeStatus", "ScheduleRecoveryEvents", "ScheduleRuleScanState", "Schedules", "SchemaHistory", "ServiceHealth",
-            "TemplateCatalog", "TemplatePolicies", "TenantSettings", "WorkerCapabilities", "Workers"
+            "ArchiveBatches", "ArchiveBatchItems", "Attempts", "AuditEvents", "Commands", "ConnectionProfileRevisions", "ConnectionProfiles",
+            "ExecutionMetricAggregates", "Executions", "IntegrationSettings", "IntegrationSettingsRevisions", "JobRevisions", "Jobs",
+            "ManualRequestDedup", "OperationalEvents", "RetentionPurgeAudit", "RetentionRequestTombstones",
+            "RuntimeStatus", "ScheduleRecoveryEvents", "ScheduleRuleScanState", "Schedules", "SchemaHistory",
+            "TemplateCatalog", "TenantSettings"
         };
         Assert.Equal(reviewed.Order(StringComparer.Ordinal), tables.Order(StringComparer.Ordinal));
     }
@@ -126,10 +126,40 @@ public sealed class CustomSqlSchemaTests
             .Order(StringComparer.Ordinal);
         var expectedSeeds = new[]
         {
-            "AlertEvaluationState", "IntegrationSettings", "IntegrationSettingsRevisions", "PolicyRevisions", "ProjectionMaintenance",
-            "RetentionPolicy", "RuntimeStatus", "ScheduleRuleScanState", "SchemaHistory", "TemplateCatalog", "TemplatePolicies", "TenantSettings"
+            "AlertEvaluationState", "IntegrationSettings", "IntegrationSettingsRevisions",
+            "RuntimeStatus", "ScheduleRuleScanState", "SchemaHistory", "TemplateCatalog", "TenantSettings"
         }.Order(StringComparer.Ordinal);
         Assert.Equal(expectedSeeds, seededTables);
+    }
+
+    [Fact]
+    public void Fresh_baseline_sql_and_runtime_queries_match_the_single_node_schema()
+    {
+        var root = Root;
+        var up = File.ReadAllText(Path.Combine(root, "database", "tenant", "0001_initial.up.sql"));
+        var down = File.ReadAllText(Path.Combine(root, "database", "tenant", "0001_initial.down.sql"));
+        var queue = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Executions", "SqlExecutionQueue.cs"));
+        var attempts = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Executions", "SqlAttemptStore.cs"));
+        var alerts = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Alerts", "IncidentEvaluator.cs"));
+        var monitoring = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Monitoring", "SqlMonitoringQueries.cs"));
+
+        Assert.Contains("AS JobConcurrencyLimit", queue);
+        Assert.Contains("AS TemplateConcurrencyLimit", queue);
+        Assert.DoesNotContain("candidate.EffectiveLimit", queue);
+        Assert.Contains("j.Enabled,j.Archived,cat.Enabled,CONVERT(bit,0),CONVERT(uniqueidentifier,NULL)", attempts);
+        Assert.Contains("MAX(r.AtUtc) DetectedAtUtc", alerts);
+        Assert.DoesNotContain("MAX(r.CreatedAtUtc) DetectedAtUtc", alerts);
+        Assert.Contains("COALESCE((SELECT Ready FROM [workerdock].RuntimeStatus WHERE StateId=1),CONVERT(bit,0))", monitoring);
+        Assert.Contains("CREATE PROCEDURE [workerdock].PurgeOperationalEvents", up);
+        Assert.Matches(@"(?m)^GO\r?\nCREATE PROCEDURE \[workerdock\]\.PurgeOperationalEvents", up);
+        Assert.Contains("i.RecordKind=N'OperationalEvent'", up);
+        Assert.Contains("r.AtUtc>b.LogCutoffUtc", up);
+        Assert.Contains("i.PurgedRowCount<=i.RowCount", up);
+        foreach (var obsolete in new[] { "Outbox", "ProjectionMaintenance", "Workers", "WorkerCapabilities", "ServiceHealth", "TemplatePolicies", "PolicyRevisions", "JobPermits", "AttemptStatusEvents", "ExecutionEvents" })
+            Assert.DoesNotContain($"CREATE TABLE [workerdock].{obsolete}", up, StringComparison.Ordinal);
+        Assert.DoesNotContain("CREATE TABLE [workerdock].RetentionPolicy", up, StringComparison.Ordinal);
+        Assert.Contains("JOIN sys.objects o ON o.object_id=t.object_id", down);
+        Assert.Contains("TemplateId NOT IN(N'workerdock.sql-server',N'workerdock.http')", down);
     }
     [Fact]
     public void Fresh_baseline_permissions_keep_audit_and_archive_protection()

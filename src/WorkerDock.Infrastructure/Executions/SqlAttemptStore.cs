@@ -151,7 +151,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
         await using var command = Command(c, t, """
             SELECT e.JobId,e.JobRevision,e.IdempotencyKey,e.State,e.Certainty,e.AvailableAtUtc,e.ProfileRevisionId,
                 e.StopRequested,e.ForceStop,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.PolicyJson,
-                j.Enabled,j.Archived,cat.Enabled,CONVERT(bit,1),o.EventId,o.PayloadJson,o.PayloadDigest,
+                j.Enabled,j.Archived,cat.Enabled,CONVERT(bit,0),CONVERT(uniqueidentifier,NULL),CONVERT(nvarchar(max),NULL),CONVERT(char(64),NULL),
                 CASE WHEN @direct=1 AND cat.Enabled=1 AND cat.ConcurrencyLimit>0 THEN 1
                     WHEN @direct=0 AND EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus runtime
                         WHERE runtime.StateId=1 AND runtime.Ready=1 AND runtime.LastHeartbeatUtc>DATEADD(second,-30,SYSUTCDATETIME())
@@ -161,15 +161,12 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
                 JOIN [workerdock].Jobs j ON j.JobId=e.JobId
                 LEFT JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
-                OUTER APPLY (SELECT TOP(1) EventId,PayloadJson,PayloadDigest FROM [workerdock].Outbox WHERE EntityId=e.ExecutionId AND EventType=N'ExecutionDispatch'
-                    ORDER BY COALESCE(TRY_CONVERT(int,JSON_VALUE(PayloadJson,'$.attemptOrdinal')),1) DESC,COALESCE(TRY_CONVERT(bigint,JSON_VALUE(PayloadJson,'$.capacityRevision')),-1) DESC,CreatedAtUtc DESC) o
             WHERE e.ExecutionId=@id
             """);
         Add(command, "@id", SqlDbType.UniqueIdentifier, id); Add(command, "@boot", SqlDbType.NVarChar, boot, 100);
         Add(command, "@direct", SqlDbType.Bit, direct);
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) throw new WorkerDockException("ExecutionNotFound");
-        if (reader.IsDBNull(17) && !direct) throw new WorkerDockException("DispatchIntegrityError");
         var policy = JsonSerializer.Deserialize<ExecutionPolicy>(reader.GetString(12)) ?? throw new WorkerDockException("PinnedDescriptorUnavailable");
         ExecutionValueContext? context = null;
         var contextInvalid = false;
@@ -206,20 +203,8 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             context, valueSnapshot, resolutionError);
         var capacityRevision = reader.GetInt64(21);
         DispatchIntent intent;
-        if (reader.IsDBNull(17))
-        {
-            intent = new DispatchIntent(Guid.NewGuid(), id, 1, descriptor.TemplateId, Utc(reader.GetDateTime(5)), policy.Priority,
-                reader.GetInt64(1), "", capacityRevision);
-        }
-        else
-        {
-            using var payload = JsonDocument.Parse(reader.GetString(18));
-            var ordinal = payload.RootElement.TryGetProperty("attemptOrdinal", out var number) ? number.GetInt32() : 1;
-            var payloadCapacity = payload.RootElement.TryGetProperty("capacityRevision", out var epoch) ? epoch.GetInt64() : 0;
-            if (reader.GetString(19) != ProjectionEnvelope.ExecutionDigest(id, reader.GetInt64(1), ordinal, payloadCapacity))
-                throw new WorkerDockException("DispatchIntegrityError");
-            intent = new DispatchIntent(reader.GetGuid(17), id, ordinal, descriptor.TemplateId, Utc(reader.GetDateTime(5)), policy.Priority, reader.GetInt64(1), "", payloadCapacity);
-        }
+        intent = new DispatchIntent(Guid.NewGuid(), id, 1, descriptor.TemplateId, Utc(reader.GetDateTime(5)), policy.Priority,
+            reader.GetInt64(1), "", capacityRevision);
         var jobId=reader.GetGuid(0);var state=reader.GetString(3);
         var uncertain=reader.GetString(4)=="Unknown";var stop=reader.GetBoolean(7);var force=reader.GetBoolean(8);
         var gateOpen=reader.GetBoolean(13) && !reader.GetBoolean(14) && !reader.GetBoolean(16) && reader.GetInt32(20)==1;
@@ -281,7 +266,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
         var state = lr.GetString(2);
         await lr.CloseAsync();
 
-        // RetryWaiting already owns its admission slot, like a retained JobPermit.
+        // RetryWaiting retains its durable admission slot until completion.
         var holdsSlot = state == "RetryWaiting";
         await using var admission = Command(c, t, """
             SELECT e.ExecutionId,e.State,COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue'),
@@ -311,7 +296,6 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
                 IF @@ROWCOUNT=1 INSERT INTO [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
                     VALUES(NEWID(),N'Execution',@id,N'Lifecycle',0,SYSUTCDATETIME(),@reason,N'{}');
                 UPDATE [workerdock].Executions SET HoldsJobSlot=0 WHERE ExecutionId=@id;
-                UPDATE [workerdock].Outbox SET ProjectionState=N'Retired' WHERE EntityId=@id AND EventType=N'ExecutionDispatch';
                 """);
             Add(skip, "@id", SqlDbType.UniqueIdentifier, executionId);
             Add(skip, "@reason", SqlDbType.NVarChar, reason, 40);
@@ -379,15 +363,13 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
         {
             if (data.State is "Queued" or "RetryWaiting" && !data.GateOpen)
             {
-                await using var held = Command(c, t, "UPDATE [workerdock].Outbox SET ProjectionState=N'Held' WHERE EntityId=@id AND EventType=N'ExecutionDispatch' AND ProjectionState<>N'Retired'");
-                Add(held, "@id", SqlDbType.UniqueIdentifier, data.Descriptor.ExecutionId); await held.ExecuteNonQueryAsync(ct);
             }
             return;
         }
         await using var update = Command(c, t, "UPDATE [workerdock].Executions SET State=@state,Certainty=@certainty,AvailableAtUtc=@due,StopRequested=@stop,ForceStop=@force,HoldsJobSlot=CASE WHEN @release=1 THEN 0 WHEN @state IN(N'Running',N'RetryWaiting',N'NeedsReview') THEN 1 ELSE HoldsJobSlot END WHERE ExecutionId=@id;");
         Add(update, "@id", SqlDbType.UniqueIdentifier, data.Descriptor.ExecutionId); Add(update, "@state", SqlDbType.NVarChar, data.State, 30);
         Add(update, "@certainty", SqlDbType.NVarChar, data.Uncertain ? "Unknown" : "Known", 10); Add(update, "@due", SqlDbType.DateTime2, data.Intent.DueUtc.UtcDateTime);
-        Add(update, "@stop", SqlDbType.Bit, data.StopRequested); Add(update, "@force", SqlDbType.Bit, data.Force); Add(update, "@release", SqlDbType.Bit, !data.PermitRetained);
+        Add(update, "@stop", SqlDbType.Bit, data.StopRequested); Add(update, "@force", SqlDbType.Bit, data.Force); Add(update, "@release", SqlDbType.Bit, !data.HoldsJobSlot);
         await update.ExecuteNonQueryAsync(ct);
         await SqlCommandOutcomes.SettleAsync(c, t, data.Descriptor.ExecutionId, ct);
         foreach (var state in data.Events)
@@ -396,17 +378,8 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             Add(ev, "@id", SqlDbType.UniqueIdentifier, data.Descriptor.ExecutionId); Add(ev, "@attempt", SqlDbType.UniqueIdentifier, data.Lease?.AttemptId); Add(ev, "@state", SqlDbType.NVarChar, state, 40);
             await ev.ExecuteNonQueryAsync(ct);
         }
-        if (!data.PermitRetained)
+        if (!data.HoldsJobSlot)
             await WorkerDock.Infrastructure.Dispatch.JobAdmission.AdmitAsync(c, t, data.JobId, ct);
-        if (data.NewDispatch is { } intent)
-        {
-            await using var outbox = Command(c, t, "INSERT INTO [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState) VALUES(@id,N'ExecutionDispatch',@payload,SYSUTCDATETIME(),@due,1,@execution,@revision,@digest,N'Pending')");
-            Add(outbox, "@id", SqlDbType.UniqueIdentifier, intent.DeliveryId); Add(outbox, "@execution", SqlDbType.UniqueIdentifier, intent.ExecutionId);
-            Add(outbox, "@revision", SqlDbType.BigInt, intent.EntityRevision); Add(outbox, "@due", SqlDbType.DateTime2, intent.DueUtc.UtcDateTime);
-            Add(outbox, "@digest", SqlDbType.Char, ProjectionEnvelope.ExecutionDigest(intent.ExecutionId, intent.EntityRevision, intent.AttemptOrdinal), 64);
-            Add(outbox, "@payload", SqlDbType.NVarChar, JsonSerializer.Serialize(new { executionId = intent.ExecutionId, jobRevision = intent.EntityRevision, attemptOrdinal = intent.AttemptOrdinal }), -1);
-            await outbox.ExecuteNonQueryAsync(ct);
-        }
     }
     internal static SqlCommand Command(DbConnection c, DbTransaction t, string sql) => new(sql, (SqlConnection)c, (SqlTransaction)t) { CommandTimeout = 10 };
     internal static void Add(SqlCommand command, string name, SqlDbType type, object? value, int size = 0) =>

@@ -17,7 +17,7 @@ namespace WorkerDock.Infrastructure.Jobs;
 public sealed record MemoryExecution(Guid ExecutionId, Guid JobId, long JobRevision, Guid? ProfileId,
     string State, string IdempotencyKey, WorkerDock.Contracts.Values.ExecutionValueContext? ValueContext = null);
 
-public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IProjectionStore
+public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
 {
     private readonly TimeProvider clock;
     private readonly IConnectionProfiles? profiles;
@@ -26,7 +26,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
     private readonly ITemplateAuthoringService? authoring;
     private readonly Func<string, CancellationToken, ValueTask>? beforeCommit;
     private readonly SemaphoreSlim gate = new(1, 1);
-    private State state = new([], [], [], [], [], [], []);
+    private State state = new([], [], [], [], [], []);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, InMemoryAttemptStore> attemptStores = new();
 
     public InMemoryJobCommands(TimeProvider clock, IEnumerable<JobRevision>? enabledSeeds = null,
@@ -53,7 +53,6 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
 
     public int AuditCount => Volatile.Read(ref state).Audits.Length;
     public ImmutableArray<MemoryJobAudit> AuditEvents => Volatile.Read(ref state).Audits;
-    public int OutboxCount => Volatile.Read(ref state).Outbox.Length;
     public int ExecutionCount => Volatile.Read(ref state).Executions.Count;
     public MemoryExecution? GetExecution(Guid id)
     {
@@ -163,7 +162,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
                 ? WorkerDock.Contracts.Values.DynamicValueJson.Read(dynamicJson)
                 : WorkerDock.Contracts.Values.DynamicValueJson.EmptyPlan;
             var capable = await HasDynamicCapabilityAsync(editor.Revision, ct);
-            if (options.ReferenceDateOverride is not null && (!capable || editor.Revision.TemplateVersion == "1.0.0"))
+            if (options.ReferenceDateOverride is not null && !capable)
                 throw new WorkerDockException("ValidationFailed", "referenceDateOverride");
             await TemplateJobValidation.ValidateAsync(templateCatalog,editor.Revision,ct,authoring,"Manual");
             if (plan.Bindings.Any(binding => binding.Source == WorkerDock.Contracts.Values.DynamicValueSource.ScheduledTimestamp))
@@ -178,8 +177,6 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
             var execution = new MemoryExecution(executionId, jobId, editor.Revision.Revision,
                 editor.Revision.ProfileId, "Queued", executionId.ToString("N"), valueContext);
             await CheckPhaseAsync("Audit", ct);
-            await CheckPhaseAsync("Outbox", ct);
-            var digest = ProjectionEnvelope.ExecutionDigest(executionId, editor.Revision.Revision);
             ImmutableInterlocked.Update(ref state, current => before with
             {
                 Executions = before.Executions.Add(executionId, execution),
@@ -189,8 +186,6 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
                 Audits = current.Audits.Add(new(Guid.NewGuid(), "ManualRunAccepted", executionId,
                     editor.Revision.Revision, editor.Revision.Revision, "Accepted", actor.Subject,
                     actor.AuthenticationMode, actor.CorrelationId, now)),
-                Outbox = before.Outbox.Add(new(Guid.NewGuid(), "ExecutionDispatch", executionId,
-                    editor.Revision.Revision, digest, now))
             });
             attemptStores[executionId] = new InMemoryAttemptStore(clock,
                 new ExecutionDescriptor(executionId, 1, editor.Revision.TemplateId, editor.Revision.TemplateVersion,
@@ -228,11 +223,10 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
     private State Settle(State before, Guid executionId, AttemptSnapshot snapshot, bool rejected = false)
     {
         var commands = before.Commands; var audits = before.Audits;
-        var published = before.Outbox.Any(row => row.EntityId == executionId && row.State == "Published");
         foreach (var receipt in before.Commands.Values.Where(row => row.TargetId == executionId && row.State == "Pending"))
         {
             var manual = before.CommandKinds.GetValueOrDefault(receipt.CommandId) == "ManualRun";
-            var outcome = manual ? snapshot.Ordinal > 0 || published ? "Applied" : rejected || snapshot.State is "Stopped" or "Skipped" or "Failed" ? "Failed" : "Pending"
+            var outcome = manual ? snapshot.Ordinal > 0 ? "Applied" : rejected || snapshot.State is "Stopped" or "Skipped" or "Failed" ? "Failed" : "Pending"
                 : snapshot.State == "Running" ? "Pending" : snapshot.State == "NeedsReview" ? "Failed" : "Applied";
             if (outcome == "Pending") continue;
             commands = commands.SetItem(receipt.CommandId, receipt with { State = outcome });
@@ -240,46 +234,6 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
                 "workerdock", "System", receipt.CommandId, clock.GetUtcNow()));
         }
         return before with { Commands = commands, Audits = audits };
-    }
-
-    public ValueTask<IReadOnlyList<ProjectionEnvelope>> ReadPendingAsync(int limit, CancellationToken ct)
-    {
-        if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
-        ct.ThrowIfCancellationRequested();
-        IReadOnlyList<ProjectionEnvelope> result = Volatile.Read(ref state).Outbox
-            .Where(row => row.State is "Pending" or "Failed" && (row.RetryAtUtc is null || row.RetryAtUtc <= clock.GetUtcNow()))
-            .OrderBy(row => row.AvailableUtc).Take(limit).Select(row => new ProjectionEnvelope(row.EventId, row.Kind, 1,
-                row.EntityId, row.Revision, row.PayloadDigest, row.AvailableUtc,
-                JsonSerializer.SerializeToElement(new { executionId = row.EntityId, jobRevision = row.Revision }))).ToArray();
-        return ValueTask.FromResult(result);
-    }
-
-    public ValueTask AcknowledgeAsync(Guid intentId, string payloadDigest, CancellationToken ct) =>
-        UpdateProjectionAsync(intentId, payloadDigest, "Published", null, false, ct);
-    public ValueTask RecordFailureAsync(Guid intentId, string safeCode, DateTimeOffset retryAtUtc, CancellationToken ct)
-    {
-        if (safeCode is not ("UnsupportedProjection" or "ProjectionIntegrityError" or "ProjectionTriggerError" or
-            "ProjectionPublicationRace" or "ProjectionHeld" or "QuartzStoreUnavailable" or "ProjectionStoreUnavailable"))
-            throw new ArgumentException("Unknown projection failure code.", nameof(safeCode));
-        return UpdateProjectionAsync(intentId, null, safeCode == "ProjectionHeld" ? "Held" : "Failed", retryAtUtc,
-            safeCode is "UnsupportedProjection" or "ProjectionIntegrityError", ct);
-    }
-    private async ValueTask UpdateProjectionAsync(Guid intentId, string? digest, string outcome, DateTimeOffset? retry,
-        bool rejected, CancellationToken ct)
-    {
-        await gate.WaitAsync(ct);
-        try
-        {
-            var row = state.Outbox.SingleOrDefault(row => row.EventId == intentId);
-            if (row is null || digest is not null && row.PayloadDigest != digest) throw new WorkerDockException("ProjectionIntegrityError");
-            await CheckPhaseAsync("Audit", ct); await CheckPhaseAsync("Outbox", ct);
-            var snapshot = attemptStores[row.EntityId].Snapshot;
-            ImmutableInterlocked.Update(ref state, before => Settle(before with
-            {
-                Outbox = before.Outbox.Replace(row, row with { State = row.State == "Published" ? "Published" : outcome, RetryAtUtc = retry })
-            }, row.EntityId, snapshot, rejected));
-        }
-        finally { gate.Release(); }
     }
 
     public ValueTask<CommandReceipt> GetCommandAsync(Guid commandId, CancellationToken ct)
@@ -343,14 +297,11 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls, IPro
         ImmutableDictionary<Guid, MemoryExecution> Executions,
         ImmutableDictionary<Guid, CommandReceipt> Commands,
         ImmutableDictionary<(Guid JobId, string Mode, string Subject, string Key), DedupRecord> Dedup,
-        ImmutableArray<MemoryJobAudit> Audits,
-        ImmutableArray<MemoryJobOutbox> Outbox)
+        ImmutableArray<MemoryJobAudit> Audits)
     {
         public ImmutableDictionary<Guid, string> CommandKinds { get; init; } = ImmutableDictionary<Guid, string>.Empty;
     }
     private sealed record DedupRecord(CommandReceipt Receipt, DateTimeOffset ExpiresUtc, string RequestHash);
-    private sealed record MemoryJobOutbox(Guid EventId, string Kind, Guid EntityId, long Revision,
-        string PayloadDigest, DateTimeOffset AvailableUtc, string State = "Pending", DateTimeOffset? RetryAtUtc = null);
 }
 
 public sealed record MemoryJobAudit(Guid EventId, string EventType, Guid TargetId,

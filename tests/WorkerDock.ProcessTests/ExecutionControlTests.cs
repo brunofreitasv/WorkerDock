@@ -198,7 +198,7 @@ public sealed class ExecutionControlTests
         await monitor.RunAsync(lease, descriptor, TimeProvider.System.GetTimestamp(), default);
         Assert.Equal("Failed", store.Snapshot.State);
         Assert.False(store.Snapshot.EffectsMayHaveOccurred);
-        Assert.False(store.Snapshot.PermitRetained);
+        Assert.False(store.Snapshot.HoldsJobSlot);
         Assert.Empty(store.Retries);
     }
 

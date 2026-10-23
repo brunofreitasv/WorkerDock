@@ -24,7 +24,7 @@ internal sealed class AttemptLifecycle
     public required DispatchIntent Intent { get; set; }
     public required Guid JobId { get; init; }
     public string State { get; set; } = "Queued";
-    public bool PermitRetained { get; set; } = true;
+    public bool HoldsJobSlot { get; set; } = true;
     public bool StopRequested { get; set; }
     public bool Force { get; set; }
     public long EffectiveCapacityRevision { get; set; }
@@ -178,5 +178,5 @@ internal sealed class AttemptLifecycle
         NewDispatch = Intent = intent with { PayloadDigest = intent.ComputeDigest() };
         State = "RetryWaiting"; Events.Add(State);
     }
-    private void Finish(string state) { State = state; PermitRetained = false; Events.Add(state); }
+    private void Finish(string state) { State = state; HoldsJobSlot = false; Events.Add(state); }
 }

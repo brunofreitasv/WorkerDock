@@ -27,8 +27,9 @@ public sealed class SqlAlertDeliveryStore(TenantDatabaseOptions options) : IAler
                 await using var command = SqlAttemptStore.Command(connection, transaction, """
                     SELECT TOP(@limit) DeliveryId,AttemptOrdinal
                     FROM [workerdock].AlertDeliveries
-                    WHERE Status=N'Pending' AND NextAvailableAtUtc<=SYSUTCDATETIME()
-                    ORDER BY NextAvailableAtUtc,DeliveryId;
+                    WHERE (Status=N'Pending' AND NextAvailableAtUtc<=SYSUTCDATETIME())
+                       OR (Status=N'Leased' AND LeaseExpiresAtUtc<=SYSUTCDATETIME())
+                    ORDER BY CASE WHEN Status=N'Leased' THEN LeaseExpiresAtUtc ELSE NextAvailableAtUtc END,DeliveryId;
                     """);
                 SqlAttemptStore.Add(command, "@limit", SqlDbType.Int, limit);
                 var rows = new List<DueAlertDelivery>(limit);

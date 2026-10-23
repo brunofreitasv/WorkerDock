@@ -14,7 +14,7 @@ namespace WorkerDock.IntegrationTests;
 public sealed class AttemptSqlTests
 {
     [Fact]
-    public async Task ConcurrentClaims_StartOneAttemptWithoutDispatchOutbox()
+    public async Task ConcurrentClaims_StartOneAttemptFromQueuedExecution()
     {
         await using var fixture = new TenantSqlFixture();
         await fixture.CreateAsync(false);
@@ -29,7 +29,6 @@ public sealed class AttemptSqlTests
         await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         await SqlCapacityTestSetup.ReadyAsync(options, "boot-a", "boot-b");
         var run = await commands.RunNowAsync(job.JobId, "direct-claim", actor, default);
-        await fixture.Database.ExecuteAsync($"DELETE FROM [workerdock].JobPermits WHERE ExecutionId='{run.TargetId}'; DELETE FROM [workerdock].Outbox WHERE EntityId='{run.TargetId}' AND EventType=N'ExecutionDispatch';");
 
         var queue = new SqlExecutionQueue(options);
         Assert.Contains(run.TargetId, await queue.ReadReadyAsync(10, default));
@@ -129,9 +128,9 @@ public sealed class AttemptSqlTests
         var (templateHolderJob, templateHolder) = await CreateRun("template-holder");
         var templateCandidate = await CreateRun("template-candidate");
         await SetState(templateHolder, "Running");
-        await fixture.Database.ExecuteAsync("UPDATE [workerdock].TemplatePolicies SET EffectiveLimit=1 WHERE TemplateId=N'workerdock.http'");
+        await fixture.Database.ExecuteAsync("UPDATE [workerdock].TemplateCatalog SET ConcurrencyLimit=1 WHERE TemplateId=N'workerdock.http'");
         await AssertHeld(templateCandidate.ExecutionId);
-        await fixture.Database.ExecuteAsync("UPDATE [workerdock].TemplatePolicies SET EffectiveLimit=3 WHERE TemplateId=N'workerdock.http'");
+        await fixture.Database.ExecuteAsync("UPDATE [workerdock].TemplateCatalog SET ConcurrencyLimit=3 WHERE TemplateId=N'workerdock.http'");
         await SetState(templateHolder, "Queued");
 
         var (jobHolderJob, jobHolder) = await CreateRun("job-holder", "Allow");
@@ -167,7 +166,7 @@ public sealed class AttemptSqlTests
         var first = await store.BeginAsync(run.TargetId, "boot-a", default);
         var result = new TemplateResult("TransientFailure", "Busy", false, JsonSerializer.SerializeToElement(new { }), TimeSpan.FromSeconds(2));
         await store.CompleteAsync(first.Lease!, new(result, "Completed", true, false), default);
-        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET AvailableAtUtc=SYSUTCDATETIME() WHERE ExecutionId='{run.TargetId}'; UPDATE [workerdock].TemplatePolicies SET EffectiveLimit=1 WHERE TemplateId=N'workerdock.http'");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET AvailableAtUtc=SYSUTCDATETIME() WHERE ExecutionId='{run.TargetId}'; UPDATE [workerdock].TemplateCatalog SET ConcurrencyLimit=1 WHERE TemplateId=N'workerdock.http'");
 
         var queue = new SqlExecutionQueue(options);
         Assert.Contains(run.TargetId, await queue.ReadReadyAsync(10, default));
@@ -202,7 +201,7 @@ public sealed class AttemptSqlTests
         var (fullJob, fullHolder) = await CreateRun("full-blocked", "Allow");
         var fullCandidate = await commands.RunNowAsync(fullJob, "full-blocked-second", actor, default);
         var runnable = await CreateRun("runnable", "Allow");
-        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET State=N'Running' WHERE ExecutionId IN('{queueHolder}','{fullHolder}'); UPDATE [workerdock].TemplatePolicies SET EffectiveLimit=10 WHERE TemplateId=N'workerdock.http'");
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET State=N'Running' WHERE ExecutionId IN('{queueHolder}','{fullHolder}'); UPDATE [workerdock].TemplateCatalog SET ConcurrencyLimit=10 WHERE TemplateId=N'workerdock.http'");
 
         var ready = await new SqlExecutionQueue(options).ReadReadyAsync(1, default);
 
@@ -260,19 +259,16 @@ public sealed class AttemptSqlTests
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
-        var job = new JobRevision(Guid.NewGuid(), 0, "attempt", "workerdock.http", "1.0.0", JsonSerializer.SerializeToElement(new { }), null,
+        var job = new JobRevision(Guid.NewGuid(), 0, "attempt", "workerdock.http", "1.1.0", JsonSerializer.SerializeToElement(new { }), null,
             new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, "Queue", 100, 5));
         var actor = new ActorContext("operator", "Anonymous", Guid.NewGuid());
         await commands.SaveAsync(job, null, actor, default);
         await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         await SqlCapacityTestSetup.ReadyAsync(options,"boot-a","boot-b");
         var run = await commands.RunNowAsync(job.JobId, "sql-fence", actor, default);
-        var projections = new SqlProjectionStore(options);
-        var envelope = Assert.Single(await projections.ReadPendingAsync(10, default));
-        var intent = (await projections.ReadAsync(envelope, 1, default)).Intent;
         var first = new SqlAttemptStore(options); var second = new SqlAttemptStore(options);
         var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        async Task<AttemptStart> Start(SqlAttemptStore store, string boot) { await barrier.Task; return await store.BeginAsync(intent, boot, default); }
+        async Task<AttemptStart> Start(SqlAttemptStore store, string boot) { await barrier.Task; return await store.BeginAsync(run.TargetId, boot, default); }
         var a = Start(first, "boot-a"); var b = Start(second, "boot-b"); barrier.SetResult();
         var starts = await Task.WhenAll(a, b);
         var lease = Assert.Single(starts, x => x.Decision == "Started").Lease!;
@@ -287,22 +283,19 @@ public sealed class AttemptSqlTests
         var success = new TemplateResult("Success", "Ok", false, JsonSerializer.SerializeToElement(new { }), null);
         await first.CompleteAsync(lease, new(success, "Completed", true, false), default);
         Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{run.TargetId}' AND State=N'Stopped' AND StopRequested=1"));
-        Assert.Equal(0, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Outbox WHERE EntityId='{run.TargetId}' AND JSON_VALUE(PayloadJson,'$.attemptOrdinal')='2'"));
-        Assert.Equal(0, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].JobPermits WHERE ExecutionId='{run.TargetId}'"));
-        Assert.Equal("Completed", (await second.BeginAsync(intent, "boot-b", default)).Decision);
+        Assert.Equal(0, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{run.TargetId}' AND HoldsJobSlot=1"));
+        Assert.Equal("Completed", (await second.BeginAsync(run.TargetId, "boot-b", default)).Decision);
 
         var crash = await commands.RunNowAsync(job.JobId, "crash-before-launch", actor, default);
-        var nextEnvelope = (await projections.ReadPendingAsync(10, default)).Single(x => x.EntityId == crash.TargetId);
-        var nextIntent = (await projections.ReadAsync(nextEnvelope, 1, default)).Intent;
-        var abandoned = (await first.BeginAsync(nextIntent, "boot-a", default)).Lease!;
+        var abandoned = (await first.BeginAsync(crash.TargetId, "boot-a", default)).Lease!;
         await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Attempts SET LeaseExpiresUtc=DATEADD(second,-1,SYSUTCDATETIME()) WHERE AttemptId='{abandoned.AttemptId}'");
         Assert.Null(await second.RenewAsync(abandoned, default));
         var reviews = await Task.WhenAll(first.ReviewExpiredAsync(10, default).AsTask(), second.ReviewExpiredAsync(10, default).AsTask());
         Assert.Equal(1, reviews.Sum());
         await first.CompleteAsync(abandoned, new(success, "Completed", true, false), default);
         Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{crash.TargetId}' AND State=N'NeedsReview' AND Certainty=N'Unknown'"));
-        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].AttemptStatusEvents WHERE ExecutionId='{crash.TargetId}' AND State=N'NeedsReview'"));
-        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].JobPermits WHERE ExecutionId='{crash.TargetId}'"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].OperationalEvents WHERE ExecutionId='{crash.TargetId}' AND Source=N'Lifecycle' AND Code=N'NeedsReview'"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{crash.TargetId}' AND HoldsJobSlot=1"));
         var rejected = await Assert.ThrowsAsync<WorkerDockException>(async () => await fixture.Runner.RollbackAsync("tenant", "0001_initial", default));
         Assert.Equal("UnsafeRollback", rejected.Code);
     }
@@ -315,6 +308,6 @@ public sealed class AttemptSqlTests
         await runner.ApplyAsync("tenant", "0001_initial", default);
         await runner.RollbackAsync("tenant", "0001_initial", default);
         await runner.ApplyAsync("tenant", "0001_initial", default);
-        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name=N'AttemptStatusEvents'"));
+        Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name=N'AttemptStatusEvents'"));
     }
 }

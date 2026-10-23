@@ -65,7 +65,7 @@ public sealed class JobAdmissionTests
         var clock=new AttemptLifecycleTests.Clock(); var descriptor=AttemptLifecycleTests.Descriptor();
         var first=new InMemoryAttemptStore(clock,descriptor,AttemptLifecycleTests.Policy());
         var next=Work("Queue"); var shared=Work();
-        AdmissionDecision Decide(int limit) => JobAdmission.Decide(first.Snapshot.PermitRetained
+        AdmissionDecision Decide(int limit) => JobAdmission.Decide(first.Snapshot.HoldsJobSlot
             ? [new(descriptor.ExecutionId,"Queue",10,true),next,shared] : [next,shared],limit);
         var lease=(await first.BeginAsync(first.Intent,"worker",default)).Lease!;
         await first.CompleteAsync(lease,new(new TemplateResult("TransientFailure","Busy",false,JsonSerializer.SerializeToElement(new {}),null),"Completed",true,false),default);

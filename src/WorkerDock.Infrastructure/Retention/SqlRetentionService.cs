@@ -46,13 +46,6 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
             Add(update, "@audit", SqlDbType.Int, policy.AuditDays); Add(update, "@archive", SqlDbType.Bit, policy.ArchiveBeforeDelete);
             Add(update, "@archiveDays", SqlDbType.Int, policy.ArchiveDays); Add(update, "@version", SqlDbType.Binary, expectedVersion, 8);
             if (await update.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion");
-            // The transition schema keeps the legacy policy row in sync until Task 9 replaces the draft chain.
-            await using (var legacy = Command(connection, transaction, "UPDATE [workerdock].RetentionPolicy SET LogDays=@log,ExecutionDays=@execution,AuditDays=@audit,ArchiveBeforeDelete=@archive,ArchiveDays=@archiveDays WHERE PolicyId=1"))
-            {
-                Add(legacy, "@log", SqlDbType.Int, policy.LogDays); Add(legacy, "@execution", SqlDbType.Int, policy.ExecutionDays);
-                Add(legacy, "@audit", SqlDbType.Int, policy.AuditDays); Add(legacy, "@archive", SqlDbType.Bit, policy.ArchiveBeforeDelete);
-                Add(legacy, "@archiveDays", SqlDbType.Int, policy.ArchiveDays); await legacy.ExecuteNonQueryAsync(token);
-            }
             await using var receiptCommand = Command(connection, transaction, "INSERT [workerdock].Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc) VALUES(@command,@target,N'RetentionPolicy',N'Applied',SYSUTCDATETIME()); INSERT [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson) VALUES(NEWID(),N'RetentionPolicyUpdated',@subject,@mode,@correlation,SYSUTCDATETIME(),@details)");
             var commandId = Guid.NewGuid();
             Add(receiptCommand, "@command", SqlDbType.UniqueIdentifier, commandId); Add(receiptCommand, "@target", SqlDbType.UniqueIdentifier, RetentionPolicy.TargetId);
@@ -156,7 +149,6 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                   AND e.HoldsJobSlot=0
                   AND (e.ManualRequestExpiresAtUtc IS NULL OR e.ManualRequestExpiresAtUtc<SYSUTCDATETIME())
                   AND NOT EXISTS(SELECT 1 FROM [workerdock].RetentionRequestTombstones d WHERE d.ExecutionId=e.ExecutionId AND d.ExpiresAtUtc>=SYSUTCDATETIME())
-                  AND NOT EXISTS(SELECT 1 FROM [workerdock].Outbox o WHERE o.EntityId=e.ExecutionId AND o.EventType=N'ExecutionDispatch' AND o.ProjectionState<>N'Retired')
                   AND NOT EXISTS(SELECT 1 FROM [workerdock].AlertIncidents i WHERE i.SubjectKey=N'execution:'+CONVERT(nvarchar(36),e.ExecutionId) AND i.State IN(N'Open',N'Unknown'))
                 ORDER BY e.CreatedAtUtc,e.ExecutionId;
 
@@ -182,9 +174,6 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                 INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId)
                 SELECT @id,N'OperationalEvent',v.EventId FROM [workerdock].OperationalEvents v
                 WHERE v.EventKind=N'ScheduleRecovery' AND v.AtUtc<=@logCutoff;
-                INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId)
-                SELECT @id,N'ExecutionDispatchOutbox',o.EventId FROM [workerdock].Outbox o JOIN @EligibleExecutions e ON e.ExecutionId=o.EntityId
-                WHERE o.EventType=N'ExecutionDispatch' AND o.ProjectionState=N'Retired';
                 UPDATE [workerdock].ArchiveBatches SET RowCount=(SELECT COUNT_BIG(*) FROM [workerdock].ArchiveBatchItems WHERE BatchId=@id) WHERE BatchId=@id;
                 """))
             {
@@ -240,9 +229,8 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
             CASE i.RecordKind
               WHEN N'AuditEvent' THEN (SELECT x.EventId,x.EventType,x.ActorSubject,x.AuthenticationMode,x.CorrelationId,x.OccurredAtUtc,JSON_QUERY(x.DetailsJson) Details FROM [workerdock].AuditEvents x WHERE x.EventId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
               WHEN N'Execution' THEN (SELECT x.ExecutionId,x.JobId,x.JobRevision,x.ProfileRevisionId,x.TriggerKind,x.ScheduleId,x.ScheduleRevision,x.ScheduledForUtc,x.State,x.Certainty,x.AvailableAtUtc,x.CorrelationId,x.CreatedAtUtc,x.StopRequested,x.ForceStop,x.ValueContextJson,x.FirstStartedAtUtc,x.ValueSnapshotJson,x.ValueResolutionError,x.RequestKey,x.ManualActorScopeHash,x.ManualRequestKeyHash,x.ManualRequestHash,x.ManualCommandId,x.ManualResponseState,x.ManualRequestExpiresAtUtc FROM [workerdock].Executions x WHERE x.ExecutionId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
-              WHEN N'ExecutionAttempt' THEN (SELECT x.AttemptId,x.ExecutionId,x.AttemptNumber,x.InstallationId,x.WorkerBootId,x.Generation,x.State,x.LeaseExpiresUtc,x.StartedAtUtc,x.DeadlineUtc,x.EndedAtUtc,x.SafeCode,x.LocalExitConfirmed,x.EffectsMayHaveOccurred FROM [workerdock].Attempts x WHERE x.AttemptId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
+              WHEN N'ExecutionAttempt' THEN (SELECT x.AttemptId,x.ExecutionId,x.AttemptNumber,x.WorkerBootId,x.Generation,x.State,x.LeaseExpiresUtc,x.StartedAtUtc,x.DeadlineUtc,x.EndedAtUtc,x.SafeCode,x.LocalExitConfirmed,x.EffectsMayHaveOccurred FROM [workerdock].Attempts x WHERE x.AttemptId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
               WHEN N'OperationalEvent' THEN (SELECT x.EventId,x.EventKind,x.ExecutionId,x.AttemptId,x.Source,x.Sequence,x.AtUtc,x.Code,JSON_QUERY(x.SafeFieldsJson) SafeFields,x.ScheduleId,x.ScheduleRevision,x.FromUtc,x.ThroughUtc,x.Policy,x.CreatedExecutions,x.ExactMissedCount,x.SkippedOccurrences FROM [workerdock].OperationalEvents x WHERE x.EventId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
-              WHEN N'ExecutionDispatchOutbox' THEN (SELECT x.EventId,x.EventType,JSON_QUERY(x.PayloadJson) Payload,x.CreatedAtUtc,x.AvailableAtUtc,x.SchemaVersion,x.EntityId,x.EntityRevision,x.PayloadDigest,x.ProjectionState,x.DispatchedAtUtc FROM [workerdock].Outbox x WHERE x.EventId=i.RecordId FOR JSON PATH,WITHOUT_ARRAY_WRAPPER)
             END PayloadJson
             FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=@id ORDER BY i.RecordKind,i.RecordId;
             """);
@@ -472,11 +460,24 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
     private static async ValueTask RecordArchivePurgeProgressAsync(DbConnection connection, DbTransaction transaction,
         Guid batchId, int purged, CancellationToken ct)
     {
-        await using var command = Command(connection, transaction,
-            "UPDATE [workerdock].ArchiveBatches SET PurgedRowCount=PurgedRowCount+@purged WHERE BatchId=@batch AND State=N'Finalized' AND PurgedRowCount+@purged<=RowCount");
+        if (purged <= 0) return;
+        await using var command = Command(connection, transaction, """
+            EXEC sys.sp_set_session_context @key=N'WDArchivePurgeBatchId',@value=@batch;
+            BEGIN TRY
+                UPDATE [workerdock].ArchiveBatches SET PurgedRowCount=PurgedRowCount+@purged WHERE BatchId=@batch AND State=N'Finalized' AND PurgedRowCount+@purged<=RowCount;
+                DECLARE @updated int=@@ROWCOUNT;
+                EXEC sys.sp_set_session_context @key=N'WDArchivePurgeBatchId',@value=NULL;
+                SELECT @updated;
+            END TRY
+            BEGIN CATCH
+                EXEC sys.sp_set_session_context @key=N'WDArchivePurgeBatchId',@value=NULL;
+                THROW;
+            END CATCH;
+            """);
         Add(command, "@batch", SqlDbType.UniqueIdentifier, batchId);
         Add(command, "@purged", SqlDbType.BigInt, (long)purged);
-        if (await command.ExecuteNonQueryAsync(ct) != 1) throw new WorkerDockException("ArchivePurgeCoverageMismatch");
+        if (Convert.ToInt32(await command.ExecuteScalarAsync(ct)) != 1)
+            throw new WorkerDockException("ArchivePurgeCoverageMismatch");
     }
 
     private async ValueTask<T> RunAsync<T>(Func<DbConnection, DbTransaction, CancellationToken, ValueTask<T>> action, CancellationToken ct)

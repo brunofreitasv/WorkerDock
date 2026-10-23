@@ -11,11 +11,9 @@ const runtimeDashboard = {
   failed24h: 1,
   longRunning: 0,
   upcoming: 2,
-  readyWorkers: 1,
-  totalWorkers: 1,
-  desiredCapacityRevision: 1,
-  effectiveCapacityRevision: 1,
-  capacityState: "Applied",
+  runtimeReady: true,
+  hostCeiling: 4,
+  runtimeHeartbeatUtc: "2026-10-23T12:00:00Z",
   upcomingItems: [],
   recentItems: [],
 };
@@ -30,7 +28,9 @@ test("visible operator views use the single-runtime vocabulary", async ({ page }
     displayName: "North tenant", displayTimeZone: "UTC", version: "AQAAAAAAAAA=",
   }, headers: { ETag: '"AQAAAAAAAAA="' } }));
   await page.route("**/api/monitoring/jobs**", route => route.fulfill({ json: { items: [], nextCursor: null } }));
-  await page.route("**/api/monitoring/workers", route => route.fulfill({ json: [] }));
+  await page.route("**/api/monitoring/workers", route => route.fulfill({ json: {
+    bootId: "22222222-2222-4222-8222-222222222222", ready: true, hostCeiling: 4, lastHeartbeatUtc: "2026-10-23T12:00:00Z",
+  } }));
   await page.route("**/api/audit**", route => route.fulfill({ json: { items: [], nextCursor: null } }));
   await page.route("**/api/alerts/incidents**", route => route.fulfill({ json: [] }));
   await page.route("**/api/alerts/deliveries**", route => route.fulfill({ json: [] }));
@@ -49,6 +49,8 @@ test("visible operator views use the single-runtime vocabulary", async ({ page }
 
   await page.goto("/#/dashboard");
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByText("Ready")).toBeVisible();
+  await expect(page.getByText("4", { exact: true }).first()).toBeVisible();
   await verify();
 
   for (const route of [
@@ -60,6 +62,10 @@ test("visible operator views use the single-runtime vocabulary", async ({ page }
   ]) {
     await navigate(route[0]);
     await expect(page.getByRole("heading", { name: route[1], level: 1 })).toBeVisible();
+    if (route[0] === "workers") {
+      await expect(page.getByText("Ready")).toBeVisible();
+      await expect(page.getByText("4", { exact: true })).toBeVisible();
+    }
     await verify();
   }
 
