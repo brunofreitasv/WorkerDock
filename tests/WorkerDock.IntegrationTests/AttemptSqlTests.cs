@@ -50,6 +50,32 @@ public sealed class AttemptSqlTests
     }
 
     [Fact]
+    public async Task RestartAfterPossibleHandlerEntry_RequiresReview()
+    {
+        await using var fixture = new QuartzProcessFixture();
+        await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        await SqlCapacityTestSetup.ReadyAsync(options, "boot-a", "boot-b");
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
+        var job = new JobRevision(Guid.NewGuid(), 0, "restart-review", "workerdock.http", "1.1.0", JsonSerializer.SerializeToElement(new { }), null,
+            new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, "Queue", 100, 5));
+        var actor = new ActorContext("operator", "Anonymous", Guid.NewGuid());
+        await commands.SaveAsync(job, null, actor, default);
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
+        var run = await commands.RunNowAsync(job.JobId, "restart-review", actor, default);
+        var attempts = new SqlAttemptStore(options);
+        var lease = (await attempts.BeginAsync(run.TargetId, "boot-a", default)).Lease!;
+
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Attempts SET LeaseExpiresUtc=DATEADD(second,-1,SYSUTCDATETIME()) WHERE AttemptId='{lease.AttemptId}'");
+        Assert.Equal(1, await attempts.ReviewExpiredAsync(10, default));
+
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{run.TargetId}' AND State=N'NeedsReview'"));
+        Assert.Equal("NeedsReview", (await attempts.BeginAsync(run.TargetId, "boot-b", default)).Decision);
+    }
+
+    [Fact]
     public async Task Direct_claim_rechecks_job_execution_template_due_and_capacity_gates()
     {
         await using var fixture = new QuartzProcessFixture();

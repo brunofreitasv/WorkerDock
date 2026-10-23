@@ -12,11 +12,149 @@ using WorkerDock.Infrastructure.Executions;
 using WorkerDock.Quartz.Dispatch;
 using WorkerDock.Quartz.Hosting;
 using WorkerDock.Runtime.Ownership;
+using WorkerDock.Runtime.Workers;
 
 namespace WorkerDock.ProcessTests;
 
 public sealed class ExecutionControlTests
 {
+    [Fact]
+    public async Task Direct_dispatch_runs_children_up_to_configured_ceiling()
+    {
+        var stores = Enumerable.Range(0, 3).Select(_ => new InMemoryAttemptStore(TimeProvider.System,
+            FixtureProgram.Descriptor("spawn", "unused"), new(null, 1, TimeSpan.Zero, TimeSpan.Zero, 0, [], false, "Queue", 100, 5))).ToArray();
+        var queue = new TestQueue(stores.Select(store => store.Intent.ExecutionId).ToArray(), ignoreLimit: true);
+        var attempts = new RoutingAttemptStore(stores);
+        var runner = new BlockingAttemptRunner();
+        var loop = new ExecutionDispatchLoop(queue, attempts, runner, TimeProvider.System, maxChildren: 2);
+
+        Assert.Equal(2, await loop.RunOnceAsync(default));
+        await runner.TwoStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, runner.MaximumActive);
+
+        runner.Release.TrySetResult();
+        await WaitUntil(() => runner.Active == 0);
+        Assert.Equal(1, await loop.RunOnceAsync(default));
+        await runner.ThreeStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, runner.MaximumActive);
+        runner.Release.TrySetResult();
+        await WaitUntil(() => runner.Active == 0);
+    }
+
+    [Fact]
+    public async Task Direct_dispatch_descriptor_failure_is_recorded_as_pre_entry_failure()
+    {
+        var store = new InMemoryAttemptStore(TimeProvider.System, FixtureProgram.Descriptor("spawn", "unused"),
+            new(null, 1, TimeSpan.Zero, TimeSpan.Zero, 0, [], false, "Queue", 100, 5));
+        var attempts = new FaultingDescriptorStore(store);
+        var runner = new CountingRunner();
+        var loop = new ExecutionDispatchLoop(new TestQueue([store.Intent.ExecutionId], repeat: true), attempts, runner, TimeProvider.System, 1);
+
+        Assert.Equal(1, await loop.RunOnceAsync(default));
+        await WaitUntil(() => store.Snapshot.State == "Failed");
+
+        Assert.Equal(0, runner.Calls);
+        Assert.False(store.Snapshot.EffectsMayHaveOccurred);
+    }
+
+    [Fact]
+    public async Task Restart_after_possible_handler_entry_requires_review_before_admission()
+    {
+        var clock = new DispatchClock();
+        var store = new InMemoryAttemptStore(clock, FixtureProgram.Descriptor("spawn", "unused"),
+            new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, "Queue", 100, 5));
+        Assert.NotNull((await store.BeginAsync(store.Intent.ExecutionId, "previous-process", default)).Lease);
+        clock.Now += TimeSpan.FromMinutes(2);
+        var runner = new CountingRunner();
+        var loop = new ExecutionDispatchLoop(new TestQueue([store.Intent.ExecutionId], repeat: true), store, runner, clock, 1);
+
+        Assert.Equal(1, await loop.RunOnceAsync(default));
+        await WaitUntil(() => store.Snapshot.State == "NeedsReview");
+
+        Assert.Equal(0, runner.Calls);
+        Assert.True(store.Snapshot.EffectsMayHaveOccurred);
+    }
+
+    [Fact]
+    public async Task Restart_replays_uncertain_attempt_only_when_bounded_policy_allows_it()
+    {
+        var clock = new DispatchClock();
+        var store = new InMemoryAttemptStore(clock, FixtureProgram.Descriptor("spawn", "unused"),
+            new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], true, "Queue", 100, 5));
+        Assert.NotNull((await store.BeginAsync(store.Intent.ExecutionId, "previous-process", default)).Lease);
+        clock.Now += TimeSpan.FromMinutes(2);
+        var runner = new CountingRunner();
+        var loop = new ExecutionDispatchLoop(new TestQueue([store.Intent.ExecutionId], repeat: true), store, runner, clock, 1);
+
+        await loop.RunOnceAsync(default);
+        await WaitUntil(() => store.Snapshot.State == "RetryWaiting");
+        var replay = Assert.Single(store.Retries);
+        Assert.Equal(0, runner.Calls);
+
+        clock.Now = replay.DueUtc;
+        await loop.RunOnceAsync(default);
+        await WaitUntil(() => runner.Calls == 1);
+        Assert.Equal(2, store.Snapshot.Ordinal);
+    }
+
+    [Fact]
+    public async Task Direct_dispatch_retries_only_after_persisted_due_time()
+    {
+        var clock = new DispatchClock();
+        var store = new InMemoryAttemptStore(clock, FixtureProgram.Descriptor("spawn", "unused"),
+            new(null, 2, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10), 0, ["Busy"], false, "Queue", 100, 5));
+        var runner = new SequencedCompletionRunner(store);
+        var attempts = new SignaledAttemptStore(store, signalOnBegin: 2);
+        var loop = new ExecutionDispatchLoop(new TestQueue([store.Intent.ExecutionId], repeat: true), attempts, runner, clock, 2);
+
+        Assert.Equal(1, await loop.RunOnceAsync(default));
+        await WaitUntil(() => store.Snapshot.State == "RetryWaiting");
+        var retry = Assert.Single(store.Retries);
+        Assert.Equal(1, runner.Calls);
+
+        await loop.RunOnceAsync(default);
+        await attempts.Signaled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, runner.Calls);
+
+        clock.Now = retry.DueUtc;
+        await loop.RunOnceAsync(default);
+        await WaitUntil(() => store.Snapshot.State == "Succeeded");
+        Assert.Equal("Succeeded", store.Snapshot.State);
+    }
+
+    [Fact]
+    public async Task Direct_dispatch_drain_stops_new_admission_and_cancels_active_run()
+    {
+        var store = new InMemoryAttemptStore(TimeProvider.System, FixtureProgram.Descriptor("spawn", "unused"),
+            new(null, 1, TimeSpan.Zero, TimeSpan.Zero, 0, [], false, "Queue", 100, 5));
+        var runner = new DrainAwareRunner();
+        var loop = new ExecutionDispatchLoop(new TestQueue([store.Intent.ExecutionId], repeat: true), store, runner, TimeProvider.System, 1);
+
+        await loop.RunOnceAsync(default);
+        await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await loop.DrainAsync(TimeSpan.FromSeconds(5), default);
+
+        Assert.True(runner.Canceled.Task.IsCompleted);
+        Assert.Equal(0, await loop.RunOnceAsync(default));
+    }
+
+    [Fact]
+    public async Task Ownership_drain_before_child_start_records_known_no_effects()
+    {
+        var store = new InMemoryAttemptStore(TimeProvider.System, FixtureProgram.Descriptor("spawn", "unused"),
+            new(null, 1, TimeSpan.Zero, TimeSpan.Zero, 0, [], false, "Queue", 100, 5));
+        var lease = (await store.BeginAsync(store.Intent.ExecutionId, "boot", default)).Lease!;
+        var supervisor = new NeverStartedSupervisor();
+        var monitor = new OwnershipMonitor(store, store, supervisor, TimeProvider.System);
+        await monitor.DrainAsync(TimeSpan.FromSeconds(1), default);
+
+        await monitor.RunAsync(lease, await store.GetDescriptorAsync(lease, default), TimeProvider.System.GetTimestamp(), default);
+
+        Assert.Equal(0, supervisor.Calls);
+        Assert.Equal("Failed", store.Snapshot.State);
+        Assert.False(store.Snapshot.EffectsMayHaveOccurred);
+    }
+
     [Fact]
     public void Accepted_near_limit_configuration_leaves_room_for_pinned_settings_and_full_envelope()
     {
@@ -286,6 +424,141 @@ public sealed class ExecutionControlTests
         public ValueTask CancelAsync(CancellationToken ct) => ValueTask.CompletedTask;
         public ValueTask TerminateAsync(CancellationToken ct) { Succeed(); return ValueTask.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class TestQueue(Guid[] executionIds, bool repeat = false, bool ignoreLimit = false) : IExecutionQueue
+    {
+        private int offset;
+        public ValueTask<IReadOnlyList<Guid>> ReadReadyAsync(int limit, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            var requestedLimit = ignoreLimit ? executionIds.Length : limit;
+            if (repeat) return ValueTask.FromResult<IReadOnlyList<Guid>>(executionIds.Take(requestedLimit).ToArray());
+            var batch = executionIds.Skip(offset).Take(requestedLimit).ToArray();
+            offset += Math.Min(limit, batch.Length);
+            return ValueTask.FromResult<IReadOnlyList<Guid>>(batch);
+        }
+    }
+
+    private sealed class RoutingAttemptStore(InMemoryAttemptStore[] stores) : IAttemptStore
+    {
+        private InMemoryAttemptStore For(Guid id) => stores.Single(store => store.Intent.ExecutionId == id);
+        public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) => For(intent.ExecutionId).BeginAsync(intent, workerBootId, ct);
+        public ValueTask<AttemptStart> BeginAsync(Guid executionId, string workerBootId, CancellationToken ct) => For(executionId).BeginAsync(executionId, workerBootId, ct);
+        public ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct) => For(lease.ExecutionId).GetDescriptorAsync(lease, ct);
+        public ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct) => For(lease.ExecutionId).RenewAsync(lease, ct);
+        public ValueTask CompleteAsync(AttemptLease lease, AttemptCompletion completion, CancellationToken ct) => For(lease.ExecutionId).CompleteAsync(lease, completion, ct);
+        public async ValueTask<int> ReviewExpiredAsync(int limit, CancellationToken ct)
+        {
+            var reviewed = 0;
+            foreach (var store in stores) reviewed += await store.ReviewExpiredAsync(limit, ct);
+            return reviewed;
+        }
+    }
+
+    private sealed class BlockingAttemptRunner : IAttemptRunner
+    {
+        private int active, maximumActive, starts;
+        private readonly TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Active => Volatile.Read(ref active);
+        public int MaximumActive => Volatile.Read(ref maximumActive);
+        public TaskCompletionSource TwoStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ThreeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release => release;
+
+        public async ValueTask RunAsync(AttemptLease lease, ExecutionDescriptor descriptor, long authorizationStarted, CancellationToken ct)
+        {
+            var current = Interlocked.Increment(ref active);
+            int observed;
+            while (current > (observed = Volatile.Read(ref maximumActive)) &&
+                   Interlocked.CompareExchange(ref maximumActive, current, observed) != observed) { }
+            if (current >= 2) TwoStarted.TrySetResult();
+            if (Interlocked.Increment(ref starts) >= 3) ThreeStarted.TrySetResult();
+            try { await release.Task.WaitAsync(ct); }
+            finally { Interlocked.Decrement(ref active); }
+        }
+    }
+
+    private sealed class FaultingDescriptorStore(IAttemptStore inner) : IAttemptStore
+    {
+        public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) => inner.BeginAsync(intent, workerBootId, ct);
+        public ValueTask<AttemptStart> BeginAsync(Guid executionId, string workerBootId, CancellationToken ct) => inner.BeginAsync(executionId, workerBootId, ct);
+        public ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct) => ValueTask.FromException<ExecutionDescriptor>(new InvalidOperationException("descriptor unavailable"));
+        public ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct) => inner.RenewAsync(lease, ct);
+        public ValueTask CompleteAsync(AttemptLease lease, AttemptCompletion completion, CancellationToken ct) => inner.CompleteAsync(lease, completion, ct);
+        public ValueTask<int> ReviewExpiredAsync(int limit, CancellationToken ct) => inner.ReviewExpiredAsync(limit, ct);
+    }
+
+    private sealed class SignaledAttemptStore(IAttemptStore inner, int signalOnBegin) : IAttemptStore
+    {
+        private int begins;
+        public TaskCompletionSource Signaled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) => inner.BeginAsync(intent, workerBootId, ct);
+        public async ValueTask<AttemptStart> BeginAsync(Guid executionId, string workerBootId, CancellationToken ct)
+        {
+            var result = await inner.BeginAsync(executionId, workerBootId, ct);
+            if (Interlocked.Increment(ref begins) == signalOnBegin) Signaled.TrySetResult();
+            return result;
+        }
+        public ValueTask<ExecutionDescriptor> GetDescriptorAsync(AttemptLease lease, CancellationToken ct) => inner.GetDescriptorAsync(lease, ct);
+        public ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct) => inner.RenewAsync(lease, ct);
+        public ValueTask CompleteAsync(AttemptLease lease, AttemptCompletion completion, CancellationToken ct) => inner.CompleteAsync(lease, completion, ct);
+        public ValueTask<int> ReviewExpiredAsync(int limit, CancellationToken ct) => inner.ReviewExpiredAsync(limit, ct);
+    }
+
+    private sealed class CountingRunner : IAttemptRunner
+    {
+        private int calls;
+        public int Calls => Volatile.Read(ref calls);
+        public ValueTask RunAsync(AttemptLease lease, ExecutionDescriptor descriptor, long authorizationStarted, CancellationToken ct)
+        {
+            Interlocked.Increment(ref calls);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class NeverStartedSupervisor : IExecutionSupervisor
+    {
+        public int Calls { get; private set; }
+        public ValueTask<IExecutionChild> StartAsync(Guid attemptId, long generation, ExecutionDescriptor descriptor, CancellationToken ct)
+        {
+            Calls++;
+            return ValueTask.FromException<IExecutionChild>(new InvalidOperationException("supervisor should not be called"));
+        }
+    }
+
+    private sealed class SequencedCompletionRunner(InMemoryAttemptStore store) : IAttemptRunner
+    {
+        private int calls;
+        public int Calls => Volatile.Read(ref calls);
+        public async ValueTask RunAsync(AttemptLease lease, ExecutionDescriptor descriptor, long authorizationStarted, CancellationToken ct)
+        {
+            var call = Interlocked.Increment(ref calls);
+            var result = call == 1
+                ? new TemplateResult("TransientFailure", "Busy", false, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null)
+                : new TemplateResult("Success", "Ok", false, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null);
+            await store.CompleteAsync(lease, new(result, "Completed", true, false), ct);
+        }
+    }
+
+    private sealed class DrainAwareRunner : IAttemptRunner
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Canceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async ValueTask RunAsync(AttemptLease lease, ExecutionDescriptor descriptor, long authorizationStarted, CancellationToken ct)
+        {
+            Started.TrySetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { Canceled.TrySetResult(); }
+        }
+    }
+
+    private sealed class DispatchClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = new(2026, 10, 18, 0, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => Now;
+        public override long GetTimestamp() => Now.UtcTicks;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
     }
 
     private sealed class DirectoryFixture : IDisposable

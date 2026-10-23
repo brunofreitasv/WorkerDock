@@ -22,6 +22,7 @@ public sealed class OwnershipMonitor(IAttemptStore store, IAttemptSignals signal
         var outcome = "ProcessFailed"; var exitConfirmed = false; var effects = true;
         var completionPersisted = false;
         var acknowledgedAt = authorizationStarted;
+        var startInvoked = false;
         var finiteBudget = lease.DeadlineUtc is { } deadline ? deadline - (lease.ExpiresUtc - OwnershipDefaults.LeaseDuration) : (TimeSpan?)null;
         TimeSpan Remaining() => OwnershipDefaults.LeaseDuration - OwnershipDefaults.SafetyMargin - clock.GetElapsedTime(acknowledgedAt);
         try
@@ -31,6 +32,7 @@ public sealed class OwnershipMonitor(IAttemptStore store, IAttemptSignals signal
             if (finiteBudget is { } finite) startupBudget = Min(startupBudget, finite - clock.GetElapsedTime(authorizationStarted));
             if (startupBudget <= TimeSpan.Zero || Volatile.Read(ref stopping) != 0) throw new OperationCanceledException();
             startup.CancelAfter(startupBudget);
+            startInvoked = true;
             child = await supervisor.StartAsync(lease.AttemptId, lease.Generation, descriptor, startup.Token);
             var completion = child.WaitAsync(default).AsTask();
             var lastRenew = clock.GetTimestamp(); var lastPoll = lastRenew;
@@ -100,6 +102,11 @@ public sealed class OwnershipMonitor(IAttemptStore store, IAttemptSignals signal
         {
             exitConfirmed = true; effects = false;
             result = new TemplateResult("PermanentFailure", error.SafeCode, false, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null);
+        }
+        catch (OperationCanceledException) when (!startInvoked && child is null)
+        {
+            exitConfirmed = true; effects = false;
+            result = new TemplateResult("PermanentFailure", "ExecutorStartAborted", false, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null);
         }
         catch
         {
