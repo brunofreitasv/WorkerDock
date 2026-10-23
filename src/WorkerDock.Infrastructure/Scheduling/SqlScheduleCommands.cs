@@ -82,7 +82,7 @@ public sealed class SqlScheduleCommands(TenantDatabaseOptions options, ISchedule
                     : "UPDATE [workerdock].Schedules SET Revision=@revision,Kind=@kind,Cron=@cron,ZoneId=@zone,OneTimeUtc=@once,ActivatedUtc=@activated,Paused=@paused,PausedAtUtc=@pausedAt,Removed=0,CursorUtc=@activated,CatchUpRecoveryThroughUtc=NULL,CatchUpRecoveryCreated=0,MissedMode=@mode,LatenessToleranceMs=@tolerance,CatchUpCount=@count,CatchUpAgeMs=@age,ZoneRulesFingerprint=@fingerprint WHERE JobId=@job";
                 await using (var write = Command(connection, transaction, sql)) { Bind(write, saved, jobId, policy, fingerprint); if (revision > 1) { Add(write, "@paused", SqlDbType.Bit, paused); Add(write, "@pausedAt", SqlDbType.DateTime2, pausedAt ?? (object)DBNull.Value); } await write.ExecuteNonQueryAsync(token); }
                 await using (var bump = Command(connection, transaction, "UPDATE [workerdock].Jobs SET CurrentRevision=CurrentRevision WHERE JobId=@job AND Version=@version")) { Add(bump, "@job", SqlDbType.UniqueIdentifier, jobId); Add(bump, "@version", SqlDbType.Binary, version, 8); if (await bump.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion"); }
-                var receipt = new CommandReceipt(Guid.NewGuid(), scheduleId, "Pending"); await CommandReceiptAsync(connection, transaction, receipt, "ScheduleSave", token);
+                var receipt = new CommandReceipt(Guid.NewGuid(), scheduleId, "Applied"); await CommandReceiptAsync(connection, transaction, receipt, "ScheduleSave", token);
                 await AuditAsync(connection, transaction, "ScheduleSaved", scheduleId, revision - 1, revision, actor, token); return receipt;
             }, ct);
         }
@@ -105,7 +105,7 @@ public sealed class SqlScheduleCommands(TenantDatabaseOptions options, ISchedule
                 if (!version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
                 await using (var remove = Command(connection, transaction, "UPDATE [workerdock].Schedules SET Removed=1,Revision=@revision WHERE JobId=@job")) { Add(remove, "@job", SqlDbType.UniqueIdentifier, jobId); Add(remove, "@revision", SqlDbType.BigInt, revision); await remove.ExecuteNonQueryAsync(token); }
                 await using (var bump = Command(connection, transaction, "UPDATE [workerdock].Jobs SET CurrentRevision=CurrentRevision WHERE JobId=@job AND Version=@version")) { Add(bump, "@job", SqlDbType.UniqueIdentifier, jobId); Add(bump, "@version", SqlDbType.Binary, version, 8); if (await bump.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion"); }
-                var receipt = new CommandReceipt(Guid.NewGuid(), id, "Pending"); await CommandReceiptAsync(connection, transaction, receipt, "ScheduleDelete", token);
+                var receipt = new CommandReceipt(Guid.NewGuid(), id, "Applied"); await CommandReceiptAsync(connection, transaction, receipt, "ScheduleDelete", token);
                 await AuditAsync(connection, transaction, "ScheduleDeleted", id, revision - 1, revision, actor, token); return receipt;
             }, ct);
         }

@@ -76,27 +76,37 @@ public sealed class JobLifecycleTests
 
     [Trait("Store", "Sql")]
     [Fact]
-    public async Task Pause_resume_advances_cursor_without_replaying_paused_interval()
+    public async Task Pause_suppresses_sweep_and_resume_materializes_future_work()
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
-        var version = await VersionAsync(database, jobId);
-        var lifecycle = new SqlJobLifecycle(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), null, new QuartzScheduleEvaluator(), TimeProvider.System);
+        var scheduleId = await ScheduleIdAsync(database, jobId);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        var lifecycle = new SqlJobLifecycle(options, null, new FiveFieldScheduleEvaluator(), TimeProvider.System);
+        var sweep = new SqlScheduleSweep(options, new OccurrenceWriter(options, new FiveFieldScheduleEvaluator()));
+        var initialCursor = DateTimeOffset.UtcNow.AddMinutes(-5).UtcDateTime;
+        await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ZoneId=N'Etc/UTC',ActivatedUtc='{initialCursor:yyyy-MM-ddTHH:mm:ss}',CursorUtc='{initialCursor:yyyy-MM-ddTHH:mm:ss}' WHERE ScheduleId='{scheduleId}'");
 
+        var version = await VersionAsync(database, jobId);
         await lifecycle.ApplyAsync(jobId, "PauseSchedule", version, Actor, default);
-        var paused = await VersionAsync(database, jobId);
-        Assert.NotEqual(version, paused);
-        await lifecycle.ApplyAsync(jobId, "ResumeSchedule", paused, Actor, default);
-        Assert.NotEqual(paused, await VersionAsync(database, jobId));
+        var pausedVersion = await VersionAsync(database, jobId);
+        var pausedAt = await ScalarStringAsync(database, $"SELECT CONVERT(nvarchar(33),PausedAtUtc,126) FROM [workerdock].Schedules WHERE ScheduleId='{scheduleId}'");
+        Assert.NotEqual(version, pausedVersion);
+        Assert.Equal(0, await sweep.RunDueAsync(DateTimeOffset.UtcNow.AddMinutes(2), 10, default));
+        Assert.Equal(0, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ScheduleId='{scheduleId}'"));
+
+        await lifecycle.ApplyAsync(jobId, "ResumeSchedule", pausedVersion, Actor, default);
+        Assert.NotEqual(pausedVersion, await VersionAsync(database, jobId));
+        Assert.True(await sweep.RunDueAsync(DateTimeOffset.UtcNow.AddMinutes(3), 10, default) > 0);
 
         Assert.Equal(0, await database.ScalarAsync($"SELECT Paused FROM [workerdock].Schedules WHERE JobId='{jobId}'"));
         Assert.Equal(3, await database.ScalarAsync($"SELECT Revision FROM [workerdock].Schedules WHERE JobId='{jobId}'"));
+        Assert.True(await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ScheduleId='{scheduleId}' AND ScheduledForUtc>CONVERT(datetime2,'{pausedAt}',126)") > 0);
         Assert.Equal(0, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Outbox WHERE EntityId=(SELECT ScheduleId FROM [workerdock].Schedules WHERE JobId='{jobId}') AND EventType=N'ScheduleProjection'"));
     }
-
     [Trait("Store", "Sql")]
     [Fact]
     public async Task Enable_works_without_a_schedule_projection()
@@ -110,9 +120,14 @@ public sealed class JobLifecycleTests
         var lifecycle = new SqlJobLifecycle(options, JobCommandTestCatalog.Create(), new FiveFieldScheduleEvaluator(), TimeProvider.System);
         var receipt = await lifecycle.ApplyAsync(jobId, "Enable", await VersionAsync(database, jobId), Actor, default);
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
+        var scheduleId = await ScheduleIdAsync(database, jobId);
+        await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ZoneId=N'Etc/UTC',CursorUtc=DATEADD(minute,-5,SYSUTCDATETIME()),ActivatedUtc=DATEADD(minute,-5,SYSUTCDATETIME()) WHERE ScheduleId='{scheduleId}'");
+        var sweep = new SqlScheduleSweep(options, new OccurrenceWriter(options, new FiveFieldScheduleEvaluator()));
+        Assert.True(await sweep.RunDueAsync(DateTimeOffset.UtcNow.AddMinutes(3), 10, default) > 0);
 
         Assert.Equal(receipt, await commands.GetCommandAsync(receipt.CommandId, default));
         Assert.Equal(1, await database.ScalarAsync($"SELECT Enabled FROM [workerdock].Jobs WHERE JobId='{jobId}'"));
+        Assert.True(await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ScheduleId='{scheduleId}' AND TriggerKind=N'Scheduled'") > 0);
         Assert.Equal(0, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Outbox WHERE EventType=N'ScheduleProjection'"));
     }
 
@@ -202,6 +217,27 @@ public sealed class JobLifecycleTests
         Assert.Equal(2, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ScheduleId='{scheduleId}' AND TriggerKind=N'Scheduled'"));
     }
 
+    [Trait("Store", "Sql")]
+    [Fact]
+    public async Task Exhausted_once_schedule_does_not_consume_the_due_scan_page()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var exhaustedJob = await SeedScheduledJobAsync(database, enabled: true);
+        var activeJob = await SeedScheduledJobAsync(database, enabled: true);
+        var onceId = await ScheduleIdAsync(database, exhaustedJob);
+        var cronId = await ScheduleIdAsync(database, activeJob);
+        await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Kind=N'Once',Cron=NULL,OneTimeUtc='2026-10-18T00:00:00',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:01:00' WHERE ScheduleId='{onceId}'; UPDATE [workerdock].Schedules SET Kind=N'Cron',Cron=N'* * * * *',OneTimeUtc=NULL,ZoneId=N'Etc/UTC',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:01:30' WHERE ScheduleId='{cronId}'");
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        var sweep = new SqlScheduleSweep(options, new OccurrenceWriter(options, new FiveFieldScheduleEvaluator()));
+
+        var created = await sweep.RunDueAsync(new DateTimeOffset(2026, 10, 18, 0, 2, 0, TimeSpan.Zero), 1, default);
+
+        Assert.Equal(1, created);
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ScheduleId='{cronId}' AND ScheduledForUtc='2026-10-18T00:02:00'"));
+    }
     [Trait("Store", "Sql")]
     [Fact]
     public async Task Stale_schedule_revision_cannot_materialize_work()
@@ -298,6 +334,25 @@ public sealed class JobLifecycleTests
         Assert.Equal(1, await database.ScalarAsync($"SELECT Paused FROM [workerdock].Schedules WHERE JobId='{jobId}'"));
     }
 
+    [Trait("Store", "Sql")]
+    [Fact]
+    public async Task Schedule_save_and_delete_receipts_are_applied_without_a_projection_worker()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        await runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var jobId = await SeedScheduledJobAsync(database, enabled: false);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        var commands = new SqlScheduleCommands(options, new FiveFieldScheduleEvaluator(), TimeProvider.System);
+        var current = await commands.GetAsync(jobId, default);
+
+        var saved = await commands.SaveAsync(jobId, current.Definition with { Cron = "*/2 * * * *" }, current.Policy, current.Version, Actor, default);
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Commands WHERE CommandId='{saved.CommandId}' AND State=N'Applied'"));
+        var deleted = await commands.DeleteAsync(jobId, await VersionAsync(database, jobId), Actor, default);
+
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Commands WHERE CommandId='{deleted.CommandId}' AND State=N'Applied'"));
+    }
     [Trait("Store", "Sql")]
     [Fact]
     public async Task Concurrent_schedule_edits_with_one_etag_reject_the_loser()

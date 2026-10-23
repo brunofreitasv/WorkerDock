@@ -83,16 +83,17 @@ During Tasks 2–8, keep the old tables available so each new path can be tested
 
 ### Task 4: Direct schedule materialization
 
-**Files:** Create `src/WorkerDock.Application/Scheduling/IScheduleSweep.cs`, `src/WorkerDock.Infrastructure/Scheduling/SqlScheduleSweep.cs`; modify `src/WorkerDock.Infrastructure/Scheduling/OccurrenceWriter.cs`, `src/WorkerDock.Infrastructure/Scheduling/SqlScheduleCommands.cs`, `src/WorkerDock.Infrastructure/Jobs/SqlJobLifecycle.cs`, `tests/WorkerDock.IntegrationTests/OccurrencePolicyTests.cs`, `tests/WorkerDock.IntegrationTests/CalendarExecutionTests.cs`, `tests/WorkerDock.UnitTests/ScheduleEvaluatorTests.cs`.
+**Files:** Create `src/WorkerDock.Application/Scheduling/IScheduleSweep.cs`, `src/WorkerDock.Infrastructure/Scheduling/SqlScheduleSweep.cs`; modify `src/WorkerDock.Infrastructure/Scheduling/SqlScheduleCommands.cs`, `src/WorkerDock.Infrastructure/Jobs/SqlJobLifecycle.cs`, `tests/WorkerDock.IntegrationTests/CalendarExecutionTests.cs`, and `tests/WorkerDock.IntegrationTests/JobLifecycleTests.cs`.
 
-**Interfaces:** `IScheduleSweep.RunDueAsync(DateTimeOffset throughUtc, int maxSchedules, CancellationToken ct) : ValueTask<int>` and `RefreshZoneRulesAsync(int maxSchedules, CancellationToken ct) : ValueTask<int>`; `OccurrenceWriter.MaterializeAsync(Guid scheduleId, long scheduleRevision, DateTimeOffset throughUtc, CancellationToken ct)` remains the only cursor/insert transaction.
+**Reused contracts:** `OccurrenceWriter.MaterializeAsync(Guid scheduleId, long scheduleRevision, DateTimeOffset throughUtc, CancellationToken ct)` remains the single cursor/occurrence transaction. The writer and `IScheduleEvaluator` contract were established in prior tasks and are reused here; `OccurrenceWriter.cs`, `OccurrencePolicyTests.cs`, and `ScheduleEvaluatorTests.cs` are not Task 4 edits.
 
-- [ ] Add `RepeatedSweep_MaterializesOccurrenceOnce`: `Assert.Single(await fixture.ExecutionsForOccurrenceAsync(scheduleId, scheduledUtc));`. Cover enable without projection, pause/resume, stale revision, DST/sparse preview parity, changed time-zone rules advancing schedule revision, and cumulative catch-up budget.
-- [ ] Run `dotnet test tests/WorkerDock.IntegrationTests/WorkerDock.IntegrationTests.csproj --filter 'FullyQualifiedName~OccurrencePolicyTests|FullyQualifiedName~CalendarExecutionTests'` with SQL; expect new tests to fail.
-- [ ] Implement due and bounded time-zone-rule scans and remove schedule-projection writes from management transactions. Keep schedule cursor, occurrence uniqueness, pinned job/profile revision, and recovery policy in the same materialization transaction.
-- [ ] Run the SQL filters; expect pass.
+**Interfaces:** `IScheduleSweep.RunDueAsync(DateTimeOffset throughUtc, int maxSchedules, CancellationToken ct) : ValueTask<int>` and `RefreshZoneRulesAsync(int maxSchedules, CancellationToken ct) : ValueTask<int>`.
+
+- [ ] Add SQL regressions for a repeated sweep, stale schedule revision, an exhausted Once row ahead of a due Cron row in a page of one, enable materialization without projections, pause suppressing sweeps and resume materializing future work, and schedule Save/Delete receipts stored as Applied. Preserve cumulative catch-up budget and timezone-rule revision/audit behavior.
+- [ ] Replace Quartz calendar fixtures with direct evaluator/preview parity checks for DST transitions and sparse yearly schedules.
+- [ ] Implement bounded and fair due/rule scans; exclude completed Once rows. Remove schedule-projection writes from management transactions. Keep schedule cursor, occurrence uniqueness, pinned job/profile revision, and recovery policy in the materialization transaction.
+- [ ] Run `dotnet test tests/WorkerDock.IntegrationTests/WorkerDock.IntegrationTests.csproj --filter 'FullyQualifiedName~JobLifecycleTests|FullyQualifiedName~CalendarExecutionTests'` with SQL and `dotnet test tests/WorkerDock.UnitTests/WorkerDock.UnitTests.csproj --filter FullyQualifiedName~ScheduleEvaluatorTests`; record SQL as unverified when `WORKERDOCK_TEST_SQL` is unavailable.
 - [ ] Commit: `feat: materialize schedules directly from SQL`.
-
 ### Task 5: Direct alert evaluation and delivery
 
 **Files:** Create `src/WorkerDock.Infrastructure/Alerts/AlertDeliveryRunner.cs`; modify `src/WorkerDock.Application/Alerts/IAlertDeliveryStore.cs`, `src/WorkerDock.Infrastructure/Alerts/SqlAlertDeliveryStore.cs`, `src/WorkerDock.Infrastructure/Alerts/IncidentEvaluator.cs`, `tests/WorkerDock.IntegrationTests/AlertDeliveryTests.cs`, `tests/WorkerDock.IntegrationTests/AlertAccessTests.cs`.

@@ -29,7 +29,7 @@ public sealed class SqlScheduleSweep(
             var schedules = new List<(Guid Id, long Revision)>();
             await using (var command = connection.CreateCommand())
             {
-                command.CommandText = "SELECT TOP (@limit) s.ScheduleId,s.Revision FROM [workerdock].Schedules s JOIN [workerdock].Jobs j ON j.JobId=s.JobId WHERE s.Removed=0 AND s.Paused=0 AND s.CursorUtc<@through AND j.Enabled=1 AND j.Archived=0 ORDER BY s.CursorUtc,s.ScheduleId";
+                command.CommandText = "SELECT TOP (@limit) s.ScheduleId,s.Revision FROM [workerdock].Schedules s JOIN [workerdock].Jobs j ON j.JobId=s.JobId WHERE s.Removed=0 AND s.Paused=0 AND s.CursorUtc<@through AND (s.Kind<>N'Once' OR (s.OneTimeUtc>s.CursorUtc AND s.OneTimeUtc<=@through)) AND j.Enabled=1 AND j.Archived=0 ORDER BY s.CursorUtc,s.ScheduleId";
                 command.Parameters.Add(new SqlParameter("@limit", SqlDbType.Int) { Value = maxSchedules });
                 command.Parameters.Add(new SqlParameter("@through", SqlDbType.DateTime2) { Value = throughUtc.UtcDateTime });
                 await using var reader = await command.ExecuteReaderAsync(ct);
