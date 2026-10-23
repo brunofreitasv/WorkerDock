@@ -48,7 +48,7 @@ There are pre-existing uncommitted changes across application, tests, docs, fron
 | 3 | complete; fresh review approved; SQL execution unverified without `WORKERDOCK_TEST_SQL` | `2c023fb`, `d20f663` |
 | 4 | complete; Task 4 review fixes committed as `924d66a`; build passed; SQL behavior unverified without `WORKERDOCK_TEST_SQL` | `3f52a20`, `924d66a`
 | 5 | complete; runner intentionally awaits Task 6 production caller; full build passed; access tests passed; SQL delivery unverified without `WORKERDOCK_TEST_SQL` | `ecebff8` |
-| 6 | pending | |
+| 6 | complete; fresh review approved; Worker build and focused process tests passed; SQL health remains unverified without `WORKERDOCK_TEST_SQL` | `20e4b77` |
 | 7 | pending | |
 | 8 | pending | |
 | 9 | pending | |
