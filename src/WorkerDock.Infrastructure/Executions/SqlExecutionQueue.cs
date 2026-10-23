@@ -36,21 +36,21 @@ public sealed class SqlExecutionQueue(TenantDatabaseOptions options) : IExecutio
                             WHERE active.JobId=e.JobId AND active.State IN(N'Running',N'RetryWaiting',N'NeedsReview')
                                 AND COALESCE(JSON_VALUE(activeRevision.PolicyJson,'$.Overlap'),N'Queue')<>N'Allow') THEN 1 ELSE 0 END) AS ExclusiveJobSlot,
                         (SELECT COUNT(*) FROM [workerdock].Executions prior
-                            WHERE prior.JobId=e.JobId AND prior.State=N'Queued' AND prior.AdmissionSequence<e.AdmissionSequence) AS EarlierQueued,
+                            WHERE prior.JobId=e.JobId AND prior.State=N'Queued' AND prior.StopRequested=0 AND prior.AdmissionSequence<e.AdmissionSequence) AS EarlierQueued,
                         (SELECT COUNT(*) FROM [workerdock].Executions prior
                             JOIN [workerdock].JobRevisions priorRevision ON priorRevision.JobId=prior.JobId AND priorRevision.Revision=prior.JobRevision
-                            WHERE prior.JobId=e.JobId AND prior.State=N'Queued' AND prior.AdmissionSequence<e.AdmissionSequence
+                            WHERE prior.JobId=e.JobId AND prior.State=N'Queued' AND prior.StopRequested=0 AND prior.AdmissionSequence<e.AdmissionSequence
                                 AND COALESCE(JSON_VALUE(priorRevision.PolicyJson,'$.Overlap'),N'Queue')=N'Allow') AS EarlierAllow,
                         (SELECT COUNT(*) FROM [workerdock].Executions prior
                             JOIN [workerdock].JobRevisions priorRevision ON priorRevision.JobId=prior.JobId AND priorRevision.Revision=prior.JobRevision
-                            WHERE prior.JobId=e.JobId AND prior.State=N'Queued' AND prior.AdmissionSequence<e.AdmissionSequence
+                            WHERE prior.JobId=e.JobId AND prior.State=N'Queued' AND prior.StopRequested=0 AND prior.AdmissionSequence<e.AdmissionSequence
                                 AND COALESCE(JSON_VALUE(priorRevision.PolicyJson,'$.Overlap'),N'Queue')=N'Skip') AS EarlierSkip,
                         (SELECT COUNT(*) FROM [workerdock].Executions active
                             JOIN [workerdock].JobRevisions activeRevision ON activeRevision.JobId=active.JobId AND activeRevision.Revision=active.JobRevision
                             WHERE active.State IN(N'Running',N'RetryWaiting',N'NeedsReview') AND activeRevision.TemplateId=r.TemplateId
                                 AND (active.ExecutionId<>e.ExecutionId OR e.State<>N'RetryWaiting')) AS ActiveTemplateSlots,
                         (SELECT COUNT(*) FROM [workerdock].Executions prior
-                            WHERE prior.JobId=e.JobId AND prior.State=N'Queued' AND prior.AdmissionSequence<e.AdmissionSequence) AS WaitingBefore
+                            WHERE prior.JobId=e.JobId AND prior.State=N'Queued' AND prior.StopRequested=0 AND prior.AdmissionSequence<e.AdmissionSequence) AS WaitingBefore
                     FROM [workerdock].Executions e
                     JOIN [workerdock].Jobs j ON j.JobId=e.JobId
                     JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
@@ -74,7 +74,7 @@ public sealed class SqlExecutionQueue(TenantDatabaseOptions options) : IExecutio
                             AND candidate.ExclusiveJobSlot=0
                             AND NOT EXISTS(SELECT 1 FROM [workerdock].Executions prior
                                 JOIN [workerdock].JobRevisions priorRevision ON priorRevision.JobId=prior.JobId AND priorRevision.Revision=prior.JobRevision
-                                WHERE prior.JobId=candidate.JobId AND prior.State=N'Queued' AND prior.AdmissionSequence<candidate.AdmissionSequence
+                                WHERE prior.JobId=candidate.JobId AND prior.State=N'Queued' AND prior.StopRequested=0 AND prior.AdmissionSequence<candidate.AdmissionSequence
                                     AND COALESCE(JSON_VALUE(priorRevision.PolicyJson,'$.Overlap'),N'Queue')=N'Queue')
                             AND NOT (candidate.ActiveJobSlots=0 AND candidate.EarlierAllow=0 AND candidate.EarlierSkip>0)))
                         )

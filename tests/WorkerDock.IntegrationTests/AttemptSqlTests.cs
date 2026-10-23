@@ -199,6 +199,30 @@ public sealed class AttemptSqlTests
         Assert.Equal("Started", (await new SqlAttemptStore(options).BeginAsync(sharedCandidate.TargetId, "boot-a", default)).Decision);
     }
 
+    [Fact]
+    public async Task Stopped_earlier_queued_execution_does_not_block_later_same_job_execution()
+    {
+        await using var fixture = new QuartzProcessFixture();
+        await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0009_dynamic_values", default);
+        var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
+        await SqlCapacityTestSetup.ReadyAsync(options, "boot-a");
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
+        var jobId = Guid.NewGuid();
+        var job = new JobRevision(jobId, 0, "stop-requested-queue", "workerdock.http", "1.1.0", JsonSerializer.SerializeToElement(new { }), null,
+            new(null, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 0, ["Busy"], false, "Queue", 10, 5));
+        var actor = new ActorContext("operator", "Anonymous", Guid.NewGuid());
+        await commands.SaveAsync(job, null, actor, default);
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{jobId}'");
+        var stopped = await commands.RunNowAsync(jobId, "stopped-earlier", actor, default);
+        var later = await commands.RunNowAsync(jobId, "later", actor, default);
+        await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Executions SET StopRequested=1 WHERE ExecutionId='{stopped.TargetId}'");
+
+        Assert.Contains(later.TargetId, await new SqlExecutionQueue(options).ReadReadyAsync(10, default));
+        Assert.Equal("Started", (await new SqlAttemptStore(options).BeginAsync(later.TargetId, "boot-a", default)).Decision);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

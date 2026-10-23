@@ -293,7 +293,8 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             SELECT e.ExecutionId,e.State,COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue'),
                 COALESCE(TRY_CONVERT(int,JSON_VALUE(r.PolicyJson,'$.BacklogLimit')),100)
             FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-            WHERE e.JobId=@job AND e.State IN(N'Queued',N'Running',N'RetryWaiting',N'NeedsReview')
+              WHERE e.JobId=@job AND e.State IN(N'Queued',N'Running',N'RetryWaiting',N'NeedsReview')
+                  AND (e.State<>N'Queued' OR e.StopRequested=0)
             ORDER BY e.AdmissionSequence,e.ExecutionId
             """);
         Add(admission, "@job", SqlDbType.UniqueIdentifier, data.JobId);
