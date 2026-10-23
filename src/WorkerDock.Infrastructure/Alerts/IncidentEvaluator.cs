@@ -1,17 +1,14 @@
 using System.Data;
 using System.Globalization;
-using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Alerts;
 using WorkerDock.Application.Common;
-using WorkerDock.Application.Dispatch;
 using WorkerDock.Infrastructure.Persistence;
 
 namespace WorkerDock.Infrastructure.Alerts;
 
 public sealed class IncidentEvaluator(TenantDatabaseOptions options) : IAlertEvaluator
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async ValueTask<int> EvaluateAsync(DateTimeOffset throughUtc, int limit, CancellationToken ct)
     {
@@ -303,18 +300,6 @@ public sealed class IncidentEvaluator(TenantDatabaseOptions options) : IAlertEva
             await delivery.ExecuteNonQueryAsync(ct);
         }
 
-        var payload = JsonSerializer.Serialize(new { deliveryId, attemptOrdinal = 1 }, JsonOptions);
-        await using var outbox = Command(c, t, """
-            INSERT [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,
-                EntityId,EntityRevision,PayloadDigest,ProjectionState)
-            VALUES(@event,N'AlertDispatch',@payload,@now,@now,1,@id,1,@digest,N'Pending');
-            """);
-        Add(outbox, "@event", SqlDbType.UniqueIdentifier, Guid.NewGuid());
-        Add(outbox, "@payload", SqlDbType.NVarChar, payload, -1);
-        Add(outbox, "@now", SqlDbType.DateTime2, now);
-        Add(outbox, "@id", SqlDbType.UniqueIdentifier, deliveryId);
-        Add(outbox, "@digest", SqlDbType.Char, ProjectionEnvelope.AlertDigest(deliveryId, 1), 64);
-        await outbox.ExecuteNonQueryAsync(ct);
     }
 
     private static async ValueTask<IReadOnlyList<Rule>> ReadRulesAsync(SqlConnection c, SqlTransaction t, Guid? cursor,

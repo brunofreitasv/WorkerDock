@@ -269,6 +269,7 @@ internal sealed class UnavailableAlertQueries : IAlertQueries
 internal sealed class UnavailableAlertDeliveryStore : IAlertDeliveryStore
 {
     private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
+    public ValueTask<IReadOnlyList<DueAlertDelivery>> ReadDueAsync(int limit, CancellationToken ct) => Unavailable<IReadOnlyList<DueAlertDelivery>>();
     public ValueTask<AlertDeliveryClaim?> TryBeginAsync(Guid deliveryId, int expectedAttemptOrdinal, Guid ownerBootId, CancellationToken ct) => Unavailable<AlertDeliveryClaim?>();
     public ValueTask<bool> RenewAsync(AlertDeliveryLease lease, CancellationToken ct) => Unavailable<bool>();
     public ValueTask<bool> CompleteAsync(AlertDeliveryLease lease, WorkerDock.Contracts.Alerts.AlertDeliveryResult result, CancellationToken ct) => Unavailable<bool>();

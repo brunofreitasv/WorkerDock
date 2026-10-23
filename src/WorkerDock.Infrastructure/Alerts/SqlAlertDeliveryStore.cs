@@ -6,7 +6,6 @@ using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Alerts;
 using WorkerDock.Application.Common;
-using WorkerDock.Application.Dispatch;
 using WorkerDock.Application.Jobs;
 using WorkerDock.Infrastructure.Connections;
 using WorkerDock.Contracts.Alerts;
@@ -17,7 +16,30 @@ namespace WorkerDock.Infrastructure.Alerts;
 
 public sealed class SqlAlertDeliveryStore(TenantDatabaseOptions options) : IAlertDeliveryStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    public async ValueTask<IReadOnlyList<DueAlertDelivery>> ReadDueAsync(int limit, CancellationToken ct)
+    {
+        if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
+        try
+        {
+            return await new BusinessTransaction(options).RunAsync(async (connection, transaction, token) =>
+            {
+                await VerifyTenantAsync(connection, transaction, token);
+                await using var command = SqlAttemptStore.Command(connection, transaction, """
+                    SELECT TOP(@limit) DeliveryId,AttemptOrdinal
+                    FROM [workerdock].AlertDeliveries
+                    WHERE Status=N'Pending' AND NextAvailableAtUtc<=SYSUTCDATETIME()
+                    ORDER BY NextAvailableAtUtc,DeliveryId;
+                    """);
+                SqlAttemptStore.Add(command, "@limit", SqlDbType.Int, limit);
+                var rows = new List<DueAlertDelivery>(limit);
+                await using var reader = await command.ExecuteReaderAsync(token);
+                while (await reader.ReadAsync(token)) rows.Add(new(reader.GetGuid(0), reader.GetInt32(1)));
+                return (IReadOnlyList<DueAlertDelivery>)rows;
+            }, ct);
+        }
+        catch (SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
+    }
+
     public async ValueTask<AlertDeliveryClaim?> TryBeginAsync(Guid deliveryId, int expectedAttemptOrdinal, Guid ownerBootId, CancellationToken ct)
     {
         if (deliveryId == Guid.Empty || ownerBootId == Guid.Empty || expectedAttemptOrdinal < 1)
@@ -89,25 +111,6 @@ public sealed class SqlAlertDeliveryStore(TenantDatabaseOptions options) : IAler
                             SqlAttemptStore.Add(update, "@generation", SqlDbType.BigInt, expiredGeneration);
                             if (await update.ExecuteNonQueryAsync(token) != 1)
                                 throw new WorkerDockException("AlertDeliveryOwnershipLost");
-                        }
-
-                        if (hasBudget)
-                        {
-                            var payload = JsonSerializer.Serialize(new { deliveryId, attemptOrdinal = nextOrdinal }, JsonOptions);
-                            var digest = ProjectionEnvelope.AlertDigest(deliveryId, nextOrdinal);
-                            await using var outbox = SqlAttemptStore.Command(connection, transaction, """
-                                INSERT [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,
-                                    SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState)
-                                VALUES(@event,N'AlertDispatch',@payload,@now,@available,1,@id,@ordinal,@digest,N'Pending');
-                                """);
-                            SqlAttemptStore.Add(outbox, "@event", SqlDbType.UniqueIdentifier, Guid.NewGuid());
-                            SqlAttemptStore.Add(outbox, "@payload", SqlDbType.NVarChar, payload, -1);
-                            SqlAttemptStore.Add(outbox, "@now", SqlDbType.DateTime2, completedAt.UtcDateTime);
-                            SqlAttemptStore.Add(outbox, "@available", SqlDbType.DateTime2, availableAt.UtcDateTime);
-                            SqlAttemptStore.Add(outbox, "@id", SqlDbType.UniqueIdentifier, deliveryId);
-                            SqlAttemptStore.Add(outbox, "@ordinal", SqlDbType.BigInt, (long)nextOrdinal);
-                            SqlAttemptStore.Add(outbox, "@digest", SqlDbType.Char, digest, 64);
-                            await outbox.ExecuteNonQueryAsync(token);
                         }
                         return null;
                     }
@@ -270,25 +273,6 @@ public sealed class SqlAlertDeliveryStore(TenantDatabaseOptions options) : IAler
                     if (await update.ExecuteNonQueryAsync(token) != 1)
                         throw new WorkerDockException("AlertDeliveryOwnershipLost");
                 }
-
-                if (outcome == "Retry")
-                {
-                    var payload = JsonSerializer.Serialize(new { deliveryId = lease.DeliveryId, attemptOrdinal = lease.AttemptOrdinal + 1 }, JsonOptions);
-                    var digest = ProjectionEnvelope.AlertDigest(lease.DeliveryId, lease.AttemptOrdinal + 1);
-                    await using var outbox = SqlAttemptStore.Command(connection, transaction, """
-                        INSERT [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,
-                            SchemaVersion,EntityId,EntityRevision,PayloadDigest,ProjectionState)
-                        VALUES(@event,N'AlertDispatch',@payload,@now,@available,1,@id,@ordinal,@digest,N'Pending');
-                        """);
-                    SqlAttemptStore.Add(outbox, "@event", SqlDbType.UniqueIdentifier, Guid.NewGuid());
-                    SqlAttemptStore.Add(outbox, "@payload", SqlDbType.NVarChar, payload, -1);
-                    SqlAttemptStore.Add(outbox, "@now", SqlDbType.DateTime2, completedAt.UtcDateTime);
-                    SqlAttemptStore.Add(outbox, "@available", SqlDbType.DateTime2, availableAt.UtcDateTime);
-                    SqlAttemptStore.Add(outbox, "@id", SqlDbType.UniqueIdentifier, lease.DeliveryId);
-                    SqlAttemptStore.Add(outbox, "@ordinal", SqlDbType.BigInt, lease.AttemptOrdinal + 1L);
-                    SqlAttemptStore.Add(outbox, "@digest", SqlDbType.Char, digest, 64);
-                    await outbox.ExecuteNonQueryAsync(token);
-                }
                 return true;
             }, ct);
         }
@@ -334,22 +318,6 @@ public sealed class SqlAlertDeliveryStore(TenantDatabaseOptions options) : IAler
                     SqlAttemptStore.Add(update, "@count", SqlDbType.Int, attemptCount);
                     SqlAttemptStore.Add(update, "@manual", SqlDbType.Int, manualRetries);
                     if (await update.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("AlertDeliveryNotRetryable");
-                }
-
-                var payload = JsonSerializer.Serialize(new { deliveryId, attemptOrdinal = nextOrdinal }, JsonOptions);
-                var digest = ProjectionEnvelope.AlertDigest(deliveryId, nextOrdinal);
-                await using (var outbox = SqlAttemptStore.Command(connection, transaction, """
-                    INSERT [workerdock].Outbox(EventId,EventType,PayloadJson,CreatedAtUtc,AvailableAtUtc,SchemaVersion,
-                        EntityId,EntityRevision,PayloadDigest,ProjectionState)
-                    VALUES(@event,N'AlertDispatch',@payload,SYSUTCDATETIME(),SYSUTCDATETIME(),1,@id,@ordinal,@digest,N'Pending');
-                    """))
-                {
-                    SqlAttemptStore.Add(outbox, "@event", SqlDbType.UniqueIdentifier, Guid.NewGuid());
-                    SqlAttemptStore.Add(outbox, "@payload", SqlDbType.NVarChar, payload, -1);
-                    SqlAttemptStore.Add(outbox, "@id", SqlDbType.UniqueIdentifier, deliveryId);
-                    SqlAttemptStore.Add(outbox, "@ordinal", SqlDbType.BigInt, (long)nextOrdinal);
-                    SqlAttemptStore.Add(outbox, "@digest", SqlDbType.Char, digest, 64);
-                    await outbox.ExecuteNonQueryAsync(token);
                 }
                 return await SqlConnectionProfiles.ReceiptAsync(connection, transaction, deliveryId, "AlertDeliveryManualRetry", actor, token);
             }, ct);
