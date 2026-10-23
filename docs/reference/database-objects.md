@@ -14,9 +14,11 @@ All tenant-owned objects are under `[workerdock]`. Tenant application connection
 | Runtime and capacity | singleton `RuntimeStatus`, local process ceiling, per-template/job limits stored on their owner rows, and execution holds |
 | Connections and egress | connection profiles and revisions, integration settings, outbound policies |
 | Monitoring and alerts | typed `OperationalEvents`, metric aggregates, alert rules/revisions, incidents, durable deliveries and delivery attempts |
-| Retention | retention settings, archive batches/items, request tombstones, purge audit and guarded purge procedures |
+| Retention | retention settings, archive batches/items with durable purge progress, request tombstones, audit events and guarded purge procedures |
 
 The baseline creates no third-party scheduler schema or distributed worker registry. The single runtime service claims queued executions directly from `Executions`; attempt leases and `HoldsJobSlot` own durable execution state, while a local semaphore enforces the process ceiling. Template and job concurrency limits live on `TemplateCatalog` and `Jobs`. Schedule cursors and alert deliveries are ordinary tenant SQL rows claimed by the runtime service. `database/tenant/current-state.sql` provisions the same schema for a fresh, empty tenant database only; it cannot update an existing database. The `database/tenant/permissions.sql` script assigns an existing principal to the restricted runtime role; `permissions.rollback.sql` removes that membership.
+
+Archive retention progress is counted on each `ArchiveBatches` row in `PurgedRowCount`. Purge decisions and outcomes remain in append-only `AuditEvents`; there is no separate purge-summary table.
 
 ## Test-only SQL objects
 

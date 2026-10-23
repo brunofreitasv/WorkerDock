@@ -448,13 +448,6 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
         await using var command = Command(connection, transaction, "INSERT [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson) VALUES(NEWID(),N'RetentionPurge',N'WorkerDock.Retention',N'System',NEWID(),SYSUTCDATETIME(),@details)");
         Add(command, "@details", SqlDbType.NVarChar, JsonSerializer.Serialize(new { purgeKind = kind, cutoffUtc = cutoff, purgedRowCount = purged, archiveBatchId = batchId }, new JsonSerializerOptions(JsonSerializerDefaults.Web)), 4000);
         await command.ExecuteNonQueryAsync(ct);
-        if (kind == "OperationalEvents")
-        {
-            // Keep the legacy archive-finalization procedure's coverage check valid through Task 9.
-            await using var legacy = Command(connection, transaction, "INSERT [workerdock].RetentionPurgeAudit(PurgeId,PurgeKind,CutoffUtc,PurgedRowCount,PurgedAtUtc,ArchiveBatchId) VALUES(NEWID(),N'RetentionItems',@cutoff,@purged,SYSUTCDATETIME(),@batch)");
-            Add(legacy, "@cutoff", SqlDbType.DateTime2, cutoff ?? DateTime.UtcNow); Add(legacy, "@purged", SqlDbType.Int, purged);
-            Add(legacy, "@batch", SqlDbType.UniqueIdentifier, batchId); await legacy.ExecuteNonQueryAsync(ct);
-        }
     }
 
     private static async ValueTask RecordArchivePurgeProgressAsync(DbConnection connection, DbTransaction transaction,

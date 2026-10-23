@@ -716,13 +716,13 @@ BEGIN
                 AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.RowCount=d.RowCount
                 AND i.EligibleThroughUtc=d.EligibleThroughUtc AND i.LogCutoffUtc=d.LogCutoffUtc
                 AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
-                AND i.ArchiveRemovedAtUtc=d.ArchiveRemovedAtUtc
+                AND (i.ArchiveRemovedAtUtc IS NULL AND d.ArchiveRemovedAtUtc IS NULL OR i.ArchiveRemovedAtUtc=d.ArchiveRemovedAtUtc)
                 AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId
           )
           AND NOT (d.ArchiveRemovedAtUtc IS NOT NULL AND USER_NAME()=N'dbo'
               AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId
               AND NOT EXISTS(SELECT 1 FROM [workerdock].ArchiveBatchItems x WHERE x.BatchId=d.BatchId)
-              AND NOT EXISTS(SELECT 1 FROM [workerdock].RetentionPurgeAudit a WHERE a.ArchiveBatchId=d.BatchId)
+              AND NOT EXISTS(SELECT 1 FROM [workerdock].AuditEvents a WHERE a.EventType=N'RetentionPurge' AND JSON_VALUE(a.DetailsJson,'$.archiveBatchId')=CONVERT(nvarchar(36),d.BatchId))
               AND NOT EXISTS(SELECT 1 FROM inserted i WHERE i.BatchId=d.BatchId))
     ) THROW 51035,'Finalized archive manifests are immutable except for archive expiry cleanup',1;
     IF EXISTS
@@ -735,7 +735,7 @@ BEGIN
               AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
               AND i.PurgedRowCount>=d.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
               AND USER_NAME()=N'dbo' AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId)
-            OR (d.ArchiveRemovedAtUtc=i.ArchiveRemovedAtUtc AND d.PurgedRowCount<i.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
+            OR ((d.ArchiveRemovedAtUtc IS NULL AND i.ArchiveRemovedAtUtc IS NULL OR d.ArchiveRemovedAtUtc=i.ArchiveRemovedAtUtc) AND d.PurgedRowCount<i.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
               AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.RowCount=d.RowCount
               AND i.EligibleThroughUtc=d.EligibleThroughUtc AND i.LogCutoffUtc=d.LogCutoffUtc
               AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
@@ -767,19 +767,6 @@ CREATE TABLE [workerdock].RetentionRequestTombstones
 );
 GO
 CREATE INDEX IX_RetentionRequestTombstones_Expiry ON [workerdock].RetentionRequestTombstones(ExpiresAtUtc);
-GO
-CREATE TABLE [workerdock].RetentionPurgeAudit
-(
-    PurgeId uniqueidentifier NOT NULL CONSTRAINT PK_RetentionPurgeAudit PRIMARY KEY,
-    PurgeKind nvarchar(32) NOT NULL,
-    CutoffUtc datetime2(7) NOT NULL,
-    PurgedRowCount int NOT NULL,
-    PurgedAtUtc datetime2(7) NOT NULL,
-    ArchiveBatchId uniqueidentifier NULL,
-    CONSTRAINT FK_RetentionPurgeAudit_ArchiveBatch FOREIGN KEY(ArchiveBatchId) REFERENCES [workerdock].ArchiveBatches(BatchId),
-    CONSTRAINT CK_RetentionPurgeAudit_Kind CHECK(PurgeKind IN(N'AuditEvents',N'RequestTombstones',N'RetentionItems')),
-    CONSTRAINT CK_RetentionPurgeAudit_Count CHECK(PurgedRowCount>=0)
-);
 GO
 ALTER TRIGGER [workerdock].AuditEvents_AppendOnly ON [workerdock].AuditEvents AFTER UPDATE, DELETE AS
 BEGIN
@@ -830,8 +817,6 @@ BEGIN
             OUTPUT DELETED.EventId INTO @Purged(EventId)
             WHERE OccurredAtUtc<@CutoffUtc;
     SELECT @PurgedRows=COUNT(*) FROM @Purged;
-    INSERT [workerdock].RetentionPurgeAudit(PurgeId,PurgeKind,CutoffUtc,PurgedRowCount,PurgedAtUtc,ArchiveBatchId)
-        VALUES(NEWID(),N'AuditEvents',@CutoffUtc,@PurgedRows,SYSUTCDATETIME(),@ArchiveBatchId);
     COMMIT TRANSACTION;
 END;
 GO
@@ -894,8 +879,6 @@ BEGIN
           AND NOT EXISTS(SELECT 1 FROM [workerdock].RetentionRequestTombstones t WHERE t.ExecutionId=Executions.ExecutionId AND t.ExpiresAtUtc>=SYSUTCDATETIME())
           AND NOT EXISTS(SELECT 1 FROM [workerdock].AlertIncidents i WHERE i.SubjectKey=N'execution:'+CONVERT(nvarchar(36),Executions.ExecutionId) AND i.State IN(N'Open',N'Unknown'));
     SELECT @Count=COUNT(*) FROM @Purged; SET @Remaining-=@Count; SET @PurgedRows+=@Count;
-    INSERT [workerdock].RetentionPurgeAudit(PurgeId,PurgeKind,CutoffUtc,PurgedRowCount,PurgedAtUtc,ArchiveBatchId)
-        VALUES(NEWID(),N'RetentionItems',@ExecutionCutoffUtc,@PurgedRows,SYSUTCDATETIME(),@BatchId);
     COMMIT TRANSACTION;
 END;
 GO
@@ -916,8 +899,6 @@ BEGIN
         OUTPUT DELETED.JobId,DELETED.ActorScopeHash,DELETED.RequestKeyHash INTO @Purged(JobId,ActorScopeHash,RequestKeyHash)
         WHERE ExpiresAtUtc<@CutoffUtc;
     SELECT @PurgedRows=COUNT(*) FROM @Purged;
-    INSERT [workerdock].RetentionPurgeAudit(PurgeId,PurgeKind,CutoffUtc,PurgedRowCount,PurgedAtUtc,ArchiveBatchId)
-        VALUES(NEWID(),N'RequestTombstones',@CutoffUtc,@PurgedRows,SYSUTCDATETIME(),NULL);
     COMMIT TRANSACTION;
 END;
 GO
@@ -934,14 +915,14 @@ BEGIN
     SET XACT_ABORT ON;
     IF @BatchId IS NULL OR @FinalizedBeforeUtc IS NULL OR @AuditCutoffUtc IS NULL OR @MaxRows IS NULL OR @MaxRows NOT BETWEEN 1 AND 1000
         THROW 51049,'Invalid archive metadata purge bounds',1;
-    DECLARE @ArchiveDays int,@AuditDays int,@FinalizedAtUtc datetime2(7),@RowCount bigint,@ArchiveRemovedAtUtc datetime2(7);
+    DECLARE @ArchiveDays int,@AuditDays int,@FinalizedAtUtc datetime2(7),@RowCount bigint,@PurgedRowCount bigint,@ArchiveRemovedAtUtc datetime2(7);
     DECLARE @Remaining int=@MaxRows,@Count int;
     BEGIN TRANSACTION;
     SELECT @ArchiveDays=ArchiveRetentionDays,@AuditDays=AuditRetentionDays FROM [workerdock].TenantSettings WITH(UPDLOCK,HOLDLOCK);
     IF @ArchiveDays IS NULL OR @AuditDays IS NULL THROW 51040,'Retention policy is missing',1;
     IF @FinalizedBeforeUtc>SYSUTCDATETIME() OR @AuditCutoffUtc>DATEADD(day,-@AuditDays,SYSUTCDATETIME())
         THROW 51050,'Archive or audit cutoff is newer than configured retention permits',1;
-    SELECT @FinalizedAtUtc=FinalizedAtUtc,@RowCount=RowCount,@ArchiveRemovedAtUtc=ArchiveRemovedAtUtc
+    SELECT @FinalizedAtUtc=FinalizedAtUtc,@RowCount=RowCount,@PurgedRowCount=PurgedRowCount,@ArchiveRemovedAtUtc=ArchiveRemovedAtUtc
       FROM [workerdock].ArchiveBatches WITH(UPDLOCK,HOLDLOCK)
       WHERE BatchId=@BatchId AND State=N'Finalized' AND FinalizedAtUtc IS NOT NULL;
     IF @FinalizedAtUtc IS NULL OR @FinalizedAtUtc>=@FinalizedBeforeUtc OR @FinalizedAtUtc>DATEADD(day,-@ArchiveDays,SYSUTCDATETIME())
@@ -949,8 +930,7 @@ BEGIN
     EXEC sys.sp_set_session_context @key=N'WDArchivePurgeBatchId',@value=@BatchId;
     IF @ArchiveRemovedAtUtc IS NULL
     BEGIN
-        IF @RowCount>COALESCE((SELECT SUM(CONVERT(bigint,PurgedRowCount)) FROM [workerdock].RetentionPurgeAudit WITH(HOLDLOCK)
-            WHERE ArchiveBatchId=@BatchId AND PurgeKind IN(N'AuditEvents',N'RetentionItems')),0)
+        IF @RowCount>@PurgedRowCount
             THROW 51052,'Archive batch purge summaries do not cover its manifest row count',1;
         UPDATE [workerdock].ArchiveBatches SET ArchiveRemovedAtUtc=SYSUTCDATETIME() WHERE BatchId=@BatchId AND ArchiveRemovedAtUtc IS NULL;
     END;
@@ -960,15 +940,7 @@ BEGIN
 
     IF @Remaining>0
        AND NOT EXISTS(SELECT 1 FROM [workerdock].ArchiveBatchItems WHERE BatchId=@BatchId)
-       AND NOT EXISTS(SELECT 1 FROM [workerdock].RetentionPurgeAudit WHERE ArchiveBatchId=@BatchId AND PurgedAtUtc>=@AuditCutoffUtc)
-       AND @FinalizedAtUtc<@AuditCutoffUtc
-    BEGIN
-        DELETE TOP (@Remaining) FROM [workerdock].RetentionPurgeAudit WHERE ArchiveBatchId=@BatchId AND PurgedAtUtc<@AuditCutoffUtc;
-        SET @Count=@@ROWCOUNT; SET @Remaining-=@Count; SET @PurgedRows+=@Count;
-    END;
-    IF @Remaining>0
-       AND NOT EXISTS(SELECT 1 FROM [workerdock].ArchiveBatchItems WHERE BatchId=@BatchId)
-       AND NOT EXISTS(SELECT 1 FROM [workerdock].RetentionPurgeAudit WHERE ArchiveBatchId=@BatchId)
+       AND NOT EXISTS(SELECT 1 FROM [workerdock].AuditEvents WHERE EventType=N'RetentionPurge' AND JSON_VALUE(DetailsJson,'$.archiveBatchId')=CONVERT(nvarchar(36),@BatchId) AND OccurredAtUtc>=@AuditCutoffUtc)
        AND @FinalizedAtUtc<@AuditCutoffUtc
     BEGIN
         DELETE FROM [workerdock].ArchiveBatches WHERE BatchId=@BatchId AND ArchiveRemovedAtUtc IS NOT NULL;
@@ -982,9 +954,7 @@ GRANT SELECT,INSERT,UPDATE ON [workerdock].ArchiveBatches TO WorkerDockRuntime;
 GRANT SELECT,INSERT ON [workerdock].ArchiveBatchItems TO WorkerDockRuntime;
 DENY DELETE ON [workerdock].ArchiveBatchItems TO WorkerDockRuntime;
 DENY DELETE ON [workerdock].ArchiveBatches TO WorkerDockRuntime;
-DENY DELETE ON [workerdock].RetentionPurgeAudit TO WorkerDockRuntime;
 GRANT SELECT,INSERT,UPDATE ON [workerdock].RetentionRequestTombstones TO WorkerDockRuntime;
-GRANT SELECT ON [workerdock].RetentionPurgeAudit TO WorkerDockRuntime;
 GRANT EXECUTE ON [workerdock].PurgeAuditEvents TO WorkerDockRuntime;
 GRANT EXECUTE ON [workerdock].PurgeRetentionItems TO WorkerDockRuntime;
 GRANT EXECUTE ON [workerdock].PurgeRetentionRequestTombstones TO WorkerDockRuntime;
@@ -1128,8 +1098,6 @@ CREATE TABLE [workerdock].OperationalEvents
     CONSTRAINT CK_OperationalEvents_Json CHECK(ISJSON(SafeFieldsJson)=1),
     CONSTRAINT CK_OperationalEvents_Code CHECK(LEN(Code)>0)
 );
-INSERT [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
-INSERT [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
 INSERT [workerdock].OperationalEvents(EventId,EventKind,AtUtc,Code,ScheduleId,ScheduleRevision,FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount,SkippedOccurrences)
 SELECT RecoveryEventId,N'ScheduleRecovery',CreatedAtUtc,N'ScheduleRecovered',ScheduleId,ScheduleRevision,FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount,SkippedOccurrences
 FROM [workerdock].ScheduleRecoveryEvents;

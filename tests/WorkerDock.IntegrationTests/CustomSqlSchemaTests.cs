@@ -58,7 +58,7 @@ public sealed class CustomSqlSchemaTests
             "AlertDeliveries", "AlertDeliveryAttempts", "AlertEvaluationState", "AlertIncidents", "AlertRuleRevisions", "AlertRules", "AlertSinkRevisions", "AlertSinks",
             "ArchiveBatches", "ArchiveBatchItems", "Attempts", "AuditEvents", "Commands", "ConnectionProfileRevisions", "ConnectionProfiles",
             "ExecutionMetricAggregates", "Executions", "IntegrationSettings", "IntegrationSettingsRevisions", "JobRevisions", "Jobs",
-            "ManualRequestDedup", "OperationalEvents", "RetentionPurgeAudit", "RetentionRequestTombstones",
+            "ManualRequestDedup", "OperationalEvents", "RetentionRequestTombstones",
             "RuntimeStatus", "ScheduleRecoveryEvents", "ScheduleRuleScanState", "Schedules", "SchemaHistory",
             "TemplateCatalog", "TenantSettings"
         };
@@ -137,6 +137,7 @@ public sealed class CustomSqlSchemaTests
     {
         var root = Root;
         var up = File.ReadAllText(Path.Combine(root, "database", "tenant", "0001_initial.up.sql"));
+        var snapshot = File.ReadAllText(Path.Combine(root, "database", "tenant", "current-state.sql"));
         var down = File.ReadAllText(Path.Combine(root, "database", "tenant", "0001_initial.down.sql"));
         var queue = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Executions", "SqlExecutionQueue.cs"));
         var attempts = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Executions", "SqlAttemptStore.cs"));
@@ -155,6 +156,13 @@ public sealed class CustomSqlSchemaTests
         Assert.Contains("i.RecordKind=N'OperationalEvent'", up);
         Assert.Contains("r.AtUtc>b.LogCutoffUtc", up);
         Assert.Contains("i.PurgedRowCount<=i.RowCount", up);
+        Assert.DoesNotMatch(@"(?m)^INSERT \[workerdock\]\.OperationalEvents\(EventId,EventKind,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson\)\s*$", up);
+        Assert.DoesNotContain("RetentionPurgeAudit", up, StringComparison.Ordinal);
+        Assert.Contains("(i.ArchiveRemovedAtUtc IS NULL AND d.ArchiveRemovedAtUtc IS NULL OR i.ArchiveRemovedAtUtc=d.ArchiveRemovedAtUtc)", up, StringComparison.Ordinal);
+        Assert.Contains("(d.ArchiveRemovedAtUtc IS NULL AND i.ArchiveRemovedAtUtc IS NULL OR d.ArchiveRemovedAtUtc=i.ArchiveRemovedAtUtc)", up, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"(?m)^INSERT \[workerdock\]\.OperationalEvents\(EventId,EventKind,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson\)\s*$", snapshot);
+        Assert.DoesNotContain("RetentionPurgeAudit", snapshot, StringComparison.Ordinal);
+        Assert.Contains("(i.ArchiveRemovedAtUtc IS NULL AND d.ArchiveRemovedAtUtc IS NULL OR i.ArchiveRemovedAtUtc=d.ArchiveRemovedAtUtc)", snapshot, StringComparison.Ordinal);
         foreach (var obsolete in new[] { "Outbox", "ProjectionMaintenance", "Workers", "WorkerCapabilities", "ServiceHealth", "TemplatePolicies", "PolicyRevisions", "JobPermits", "AttemptStatusEvents", "ExecutionEvents" })
             Assert.DoesNotContain($"CREATE TABLE [workerdock].{obsolete}", up, StringComparison.Ordinal);
         Assert.DoesNotContain("CREATE TABLE [workerdock].RetentionPolicy", up, StringComparison.Ordinal);

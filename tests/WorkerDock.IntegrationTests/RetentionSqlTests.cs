@@ -47,7 +47,6 @@ public sealed class RetentionSqlTests
 
         var batchId = Guid.NewGuid();
         var auditId = Guid.NewGuid();
-        var purgeId = Guid.NewGuid();
         await database.ExecuteAsync($$"""
             UPDATE [workerdock].TenantSettings SET LogRetentionDays=365,ExecutionRetentionDays=365,AuditRetentionDays=1,
                 ArchiveBeforeDelete=0,ArchiveRetentionDays=90,RetentionVersion=RetentionVersion+1;
@@ -59,8 +58,6 @@ public sealed class RetentionSqlTests
             INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId) VALUES('{{batchId}}',N'AuditEvent','{{auditId}}');
             UPDATE [workerdock].ArchiveBatches SET RowCount=1,State=N'Finalized',CreatedAtUtc=DATEADD(day,-101,SYSUTCDATETIME()),
                 FinalizedAtUtc=DATEADD(day,-100,SYSUTCDATETIME()),PurgedRowCount=1 WHERE BatchId='{{batchId}}';
-            INSERT [workerdock].RetentionPurgeAudit(PurgeId,PurgeKind,CutoffUtc,PurgedRowCount,PurgedAtUtc,ArchiveBatchId)
-            VALUES('{{purgeId}}',N'AuditEvents',DATEADD(day,-100,SYSUTCDATETIME()),1,DATEADD(day,-100,SYSUTCDATETIME()),'{{batchId}}');
             """);
 
         var archiveRoot = Path.Combine(Path.GetTempPath(), "workerdock-retention-" + Guid.NewGuid().ToString("N"));
@@ -193,7 +190,7 @@ public sealed class RetentionSqlTests
         Assert.Contains("ALTER TABLE [workerdock].AlertRules", sql, StringComparison.Ordinal);
         Assert.Contains("ALTER TABLE [workerdock].TenantSettings", sql, StringComparison.Ordinal);
         Assert.Contains("AuditEvents", File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "WorkerDock.Infrastructure", "Retention", "SqlRetentionService.cs")), StringComparison.Ordinal);
-        Assert.DoesNotContain("CREATE TABLE [workerdock].RetentionPurgeAudit", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("RetentionPurgeAudit", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("DROP TABLE [workerdock].ArchiveBatches", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("DROP TABLE [workerdock].ArchiveBatchItems", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("DROP TABLE [workerdock].RetentionRequestTombstones", sql, StringComparison.Ordinal);
@@ -203,11 +200,46 @@ public sealed class RetentionSqlTests
     public void Archive_progress_uses_batch_state_that_survives_audit_purge()
     {
         var sql = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "WorkerDock.Infrastructure", "Retention", "SqlRetentionService.cs"));
+        var schema = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "database", "tenant", "0001_initial.up.sql"));
         Assert.Contains("b.PurgedRowCount", sql, StringComparison.Ordinal);
         Assert.Contains("SET PurgedRowCount=PurgedRowCount+@purged", sql, StringComparison.Ordinal);
         Assert.Contains("WriteSafeOperationalFields(writer, property.Value)", sql, StringComparison.Ordinal);
         Assert.Contains("private static bool IsSafeOperationalField", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("SUM(TRY_CONVERT(bigint,JSON_VALUE(a.DetailsJson,'$.purgedRowCount'))) FROM [workerdock].AuditEvents", sql, StringComparison.Ordinal);
+        Assert.Contains("IF @RowCount>@PurgedRowCount", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("RetentionPurgeAudit", schema, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ArchiveBatchProgress_AllowsOnlyCounterUpdatesBeforeArchiveRemoval()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        await database.ApplyLatestSchemaAsync();
+
+        var batchId = Guid.NewGuid();
+        var eventId = Guid.NewGuid();
+        await database.ExecuteAsync($$"""
+            INSERT [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson)
+            VALUES('{{eventId}}',N'test',N'test',N'System',NEWID(),SYSUTCDATETIME(),N'{}');
+            INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc)
+            VALUES('{{batchId}}',N'{{batchId:N}}.archive.gz',REPLICATE('A',64),0,SYSUTCDATETIME(),SYSUTCDATETIME(),N'Writing',SYSUTCDATETIME());
+            INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId) VALUES('{{batchId}}',N'AuditEvent','{{eventId}}');
+            UPDATE [workerdock].ArchiveBatches SET RowCount=1,State=N'Finalized',FinalizedAtUtc=SYSUTCDATETIME() WHERE BatchId='{{batchId}}';
+            """);
+
+        await using var connection = new SqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await using (var progress = connection.CreateCommand())
+        {
+            progress.CommandText = $"EXEC sys.sp_set_session_context @key=N'WDArchivePurgeBatchId',@value='{batchId}'; UPDATE [workerdock].ArchiveBatches SET PurgedRowCount=1 WHERE BatchId='{batchId}';";
+            await progress.ExecuteNonQueryAsync();
+        }
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].ArchiveBatches WHERE BatchId='{batchId}' AND PurgedRowCount=1 AND RelativePath=N'{batchId:N}.archive.gz' AND Sha256=REPLICATE('A',64) AND RowCount=1"));
+
+        await using var mutation = connection.CreateCommand();
+        mutation.CommandText = $"UPDATE [workerdock].ArchiveBatches SET Sha256=REPLICATE('B',64) WHERE BatchId='{batchId}';";
+        await Assert.ThrowsAsync<SqlException>(() => mutation.ExecuteNonQueryAsync());
     }
 
     private static async Task<bool> ExistsAsync(SqlDatabaseFixture database, string sql) => await database.ScalarAsync(sql) == 1;
