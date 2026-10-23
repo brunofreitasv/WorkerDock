@@ -21,3 +21,27 @@ The plan asks for a broad `rg -n 'Quartz|QRTZ|WDS_|WDE_' src database/tenant tes
 ## Preserved pre-existing work
 
 The prior settings/template UI and help changes remain in the worktree. The original untracked 0010 migration/preflight sources were absent from the other checkout and worktrees; generated build-output copies of the SQL scripts were recovered and checked against the baseline. Per the ruling, the original migration-history-specific rollback/preflight code is intentionally superseded, while its desired catalog state is represented by the fresh-install baseline. Task 10 documentation remains outside this change.
+
+## Rollback guard review fix (round 1)
+
+- Replaced the four-table rollback check with a guard that dynamically checks every table in the `workerdock` schema before any drop. It permits only the known baseline seed tables, then verifies their expected seed counts and values, including tenant settings, integration configuration, template catalog/policies, default policy revision, retention, and singleton state rows.
+- Added rollback refusal cases for alert sinks, archive batches, changed tenant settings, connection profiles, and changed integration settings. Added a database-independent check that the dynamic guard precedes table drops and that its seed allowlist matches the reviewed set. Existing migration round-trip coverage verifies the default seeded baseline still rolls back cleanly.
+- Updated `manifest.json` with the recalculated `0001_initial.down.sql` checksum: `998F1688C568B39554A4E72C3ED62AEF22CED62970D003B7385F1E15E16643A5`.
+
+### Verification
+
+- `dotnet build WorkerDock.slnx --no-restore --artifacts-path <writable artifacts directory>`: pass, 0 warnings and 0 errors.
+- Schema inventory, permission, and rollback-guard inventory tests: pass, 3/3.
+- Rollback SQL tests for business rows, alert/archive rows, settings, and profile rows were attempted. Execution is blocked because `WORKERDOCK_TEST_SQL` is unset; each fixture reports `SQL_TEST_BLOCKED: configure WORKERDOCK_TEST_SQL for a disposable SQL Server 2022+ test instance.`
+Executed commands:
+
+```powershell
+dotnet build WorkerDock.slnx --no-restore --artifacts-path 'C:\Users\bruno\OneDrive\Documentos\ChatGPT\WorkerDock 2\.codex-task9-artifacts'
+# Compilação com êxito; 0 Aviso(s); 0 Erro(s).
+
+dotnet test tests/WorkerDock.IntegrationTests/WorkerDock.IntegrationTests.csproj --no-build --artifacts-path 'C:\Users\bruno\OneDrive\Documentos\ChatGPT\WorkerDock 2\.codex-task9-artifacts' --filter "FullyQualifiedName~Fresh_baseline_has_one_target_and_a_reviewed_table_inventory|FullyQualifiedName~Fresh_baseline_permissions_keep_audit_and_archive_protection|FullyQualifiedName~Fresh_baseline_rollback_guard_covers_every_table_except_known_seeds"
+# Aprovado: 3; Com falha: 0.
+
+dotnet test tests/WorkerDock.IntegrationTests/WorkerDock.IntegrationTests.csproj --no-build --artifacts-path 'C:\Users\bruno\OneDrive\Documentos\ChatGPT\WorkerDock 2\.codex-task9-artifacts' --filter "FullyQualifiedName~Fresh_baseline_rollback_refuses_user_state_outside_execution_tables|FullyQualifiedName~Fresh_baseline_rollback_is_guarded_by_business_data"
+# Blocked: WORKERDOCK_TEST_SQL is unset; SQL_TEST_BLOCKED was reported by fixture construction.
+```

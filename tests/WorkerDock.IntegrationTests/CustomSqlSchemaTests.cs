@@ -94,6 +94,43 @@ public sealed class CustomSqlSchemaTests
         Assert.Equal(1, await fixture.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Jobs"));
     }
 
+    [Theory]
+    [InlineData("INSERT [workerdock].AlertSinks(SinkId,Name,CurrentRevision,Enabled) VALUES(NEWID(),N'custom',1,1)", "SELECT COUNT(*) FROM [workerdock].AlertSinks")]
+    [InlineData("INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc) VALUES(NEWID(),N'archives/custom.ndjson',REPLICATE('A',64),1,SYSUTCDATETIME(),SYSUTCDATETIME(),N'Writing',SYSUTCDATETIME())", "SELECT COUNT(*) FROM [workerdock].ArchiveBatches")]
+    [InlineData("UPDATE [workerdock].TenantSettings SET DisplayName=N'Custom tenant'", "SELECT COUNT(*) FROM [workerdock].TenantSettings WHERE DisplayName=N'Custom tenant'")]
+    [InlineData("INSERT [workerdock].ConnectionProfiles(ProfileId,Name,CurrentRevisionId,Retired) VALUES(NEWID(),N'custom',NULL,0)", "SELECT COUNT(*) FROM [workerdock].ConnectionProfiles")]
+    [InlineData("UPDATE [workerdock].IntegrationSettings SET ProviderId=N'custom.provider'", "SELECT COUNT(*) FROM [workerdock].IntegrationSettings WHERE ProviderId=N'custom.provider'")]
+    public async Task Fresh_baseline_rollback_refuses_user_state_outside_execution_tables(string mutation, string preservedQuery)
+    {
+        await using var fixture = new SqlDatabaseFixture();
+        await fixture.CreateAsync(false);
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(fixture.ConnectionString, fixture.InstanceId, fixture.ScriptsRoot);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await fixture.ExecuteAsync(mutation);
+
+        var error = await Assert.ThrowsAsync<WorkerDock.Application.Common.WorkerDockException>(async () => await runner.RollbackAsync("tenant", "0001_initial", default));
+
+        Assert.Equal("UnsafeRollback", error.Code);
+        Assert.Equal(1, await fixture.ScalarAsync(preservedQuery));
+    }
+    [Fact]
+    public void Fresh_baseline_rollback_guard_covers_every_table_except_known_seeds()
+    {
+        var down = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "database", "tenant", "0001_initial.down.sql"));
+        Assert.Contains("FROM sys.tables t JOIN sys.schemas s", down);
+        Assert.True(down.IndexOf("EXEC sys.sp_executesql @GuardSql", StringComparison.Ordinal) < down.IndexOf("DROP TABLE", StringComparison.Ordinal));
+        var match = Regex.Match(down, @"(?im)^\s+AND t\.name NOT IN\((?<names>[^)]*)\)");
+        Assert.True(match.Success);
+        var seededTables = Regex.Matches(match.Groups["names"].Value, @"N'([^']+)'")
+            .Select(name => name.Groups[1].Value)
+            .Order(StringComparer.Ordinal);
+        var expectedSeeds = new[]
+        {
+            "AlertEvaluationState", "IntegrationSettings", "IntegrationSettingsRevisions", "PolicyRevisions", "ProjectionMaintenance",
+            "RetentionPolicy", "RuntimeStatus", "ScheduleRuleScanState", "SchemaHistory", "TemplateCatalog", "TemplatePolicies", "TenantSettings"
+        }.Order(StringComparer.Ordinal);
+        Assert.Equal(expectedSeeds, seededTables);
+    }
     [Fact]
     public void Fresh_baseline_permissions_keep_audit_and_archive_protection()
     {
