@@ -28,6 +28,11 @@ and no upgrade converter is provided. The `tests/sql` scripts create only
 fixture objects in generated disposable databases; never apply them to a
 runtime tenant. SQL behavior remains unverified until run against a disposable
 SQL Server 2022+ instance.
+
+Do not execute `database/tenant/0001_initial.up.sql` directly in SSMS: it is a
+parameterized migration source, and the migration runner supplies `@InstanceId`.
+For manual setup, use the rendered `current-state.sql` snapshot described below.
+
 This is a fresh-install-only baseline and does not convert an existing tenant
 database.
 The in-memory tutorial needs none of these SQL objects.

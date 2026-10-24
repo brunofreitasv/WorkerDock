@@ -9,7 +9,8 @@ SET CONCAT_NULL_YIELDS_NULL ON;
 SET NUMERIC_ROUNDABORT OFF;
 
 -- 0001_bootstrap
-CREATE SCHEMA [workerdock] AUTHORIZATION [dbo];
+-- Apply through scripts/Invoke-TenantMigration.ps1 so @InstanceId is bound by MigrationRunner.
+EXEC sys.sp_executesql N'CREATE SCHEMA [workerdock] AUTHORIZATION [dbo];';
 GO
 
 CREATE TABLE [workerdock].TenantSettings (

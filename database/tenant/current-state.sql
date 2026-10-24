@@ -32,7 +32,7 @@ SET CONCAT_NULL_YIELDS_NULL ON;
 SET NUMERIC_ROUNDABORT OFF;
 
 -- 0001_bootstrap
-CREATE SCHEMA [workerdock] AUTHORIZATION [dbo];
+EXEC sys.sp_executesql N'CREATE SCHEMA [workerdock] AUTHORIZATION [dbo];';
 GO
 
 CREATE TABLE [workerdock].TenantSettings (

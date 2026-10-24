@@ -170,6 +170,8 @@ public sealed class CustomSqlSchemaTests
         Assert.Contains("MAX(r.AtUtc) DetectedAtUtc", alerts);
         Assert.DoesNotContain("MAX(r.CreatedAtUtc) DetectedAtUtc", alerts);
         Assert.Contains("COALESCE((SELECT Ready FROM [workerdock].RuntimeStatus WHERE StateId=1),CONVERT(bit,0))", monitoring);
+        Assert.Contains("EXEC sys.sp_executesql N'CREATE SCHEMA [workerdock] AUTHORIZATION [dbo];'", up);
+        Assert.Contains("EXEC sys.sp_executesql N'CREATE SCHEMA [workerdock] AUTHORIZATION [dbo];'", snapshot);
         Assert.Contains("CREATE PROCEDURE [workerdock].PurgeOperationalEvents", up);
         Assert.Matches(@"(?m)^GO\r?\nCREATE PROCEDURE \[workerdock\]\.PurgeOperationalEvents", up);
         Assert.Contains("i.RecordKind=N'OperationalEvent'", up);
