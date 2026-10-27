@@ -11,7 +11,8 @@ public sealed class MigrationTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        Assert.True(await database.ScalarAsync("SELECT COUNT(*) FROM sys.schemas WHERE name IN(N'db_owner',N'db_datareader',N'db_datawriter')") >= 3);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory WHERE MigrationId=N'0001_initial'"));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].TenantSettings WHERE InstanceId='" + database.InstanceId + "'"));
@@ -28,9 +29,12 @@ public sealed class MigrationTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
-        var wrong = new MigrationRunner(database.ConnectionString, Guid.NewGuid(), database.ScriptsRoot);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
+        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory WHERE MigrationId=N'0001_initial'"));
+        var wrong = new MigrationRunner(database.ConnectionString, Guid.NewGuid(), database.RuntimePrincipal, database.ScriptsRoot);
         var wrongInstance = await Assert.ThrowsAsync<WorkerDockException>(async () => await wrong.ApplyAsync("tenant", "0001_initial", default));
         Assert.Equal("TenantInstanceMismatch", wrongInstance.Code);
         await database.ExecuteAsync("UPDATE [workerdock].SchemaHistory SET UpChecksum=REPLICATE('0',64)");
@@ -41,7 +45,7 @@ public sealed class MigrationTests
     [Fact]
     public async Task Unknown_target_is_rejected_before_connecting()
     {
-        var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), Path.GetTempPath());
+        var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), "test-runtime", Path.GetTempPath());
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "missing", default));
         Assert.Equal("UnknownMigration", error.Code);
     }
@@ -49,8 +53,53 @@ public sealed class MigrationTests
     [Fact]
     public async Task Invalid_database_kind_fails_before_connecting()
     {
-        var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), Path.GetTempPath());
+        var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), "test-runtime", Path.GetTempPath());
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("other", "0001_initial", default));
         Assert.Equal("InvalidDatabaseKind", error.Code);
+    }
+
+    [Fact]
+    [Trait("Store", "Sql")]
+    public async Task Migration_rejects_missing_runtime_principal_before_creating_schema()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, "WorkerDock_Missing_Runtime", database.ScriptsRoot);
+
+        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "0001_initial", default));
+
+        Assert.Equal("RuntimePrincipalInvalid", error.Code);
+        Assert.Equal(0, await database.ScalarAsync("SELECT CASE WHEN SCHEMA_ID(N'workerdock') IS NULL THEN 0 ELSE 1 END"));
+    }
+
+    [Fact]
+    [Trait("Store", "Sql")]
+    public async Task Migration_rejects_role_as_runtime_principal_before_creating_schema()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        await database.ExecuteAsync("CREATE ROLE [WorkerDock_Test_Role];");
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, "WorkerDock_Test_Role", database.ScriptsRoot);
+
+        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "0001_initial", default));
+
+        Assert.Equal("RuntimePrincipalInvalid", error.Code);
+        Assert.Equal(0, await database.ScalarAsync("SELECT CASE WHEN SCHEMA_ID(N'workerdock') IS NULL THEN 0 ELSE 1 END"));
+    }
+
+    [Fact]
+    [Trait("Store", "Sql")]
+    public async Task Migration_rejects_nonempty_database_before_creating_schema()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        await database.ExecuteAsync("CREATE TABLE dbo.MigrationSentinel (Id int NOT NULL);");
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
+
+        var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "0001_initial", default));
+
+        Assert.Equal("TenantDatabaseNotEmpty", error.Code);
+        Assert.Equal(0, await database.ScalarAsync("SELECT CASE WHEN SCHEMA_ID(N'workerdock') IS NULL THEN 0 ELSE 1 END"));
+        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE object_id=OBJECT_ID(N'dbo.MigrationSentinel')"));
     }
 }

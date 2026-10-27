@@ -21,9 +21,20 @@ public sealed class TenantSnapshotTests
         await ExecuteSnapshotAsync(snapshot, migrated.InstanceId);
 
         AssertEquivalent(await ReadStateAsync(migrated), await ReadStateAsync(snapshot));
+        foreach (var database in new[] { migrated, snapshot })
+        {
+            Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM sys.database_principals WHERE name=N'WorkerDockRuntime'"));
+            Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].SchemaHistory WHERE MigrationId=N'0001_initial'"));
+            using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(database.ScriptsRoot, "tenant", "manifest.json")));
+            var baseline = Assert.Single(manifest.RootElement.EnumerateArray());
+            Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].SchemaHistory WHERE MigrationId=N'0001_initial' AND UpChecksum='{baseline.GetProperty("upSha256").GetString()}' AND DownChecksum='{baseline.GetProperty("downSha256").GetString()}'"));
+            Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM sys.objects WHERE schema_id=SCHEMA_ID(N'workerdock') AND name=N'TenantEgressPolicies'"));
+            var runtimeLiteral = database.RuntimePrincipal.Replace("'", "''", StringComparison.Ordinal);
+            Assert.Equal(0, await database.ScalarAsync($"SELECT COUNT(*) FROM sys.database_permissions p WHERE p.grantee_principal_id=DATABASE_PRINCIPAL_ID(N'{runtimeLiteral}') AND p.class=1 AND NOT EXISTS(SELECT 1 FROM sys.objects o WHERE o.object_id=p.major_id)"));
+        }
         // The baseline must also be accepted by the incremental runner without mutation.
         var before = await ReadStateAsync(snapshot);
-        await new MigrationRunner(snapshot.ConnectionString, migrated.InstanceId, snapshot.ScriptsRoot)
+        await new MigrationRunner(snapshot.ConnectionString, migrated.InstanceId, snapshot.RuntimePrincipal, snapshot.ScriptsRoot)
             .ApplyAsync("tenant", await LastMigrationAsync(snapshot), CancellationToken.None);
         AssertEquivalent(before, await ReadStateAsync(snapshot));
         Assert.Equal(0, await snapshot.ScalarAsync("SELECT COUNT(*) FROM workerdock.TemplateCatalog WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server')"));
@@ -34,6 +45,12 @@ public sealed class TenantSnapshotTests
     [InlineData("malformed", 51070)]
     [InlineData("empty-guid", 51070)]
     [InlineData("overlong-guid", 51070)]
+    [InlineData("unrendered-principal", 51074)]
+    [InlineData("missing-principal", 51074)]
+    [InlineData("empty-principal", 51074)]
+    [InlineData("whitespace-principal", 51074)]
+    [InlineData("overlong-principal", 51074)]
+    [InlineData("role-principal", 51074)]
     [InlineData("table", 51071)]
     [InlineData("schema", 51071)]
     [InlineData("role", 51071)]
@@ -45,6 +62,7 @@ public sealed class TenantSnapshotTests
         if (scenario == "table") await database.ExecuteAsync("CREATE TABLE dbo.Sentinel(Value int); INSERT dbo.Sentinel VALUES(42);");
         if (scenario == "schema") await database.ExecuteAsync("CREATE SCHEMA ExistingSchema;");
         if (scenario == "role") await database.ExecuteAsync("CREATE ROLE ExistingRole;");
+        if (scenario == "role-principal") await database.ExecuteAsync("CREATE ROLE ExistingRole;");
         if (scenario == "existing-tenant") await ApplyChainAsync(database);
         var before = scenario == "existing-tenant" ? await ReadStateAsync(database) : null;
         var sql = await SnapshotSqlAsync(database);
@@ -56,7 +74,19 @@ public sealed class TenantSnapshotTests
             "overlong-guid" => database.InstanceId + "-suffix",
             _ => database.InstanceId.ToString()
         };
-        var error = await Assert.ThrowsAsync<SqlException>(() => ExecuteSqlAsync(database, sql.Replace("__WORKERDOCK_INSTANCE_ID__", replacement, StringComparison.Ordinal)));
+        var principal = scenario switch
+        {
+            "unrendered-principal" => "__WORKERDOCK_RUNTIME_PRINCIPAL__",
+            "missing-principal" => "MissingRuntimeUser",
+            "empty-principal" => "",
+            "whitespace-principal" => " \t\r\n",
+            "overlong-principal" => new string('x', 129),
+            "role-principal" => "ExistingRole",
+            _ => database.RuntimePrincipal
+        };
+        var rendered = sql.Replace("__WORKERDOCK_INSTANCE_ID__", replacement, StringComparison.Ordinal)
+            .Replace("__WORKERDOCK_RUNTIME_PRINCIPAL__", principal.Replace("'", "''", StringComparison.Ordinal), StringComparison.Ordinal);
+        var error = await Assert.ThrowsAsync<SqlException>(() => ExecuteSqlAsync(database, rendered));
         Assert.Equal(expectedNumber, error.Number);
         if (before is not null) AssertEquivalent(before, await ReadStateAsync(database));
         else Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM sys.schemas WHERE name=N'workerdock'"));
@@ -64,7 +94,7 @@ public sealed class TenantSnapshotTests
     }
 
     [Theory]
-    [InlineData("grant", "permissions", "REVOKE SELECT ON workerdock.TenantSettings FROM WorkerDockRuntime;")]
+    [InlineData("grant", "permissions", "REVOKE SELECT ON workerdock.TenantSettings FROM __RUNTIME_PRINCIPAL__;")]
     [InlineData("trigger", "modules", "ALTER TRIGGER workerdock.AuditEvents_AppendOnly ON workerdock.AuditEvents AFTER UPDATE, DELETE AS BEGIN SET NOCOUNT ON; END;")]
     [InlineData("seed", "data:TenantSettings", "UPDATE workerdock.TenantSettings SET LogRetentionDays=31 WHERE InstanceId=(SELECT InstanceId FROM workerdock.TenantSettings);")]
     [InlineData("history", "data:SchemaHistory", "UPDATE workerdock.SchemaHistory SET UpChecksum=REPLICATE('0',64) WHERE MigrationId=N'0001_initial';")]
@@ -78,7 +108,7 @@ public sealed class TenantSnapshotTests
         await ExecuteSnapshotAsync(snapshot, migrated.InstanceId);
         var expected = await ReadStateAsync(migrated);
         AssertEquivalent(expected, await ReadStateAsync(snapshot));
-        await snapshot.ExecuteAsync(mutation);
+        await snapshot.ExecuteAsync(mutation.Replace("__RUNTIME_PRINCIPAL__", "[" + snapshot.RuntimePrincipal.Replace("]", "]]", StringComparison.Ordinal) + "]", StringComparison.Ordinal));
         var actual = await ReadStateAsync(snapshot);
         Assert.False(expected[section].SequenceEqual(actual[section]), $"Undetected {drift} drift in {section}");
         Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => AssertEquivalent(expected, actual));
@@ -91,17 +121,40 @@ public sealed class TenantSnapshotTests
     }
 
     private static async Task ApplyChainAsync(SqlDatabaseFixture database) =>
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
+        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot)
             .ApplyAsync("tenant", await LastMigrationAsync(database), CancellationToken.None);
 
     private static Task<string> SnapshotSqlAsync(SqlDatabaseFixture database) =>
         File.ReadAllTextAsync(Path.Combine(database.ScriptsRoot, "tenant", "current-state.sql"));
 
-    private static async Task ExecuteSnapshotAsync(SqlDatabaseFixture database, Guid instanceId) =>
-        await ExecuteSqlAsync(database, (await SnapshotSqlAsync(database)).Replace("__WORKERDOCK_INSTANCE_ID__", instanceId.ToString(), StringComparison.Ordinal));
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Fresh_baseline_permissions_quote_runtime_user_identifiers(bool snapshot)
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        const string principal = "WorkerDock]Runtime'User";
+        await database.ExecuteAsync($"ALTER USER [{database.RuntimePrincipal}] WITH NAME=[{principal.Replace("]", "]]", StringComparison.Ordinal)}];");
+        if (snapshot) await ExecuteSnapshotAsync(database, database.InstanceId, principal);
+        else await new MigrationRunner(database.ConnectionString, database.InstanceId, principal, database.ScriptsRoot)
+            .ApplyAsync("tenant", await LastMigrationAsync(database), CancellationToken.None);
+
+        var literal = principal.Replace("'", "''", StringComparison.Ordinal);
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID(N'{literal}') AND major_id=OBJECT_ID(N'[workerdock].RuntimeStatus') AND permission_name=N'SELECT' AND state=N'G'"));
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID(N'{literal}') AND major_id=OBJECT_ID(N'[workerdock].ArchiveBatches') AND permission_name=N'DELETE' AND state=N'D'"));
+        Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM sys.database_principals WHERE name=N'WorkerDockRuntime'"));
+    }
+
+    private static async Task ExecuteSnapshotAsync(SqlDatabaseFixture database, Guid instanceId, string? runtimePrincipal = null) =>
+        await ExecuteSqlAsync(database, (await SnapshotSqlAsync(database))
+            .Replace("__WORKERDOCK_INSTANCE_ID__", instanceId.ToString(), StringComparison.Ordinal)
+            .Replace("__WORKERDOCK_RUNTIME_PRINCIPAL__", (runtimePrincipal ?? database.RuntimePrincipal).Replace("'", "''", StringComparison.Ordinal), StringComparison.Ordinal));
 
     private static async Task ExecuteSqlAsync(SqlDatabaseFixture database, string sql)
     {
+        // ADO already stops at the first exception, matching the snapshot's SQLCMD directive.
+        sql = Regex.Replace(sql, @"\A:ON ERROR EXIT\r?\n", "", RegexOptions.CultureInvariant);
         await using var connection = new SqlConnection(database.ConnectionString);
         await connection.OpenAsync();
         foreach (var batch in Regex.Split(sql, @"(?im)^\s*GO\s*$"))
@@ -128,7 +181,7 @@ public sealed class TenantSnapshotTests
         await connection.OpenAsync();
         var state = new SortedDictionary<string, string[]>(StringComparer.Ordinal);
         foreach (var (name, query) in CatalogQueries)
-            state[name] = await ReadRowsAsync(connection, query, name == "modules");
+            state[name] = await ReadRowsAsync(connection, query, name == "modules", database.RuntimePrincipal);
 
         // Read every table, including empty operational tables. Only known generated
         // values are omitted; tenant identity, all seed values and both history hashes remain.
@@ -152,10 +205,12 @@ public sealed class TenantSnapshotTests
         return state;
     }
 
-    private static async Task<string[]> ReadRowsAsync(SqlConnection connection, string sql, bool normalizeModules = false)
+    private static async Task<string[]> ReadRowsAsync(SqlConnection connection, string sql, bool normalizeModules = false, string? runtimePrincipal = null)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+        if (runtimePrincipal is not null)
+            command.Parameters.Add(new SqlParameter("@RuntimePrincipal", SqlDbType.NVarChar, 128) { Value = runtimePrincipal });
         await using var reader = await command.ExecuteReaderAsync();
         var rows = new List<string>();
         while (await reader.ReadAsync())
@@ -249,7 +304,7 @@ public sealed class TenantSnapshotTests
                                 WHEN 3 THEN SCHEMA_NAME(p.major_id) WHEN 4 THEN USER_NAME(p.major_id) ELSE N'<database>' END,
                    CASE WHEN p.class=1 AND p.minor_id>0 THEN COL_NAME(p.major_id,p.minor_id) ELSE N'' END
             FROM sys.database_permissions p
-            WHERE USER_NAME(p.grantee_principal_id)=N'WorkerDockRuntime'
+            WHERE p.grantee_principal_id=DATABASE_PRINCIPAL_ID(@RuntimePrincipal)
                OR (p.class=1 AND OBJECT_SCHEMA_NAME(p.major_id)=N'workerdock')
                OR (p.class=3 AND SCHEMA_NAME(p.major_id)=N'workerdock')
             """)

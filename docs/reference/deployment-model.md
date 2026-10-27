@@ -3,7 +3,7 @@
 Follow the [production deployment guide](../how-to/deploy-production.md) for
 application, SQL, and upgrade guidance. Use [tenant configuration](../how-to/configure-tenants.md)
 for process settings and Control Center registration, and [SQL setup](../how-to/setup-sql-server.md)
-for migration, snapshot, and runtime-role instructions. Operators choose their
+for migration, snapshot, and existing runtime-user instructions. Operators choose their
 own build, packaging, and process-management tools.
 
 A tenant consists of a Web process and one Windows runtime service. The runtime
@@ -30,8 +30,9 @@ vault integration is installed and verified. Complete the
 infrastructure before live use.
 
 Use SQL Server 2022 or newer with a separate database per tenant. Apply the
-`0001_initial` baseline before starting applications, then map the tenant web
-and runtime identities to `WorkerDockRuntime` in its tenant database. The current Control Center uses
+`0001_initial` baseline before starting applications. The selected runtime
+database user must already exist in the tenant database; setup validates and
+grants that user directly. The current Control Center uses
 its host identity for protected file state and its vault adapter;
 it has no SQL principal. Runtime identities must not have schema-change rights.
 Keep configuration, credentials, and Data Protection keys outside release

@@ -66,7 +66,7 @@ public sealed class DynamicValuePersistenceTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = Guid.NewGuid();
         var executionId = Guid.NewGuid();
@@ -91,7 +91,7 @@ public sealed class DynamicValuePersistenceTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = Guid.NewGuid();
         var executionId = Guid.NewGuid();
@@ -125,7 +125,7 @@ public sealed class DynamicValuePersistenceTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = Guid.NewGuid();
         var executionId = Guid.NewGuid();
@@ -163,7 +163,7 @@ public sealed class DynamicValuePersistenceTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var catalog = JobCommandTestCatalog.Create();

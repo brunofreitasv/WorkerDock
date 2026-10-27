@@ -10,6 +10,6 @@ The `WorkerDock` `ActivitySource` emits an attempt span with execution/attempt i
 
 Metric aggregation claims terminal executions in bounded batches under `ReadCommitted`, using `UPDLOCK,READPAST,READCOMMITTEDLOCK`. The explicit read-committed lock hint keeps the claim compatible with databases using read-committed snapshot isolation while allowing concurrent workers to process separate rows.
 
-The fresh-install baseline creates the event and aggregate tables and grants only `SELECT` on `AuditEvents` to `WorkerDockRuntime`, preserving its existing `INSERT` permission. It grants no audit `UPDATE` or `DELETE`. Rollback refuses to remove populated diagnostics or aggregates. Runtime processes do not run migrations; deployment applies the manifest-verified baseline.
+The fresh-install baseline creates the event and aggregate tables and grants only `SELECT` on `AuditEvents` to the selected existing runtime database user, preserving its existing `INSERT` permission. It grants no audit `UPDATE` or `DELETE`. Rollback refuses to remove populated diagnostics or aggregates. Runtime processes do not run migrations; deployment applies the manifest-verified baseline.
 
 SQL-backed integration checks require `WORKERDOCK_TEST_SQL`; local SQL verification is blocked when it is unset. The in-memory web adapter does not provide persisted event history.

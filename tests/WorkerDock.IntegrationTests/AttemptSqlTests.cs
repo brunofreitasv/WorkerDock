@@ -304,7 +304,7 @@ public sealed class AttemptSqlTests
     public async Task Empty_attempt_migration_round_trip_restores_schema()
     {
         await using var database = new SqlDatabaseFixture(); await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         await runner.RollbackAsync("tenant", "0001_initial", default);
         await runner.ApplyAsync("tenant", "0001_initial", default);

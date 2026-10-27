@@ -48,9 +48,6 @@ BEGIN
 END;
 GO
 
-CREATE ROLE WorkerDockRuntime;
-GRANT SELECT, UPDATE ON [workerdock].TenantSettings TO WorkerDockRuntime;
-GRANT INSERT ON [workerdock].AuditEvents TO WorkerDockRuntime;
 
 GO
 -- 0003_execution
@@ -151,16 +148,9 @@ CREATE TABLE [workerdock].Commands (
     State nvarchar(20) NOT NULL,
     CreatedAtUtc datetime2(7) NOT NULL
 );
-GRANT SELECT ON [workerdock].TemplateCatalog TO WorkerDockRuntime;
-GRANT SELECT ON [workerdock].JobRevisions TO WorkerDockRuntime;
-GRANT SELECT, INSERT, UPDATE ON [workerdock].Jobs TO WorkerDockRuntime;
-GRANT INSERT ON [workerdock].JobRevisions TO WorkerDockRuntime;
-GRANT SELECT, INSERT, UPDATE ON [workerdock].Executions TO WorkerDockRuntime;
-GRANT SELECT, INSERT, UPDATE ON [workerdock].Commands TO WorkerDockRuntime;
 
 GO
 -- 0003a_projection
-GRANT SELECT ON [workerdock].Attempts TO WorkerDockRuntime;
 
 GO
 -- 0003b_attempts
@@ -168,7 +158,6 @@ ALTER TABLE [workerdock].Executions ADD StopRequested bit NOT NULL CONSTRAINT DF
     ForceStop bit NOT NULL CONSTRAINT DF_Executions_Force DEFAULT 0;
 ALTER TABLE [workerdock].Attempts ADD LocalExitConfirmed bit NOT NULL CONSTRAINT DF_Attempts_Exit DEFAULT 0,
     EffectsMayHaveOccurred bit NOT NULL CONSTRAINT DF_Attempts_Effects DEFAULT 0;
-GRANT SELECT,INSERT,UPDATE ON [workerdock].Attempts TO WorkerDockRuntime;
 
 GO
 -- 0003c_capacity
@@ -208,8 +197,6 @@ BEGIN
 END;
 GO
 -- Runtime receives catalog data mutations only; the trigger prevents identity/metadata replacement and deletion.
-GRANT INSERT ON [workerdock].TemplateCatalog TO WorkerDockRuntime;
-GRANT UPDATE (DescriptorJson,MetadataDigest,Enabled,Retired) ON [workerdock].TemplateCatalog TO WorkerDockRuntime;
 
 GO
 -- 0004a_profiles
@@ -242,9 +229,6 @@ BEGIN
     THROW 51023,'ProfileRevisionImmutable',1;
 END;
 GO
-GRANT SELECT,INSERT ON [workerdock].ConnectionProfileRevisions TO WorkerDockRuntime;
-GRANT SELECT,INSERT ON [workerdock].ConnectionProfiles TO WorkerDockRuntime;
-GRANT UPDATE(Name,CurrentRevisionId,Retired) ON [workerdock].ConnectionProfiles TO WorkerDockRuntime;
 
 GO
 -- 0004b_integration_settings
@@ -275,6 +259,9 @@ CREATE TABLE [workerdock].TenantEgressPolicies (
 );
 INSERT [workerdock].TenantEgressPolicies(Name,Revision,HostsJson,PortsJson,PrivateCidrsJson,AllowHttp)
 VALUES(N'tenant-jobs',1,N'[]',N'[443]',N'[]',0),(N'tenant-alerts',1,N'[]',N'[443]',N'[]',0);
+-- Preserve the transient table's permissions until its policies are moved into IntegrationSettings.
+DECLARE @EgressPermissionSql nvarchar(max)=N'GRANT SELECT,INSERT,UPDATE ON [workerdock].TenantEgressPolicies TO '+QUOTENAME(@RuntimePrincipal)+N';';
+EXEC sys.sp_executesql @EgressPermissionSql;
 
 CREATE TABLE [workerdock].IntegrationSettingsRevisions (
     RevisionId uniqueidentifier NOT NULL CONSTRAINT PK_IntegrationSettingsRevisions PRIMARY KEY,
@@ -298,9 +285,6 @@ BEGIN
     THROW 51025,'IntegrationSettingsRevisionImmutable',1;
 END;
 GO
-GRANT SELECT,INSERT,UPDATE ON [workerdock].IntegrationSettings TO WorkerDockRuntime;
-GRANT SELECT,INSERT,UPDATE ON [workerdock].TenantEgressPolicies TO WorkerDockRuntime;
-GRANT SELECT,INSERT ON [workerdock].IntegrationSettingsRevisions TO WorkerDockRuntime;
 
 GO
 -- 0005_scheduling
@@ -355,8 +339,6 @@ CREATE TABLE [workerdock].ScheduleRuleScanState
 );
 INSERT [workerdock].ScheduleRuleScanState(ScanId,LastScheduleId) VALUES(1,NULL);
 GO
-GRANT SELECT,INSERT,UPDATE,DELETE ON [workerdock].Schedules TO WorkerDockRuntime;
-GRANT SELECT,UPDATE ON [workerdock].ScheduleRuleScanState TO WorkerDockRuntime;
 
 GO
 -- 0006_observability
@@ -381,8 +363,6 @@ CREATE TABLE [workerdock].ExecutionMetricAggregates
     CONSTRAINT CK_ExecutionMetricAggregates_Counts CHECK(ExecutionCount>=0 AND RetryCount>=0 AND TimeoutCount>=0 AND DurationMsTotal>=0 AND TriggerDelayMsTotal>=0 AND QueueDelayMsTotal>=0)
 );
 GO
-GRANT SELECT ON [workerdock].AuditEvents TO WorkerDockRuntime;
-GRANT SELECT,INSERT,UPDATE ON [workerdock].ExecutionMetricAggregates TO WorkerDockRuntime;
 
 GO
 -- 0007_alerts
@@ -539,13 +519,6 @@ CREATE TABLE [workerdock].AlertDeliveryAttempts
 GO
 CREATE INDEX IX_AlertDeliveryAttempts_Timing ON [workerdock].AlertDeliveryAttempts(DeliveryId,CompletedAtUtc,AttemptOrdinal) INCLUDE(LeaseGeneration,Result,SafeCode);
 GO
-GRANT SELECT,INSERT,UPDATE ON [workerdock].AlertSinks TO WorkerDockRuntime;
-GRANT SELECT,INSERT ON [workerdock].AlertSinkRevisions TO WorkerDockRuntime;
-GRANT SELECT,INSERT,UPDATE ON [workerdock].AlertRules TO WorkerDockRuntime;
-GRANT SELECT,INSERT ON [workerdock].AlertRuleRevisions TO WorkerDockRuntime;
-GRANT SELECT,INSERT,UPDATE ON [workerdock].AlertIncidents TO WorkerDockRuntime;
-GRANT SELECT,INSERT,UPDATE ON [workerdock].AlertDeliveries TO WorkerDockRuntime;
-GRANT SELECT,INSERT ON [workerdock].AlertDeliveryAttempts TO WorkerDockRuntime;
 
 GO
 -- 0008_retention
@@ -866,15 +839,6 @@ BEGIN
     COMMIT TRANSACTION;
 END;
 GO
-GRANT SELECT,INSERT,UPDATE ON [workerdock].ArchiveBatches TO WorkerDockRuntime;
-GRANT SELECT,INSERT ON [workerdock].ArchiveBatchItems TO WorkerDockRuntime;
-DENY DELETE ON [workerdock].ArchiveBatchItems TO WorkerDockRuntime;
-DENY DELETE ON [workerdock].ArchiveBatches TO WorkerDockRuntime;
-GRANT SELECT,INSERT,UPDATE ON [workerdock].RetentionRequestTombstones TO WorkerDockRuntime;
-GRANT EXECUTE ON [workerdock].PurgeAuditEvents TO WorkerDockRuntime;
-GRANT EXECUTE ON [workerdock].PurgeRetentionItems TO WorkerDockRuntime;
-GRANT EXECUTE ON [workerdock].PurgeRetentionRequestTombstones TO WorkerDockRuntime;
-GRANT EXECUTE ON [workerdock].PurgeExpiredArchiveBatchItems TO WorkerDockRuntime;
 
 GO
 -- 0009_dynamic_values
@@ -937,8 +901,6 @@ CREATE TABLE [workerdock].RuntimeStatus (
     CONSTRAINT CK_RuntimeStatus_HostCeiling CHECK (HostCeiling BETWEEN 1 AND 1000)
 );
 INSERT [workerdock].RuntimeStatus(StateId,BootId,Ready,HostCeiling,LastHeartbeatUtc) VALUES(1,NULL,0,1,NULL);
-GRANT SELECT ON [workerdock].RuntimeStatus TO WorkerDockRuntime;
-GRANT UPDATE ON [workerdock].RuntimeStatus TO WorkerDockRuntime;
 
 GO
 -- 0012_execution_manual_dedup
@@ -953,7 +915,6 @@ ALTER TABLE [workerdock].Executions ADD
     ManualRequestExpiresAtUtc datetime2(7) NULL,
     HoldsJobSlot bit NOT NULL CONSTRAINT DF_Executions_HoldsJobSlot DEFAULT(0);
 ALTER TABLE [workerdock].TemplateCatalog ADD ConcurrencyLimit int NOT NULL CONSTRAINT DF_TemplateCatalog_ConcurrencyLimit DEFAULT(1);
-GRANT UPDATE (ConcurrencyLimit) ON [workerdock].TemplateCatalog TO WorkerDockRuntime;
 ALTER TABLE [workerdock].IntegrationSettings ADD EgressPoliciesJson nvarchar(max) NOT NULL CONSTRAINT DF_IntegrationSettings_EgressPolicies DEFAULT(N'[]');
 UPDATE settings SET EgressPoliciesJson=(SELECT p.Name AS [name],p.Revision AS [revision],JSON_QUERY(p.HostsJson) AS [hosts],JSON_QUERY(p.PortsJson) AS [ports],
     JSON_QUERY(p.PrivateCidrsJson) AS [privateCidrs],p.AllowHttp AS [allowHttp] FROM [workerdock].TenantEgressPolicies p ORDER BY p.Name FOR JSON PATH)
@@ -1010,8 +971,6 @@ CREATE INDEX IX_OperationalEvents_ExecutionPage ON [workerdock].OperationalEvent
     INCLUDE(AttemptId,Source,Sequence,Code,SafeFieldsJson);
 CREATE INDEX IX_OperationalEvents_Recovery ON [workerdock].OperationalEvents(EventKind,ScheduleId,AtUtc)
     INCLUDE(FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount,SkippedOccurrences);
-GRANT SELECT,INSERT ON [workerdock].OperationalEvents TO WorkerDockRuntime;
-GRANT UPDATE(LastEvaluatedAtUtc,LastSubjectKey) ON [workerdock].AlertRules TO WorkerDockRuntime;
 GO
 CREATE PROCEDURE [workerdock].PurgeOperationalEvents
     @LogCutoffUtc datetime2(7),@MaxRows int,@BatchId uniqueidentifier=NULL,@PurgedRows int OUTPUT
@@ -1045,4 +1004,51 @@ BEGIN
     COMMIT TRANSACTION;
 END;
 GO
-GRANT EXECUTE ON [workerdock].PurgeOperationalEvents TO WorkerDockRuntime;
+
+-- Direct runtime permissions: preserve object, column and procedure boundaries.
+DECLARE @QuotedRuntimePrincipal nvarchar(258)=QUOTENAME(@RuntimePrincipal);
+DECLARE @PermissionSql nvarchar(max)=CONVERT(nvarchar(max),N'')+
+    N'GRANT SELECT, UPDATE ON [workerdock].TenantSettings TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT INSERT ON [workerdock].AuditEvents TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT ON [workerdock].TemplateCatalog TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT ON [workerdock].JobRevisions TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT, INSERT, UPDATE ON [workerdock].Jobs TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT INSERT ON [workerdock].JobRevisions TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT, INSERT, UPDATE ON [workerdock].Executions TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT, INSERT, UPDATE ON [workerdock].Commands TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT ON [workerdock].Attempts TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT,UPDATE ON [workerdock].Attempts TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT INSERT ON [workerdock].TemplateCatalog TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT UPDATE (DescriptorJson,MetadataDigest,Enabled,Retired) ON [workerdock].TemplateCatalog TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT ON [workerdock].ConnectionProfileRevisions TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT ON [workerdock].ConnectionProfiles TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT UPDATE(Name,CurrentRevisionId,Retired) ON [workerdock].ConnectionProfiles TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT,UPDATE ON [workerdock].IntegrationSettings TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT ON [workerdock].IntegrationSettingsRevisions TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT,UPDATE,DELETE ON [workerdock].Schedules TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,UPDATE ON [workerdock].ScheduleRuleScanState TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT ON [workerdock].AuditEvents TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT,UPDATE ON [workerdock].ExecutionMetricAggregates TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT,UPDATE ON [workerdock].AlertSinks TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT ON [workerdock].AlertSinkRevisions TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT,UPDATE ON [workerdock].AlertRules TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT ON [workerdock].AlertRuleRevisions TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT,UPDATE ON [workerdock].AlertIncidents TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT,UPDATE ON [workerdock].AlertDeliveries TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT ON [workerdock].AlertDeliveryAttempts TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT,UPDATE ON [workerdock].ArchiveBatches TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT ON [workerdock].ArchiveBatchItems TO '+@QuotedRuntimePrincipal+N';'+
+    N'DENY DELETE ON [workerdock].ArchiveBatchItems TO '+@QuotedRuntimePrincipal+N';'+
+    N'DENY DELETE ON [workerdock].ArchiveBatches TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT,UPDATE ON [workerdock].RetentionRequestTombstones TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT EXECUTE ON [workerdock].PurgeAuditEvents TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT EXECUTE ON [workerdock].PurgeRetentionItems TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT EXECUTE ON [workerdock].PurgeRetentionRequestTombstones TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT EXECUTE ON [workerdock].PurgeExpiredArchiveBatchItems TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT ON [workerdock].RuntimeStatus TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT UPDATE ON [workerdock].RuntimeStatus TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT UPDATE (ConcurrencyLimit) ON [workerdock].TemplateCatalog TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT ON [workerdock].OperationalEvents TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT UPDATE(LastEvaluatedAtUtc,LastSubjectKey) ON [workerdock].AlertRules TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT EXECUTE ON [workerdock].PurgeOperationalEvents TO '+@QuotedRuntimePrincipal+N';';
+EXEC sys.sp_executesql @PermissionSql;

@@ -15,7 +15,7 @@ public sealed class JobSqlIntegrationTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
+        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot)
             .ApplyAsync("tenant", "0001_initial", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
@@ -37,7 +37,7 @@ public sealed class JobSqlIntegrationTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
+        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot)
             .ApplyAsync("tenant", "0001_initial", default);
         await database.ExecuteAsync("CREATE TRIGGER [workerdock].TestJobAuditFailure ON [workerdock].AuditEvents AFTER INSERT AS THROW 51000, 'Injected audit failure', 1;");
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
@@ -58,7 +58,7 @@ public sealed class JobSqlIntegrationTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
+        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot)
             .ApplyAsync("tenant", "0001_initial", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
@@ -78,7 +78,7 @@ public sealed class JobSqlIntegrationTests
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AuditEvents WHERE EventType=N'ManualRunAccepted'"));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AuditEvents WHERE EventType=N'ManualRunAccepted' AND JSON_VALUE(DetailsJson,'$.beforeRevision')='1' AND JSON_VALUE(DetailsJson,'$.afterRevision')='1' AND JSON_VALUE(DetailsJson,'$.outcome')='Accepted'"));
         var unsafeRollback = await Assert.ThrowsAsync<WorkerDockException>(async () =>
-            await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
+            await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot)
                 .RollbackAsync("tenant", "0001_initial", default));
         Assert.Equal("UnsafeRollback", unsafeRollback.Code);
     }
@@ -111,7 +111,7 @@ public sealed class JobSqlIntegrationTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock') AND name=N'Executions'"));
         await runner.RollbackAsync("tenant", "0001_initial", default);

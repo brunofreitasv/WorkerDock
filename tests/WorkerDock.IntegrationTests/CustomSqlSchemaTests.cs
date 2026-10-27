@@ -46,7 +46,7 @@ public sealed class CustomSqlSchemaTests
 
         var up = File.ReadAllText(Path.Combine(directory, "0001_initial.up.sql"));
         Assert.Contains("@InstanceId", up);
-        Assert.Contains("WorkerDockRuntime", up);
+        Assert.Contains("@RuntimePrincipal", up);
         Assert.DoesNotContain("Quartz", up, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("QRTZ", up, StringComparison.OrdinalIgnoreCase);
         var tables = Regex.Matches(up, @"(?im)^CREATE TABLE\s+\[workerdock\]\.\[?(?<name>\w+)\]?")
@@ -76,8 +76,10 @@ public sealed class CustomSqlSchemaTests
         Assert.Equal(fixture.Database.InstanceId.ToString(), await ReadScalarAsync(fixture.Database, "SELECT CONVERT(nvarchar(36),InstanceId) FROM [workerdock].TenantSettings"));
         Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].TemplateCatalog WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server')"));
         Assert.Equal(2, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].TemplateCatalog WHERE TemplateVersion=N'1.1.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server')"));
-        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID(N'WorkerDockRuntime') AND major_id=OBJECT_ID(N'[workerdock].RuntimeStatus') AND permission_name=N'SELECT' AND state=N'G'"));
-        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID(N'WorkerDockRuntime') AND major_id=OBJECT_ID(N'[workerdock].RuntimeStatus') AND permission_name=N'UPDATE' AND state=N'G'"));
+        var principal = fixture.Database.RuntimePrincipal.Replace("'", "''", StringComparison.Ordinal);
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID(N'{principal}') AND major_id=OBJECT_ID(N'[workerdock].RuntimeStatus') AND permission_name=N'SELECT' AND state=N'G'"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID(N'{principal}') AND major_id=OBJECT_ID(N'[workerdock].RuntimeStatus') AND permission_name=N'UPDATE' AND state=N'G'"));
+        Assert.Equal(0, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM sys.database_principals WHERE name=N'WorkerDockRuntime'"));
     }
 
     [Fact]
@@ -86,7 +88,7 @@ public sealed class CustomSqlSchemaTests
     {
         await using var fixture = new SqlDatabaseFixture();
         await fixture.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(fixture.ConnectionString, fixture.InstanceId, fixture.ScriptsRoot);
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(fixture.ConnectionString, fixture.InstanceId, fixture.RuntimePrincipal, fixture.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         await fixture.ExecuteAsync("INSERT [workerdock].Jobs(JobId,CurrentRevision) VALUES(NEWID(),0)");
         var error = await Assert.ThrowsAsync<WorkerDock.Application.Common.WorkerDockException>(async () => await runner.RollbackAsync("tenant", "0001_initial", default));
@@ -104,7 +106,7 @@ public sealed class CustomSqlSchemaTests
     {
         await using var fixture = new SqlDatabaseFixture();
         await fixture.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(fixture.ConnectionString, fixture.InstanceId, fixture.ScriptsRoot);
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(fixture.ConnectionString, fixture.InstanceId, fixture.RuntimePrincipal, fixture.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         await fixture.ExecuteAsync(mutation);
 
@@ -196,12 +198,63 @@ public sealed class CustomSqlSchemaTests
     [Fact]
     public void Fresh_baseline_permissions_keep_audit_and_archive_protection()
     {
-        var up = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "database", "tenant", "0001_initial.up.sql"));
-        Assert.Contains("GRANT INSERT ON [workerdock].AuditEvents TO WorkerDockRuntime", up);
-        Assert.DoesNotContain("GRANT DELETE ON [workerdock].AuditEvents TO WorkerDockRuntime", up);
-        Assert.Contains("DENY DELETE ON [workerdock].ArchiveBatchItems TO WorkerDockRuntime", up);
-        Assert.Contains("PurgeAuditEvents", up);
-        Assert.Contains("PurgeExpiredArchiveBatchItems", up);
+        var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
+        var up = File.ReadAllText(Path.Combine(directory, "0001_initial.up.sql"));
+        var snapshot = File.ReadAllText(Path.Combine(directory, "current-state.sql"));
+        foreach (var sql in new[] { up, snapshot })
+        {
+            Assert.DoesNotMatch(@"(?i)\bCREATE\s+(ROLE|USER|LOGIN)\b", sql);
+            Assert.DoesNotContain("WorkerDockRuntime", sql);
+            Assert.Contains("QUOTENAME(@RuntimePrincipal)", sql);
+            Assert.Contains("GRANT INSERT ON [workerdock].AuditEvents TO '+@QuotedRuntimePrincipal", sql);
+            Assert.Contains("GRANT SELECT ON [workerdock].AuditEvents TO '+@QuotedRuntimePrincipal", sql);
+            Assert.DoesNotMatch(@"(?i)GRANT[^;\r\n]*(UPDATE|DELETE)[^;\r\n]*AuditEvents", sql);
+            Assert.Contains("DENY DELETE ON [workerdock].ArchiveBatchItems TO '+@QuotedRuntimePrincipal", sql);
+            Assert.Contains("DENY DELETE ON [workerdock].ArchiveBatches TO '+@QuotedRuntimePrincipal", sql);
+            Assert.Contains("GRANT EXECUTE ON [workerdock].PurgeAuditEvents TO '+@QuotedRuntimePrincipal", sql);
+            Assert.Contains("GRANT EXECUTE ON [workerdock].PurgeExpiredArchiveBatchItems TO '+@QuotedRuntimePrincipal", sql);
+            // This legacy table exists only while its seed policies are moved into IntegrationSettings.
+            var transientGrant = sql.IndexOf("GRANT SELECT,INSERT,UPDATE ON [workerdock].TenantEgressPolicies", StringComparison.Ordinal);
+            var transientDrop = sql.IndexOf("DROP TABLE [workerdock].TenantEgressPolicies", StringComparison.Ordinal);
+            Assert.True(transientGrant > sql.IndexOf("CREATE TABLE [workerdock].TenantEgressPolicies", StringComparison.Ordinal));
+            Assert.True(transientGrant < transientDrop);
+            Assert.DoesNotContain("TenantEgressPolicies", sql[transientDrop..].Split(';', 2)[1]);
+        }
+        Assert.Equal(up[up.IndexOf("-- Direct runtime permissions", StringComparison.Ordinal)..].Trim(),
+            snapshot[snapshot.IndexOf("-- Direct runtime permissions", StringComparison.Ordinal)..snapshot.IndexOf("INSERT [workerdock].SchemaHistory", StringComparison.Ordinal)].Trim());
+        Assert.DoesNotContain("DROP ROLE", File.ReadAllText(Path.Combine(directory, "0001_initial.down.sql")));
+        Assert.False(File.Exists(Path.Combine(Root, "database", "tenant", "permissions.sql")));
+        Assert.False(File.Exists(Path.Combine(Root, "database", "tenant", "permissions.rollback.sql")));
+    }
+
+    [Fact]
+    public void Fresh_baseline_permissions_snapshot_records_manifest_history()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
+        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "manifest.json")));
+        var entry = Assert.Single(manifest.RootElement.EnumerateArray());
+        var snapshot = File.ReadAllText(Path.Combine(directory, "current-state.sql"));
+        Assert.Single(Regex.Matches(snapshot, @"INSERT \[workerdock\]\.SchemaHistory"));
+        Assert.Contains($"VALUES(N'0001_initial','{entry.GetProperty("upSha256").GetString()}','{entry.GetProperty("downSha256").GetString()}',SYSUTCDATETIME())", snapshot);
+        Assert.Contains("__WORKERDOCK_RUNTIME_PRINCIPAL__", snapshot);
+        Assert.True(snapshot.IndexOf("SnapshotRuntimePrincipalInvalid", StringComparison.Ordinal) < snapshot.IndexOf("CREATE SCHEMA", StringComparison.Ordinal));
+        Assert.StartsWith(":ON ERROR EXIT\n", snapshot.Replace("\r\n", "\n", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Store", "Sql")]
+    public async Task Fresh_baseline_permissions_rollback_retains_existing_user_without_object_grants()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
+        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.RollbackAsync("tenant", "0001_initial", default);
+
+        Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM sys.schemas WHERE name=N'workerdock'"));
+        var principal = database.RuntimePrincipal.Replace("'", "''", StringComparison.Ordinal);
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM sys.database_principals WHERE name=N'{principal}' AND type=N'S'"));
+        Assert.Equal(0, await database.ScalarAsync($"SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID(N'{principal}') AND class IN(1,3)"));
     }
 
     private static async Task<string[]> ReadStringsAsync(SqlDatabaseFixture fixture, string sql)

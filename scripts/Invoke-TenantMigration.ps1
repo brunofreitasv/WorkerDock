@@ -6,6 +6,8 @@ param(
     [string]$Database,
     [object]$Credential,
     [string]$InstanceId,
+    [switch]$InitialSetup,
+    [string]$RuntimePrincipal,
     [string]$TargetMigration,
     [string]$ScriptsRoot,
     [string]$AssemblyDirectory
@@ -24,8 +26,19 @@ try {
     if (-not [int]::TryParse($Port, [Globalization.NumberStyles]::None, [Globalization.CultureInfo]::InvariantCulture, [ref]$parsedPort)) {
         Stop-WithCode 'SqlConfigurationInvalid'
     }
+    $generatedInstanceId = $false
     $parsedInstanceId = [guid]::Empty
-    if (-not [guid]::TryParse($InstanceId, [ref]$parsedInstanceId)) { Stop-WithCode 'InstanceIdInvalid' }
+    if ($InitialSetup) {
+        if ($PSBoundParameters.ContainsKey('InstanceId') -or $Action -ne 'Apply') { Stop-WithCode 'MigrationModeInvalid' }
+        $parsedInstanceId = [guid]::NewGuid()
+        $generatedInstanceId = $true
+    }
+    elseif (-not [guid]::TryParse($InstanceId, [ref]$parsedInstanceId)) {
+        Stop-WithCode 'InstanceIdInvalid'
+    }
+    if ([string]::IsNullOrWhiteSpace($RuntimePrincipal) -or $RuntimePrincipal.Length -gt 128) {
+        Stop-WithCode 'RuntimePrincipalInvalid'
+    }
     if ($null -eq $Credential -or $Credential -isnot [System.Management.Automation.PSCredential] -or
         [string]::IsNullOrEmpty($Credential.UserName) -or
         $null -eq $Credential.Password -or $Credential.Password.Length -eq 0) {
@@ -107,10 +120,11 @@ public sealed class WorkerDockMigrationAssemblyLoadContext : AssemblyLoadContext
         $SqlHost, $parsedPort, $Database, $Credential.UserName, $password))
 
     $runnerType = $infrastructure.GetType('WorkerDock.Infrastructure.Migrations.MigrationRunner', $true)
-    $runner = [Activator]::CreateInstance($runnerType, [object[]]@($connectionString, $parsedInstanceId, $ScriptsRoot))
+    $runner = [Activator]::CreateInstance($runnerType, [object[]]@($connectionString, $parsedInstanceId, $RuntimePrincipal, $ScriptsRoot))
     $methodName = if ($Action -eq 'Apply') { 'ApplyAsync' } else { 'RollbackAsync' }
     $operation = $runnerType.GetMethod($methodName).Invoke($runner, [object[]]@('tenant', $TargetMigration, [Threading.CancellationToken]::None))
     $operation.AsTask().GetAwaiter().GetResult()
+    if ($generatedInstanceId) { [Console]::Out.WriteLine($parsedInstanceId.ToString()) }
 }
 catch {
     $exception = $_.Exception
@@ -121,7 +135,7 @@ catch {
         $candidate = $codeProperty.GetValue($exception)
         if ($candidate -is [string] -and $candidate -match '^[A-Za-z][A-Za-z0-9]{0,79}$') { $code = $candidate }
     }
-    elseif ($exception.Message -in 'ActionInvalid', 'SqlConfigurationInvalid', 'InstanceIdInvalid', 'ScriptsRootInvalid', 'AssemblyDirectoryInvalid', 'CredentialInvalid', 'UnknownMigration') {
+    elseif ($exception.Message -in 'ActionInvalid', 'SqlConfigurationInvalid', 'InstanceIdInvalid', 'MigrationModeInvalid', 'RuntimePrincipalInvalid', 'ScriptsRootInvalid', 'AssemblyDirectoryInvalid', 'CredentialInvalid', 'UnknownMigration') {
         $code = $exception.Message
     }
     [Console]::Error.WriteLine($code)

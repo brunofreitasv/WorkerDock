@@ -17,21 +17,63 @@ public sealed class MigrationInputTests
         Assert.Contains("database/tenant/current-state.sql", setup, StringComparison.Ordinal);
         Assert.Contains("fresh-install-only", setup, StringComparison.Ordinal);
         Assert.Contains("__WORKERDOCK_INSTANCE_ID__", setup, StringComparison.Ordinal);
-        Assert.Contains("same snapshot action", setup, StringComparison.Ordinal);
-        Assert.Contains("one SQL batch", setup, StringComparison.Ordinal);
+        Assert.Contains("SQLCMD mode", setup, StringComparison.Ordinal);
+        Assert.Contains(":ON ERROR EXIT", setup, StringComparison.Ordinal);
+        Assert.DoesNotContain("one SQL batch", setup, StringComparison.Ordinal);
         Assert.Contains("equivalent satisfied state", setup, StringComparison.Ordinal);
         Assert.Contains("& scripts/Invoke-TenantMigration.ps1", setup, StringComparison.Ordinal);
         Assert.DoesNotContain("pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1", setup, StringComparison.Ordinal);
         Assert.Contains("PowerShell host must run on .NET 10 or later", setup, StringComparison.Ordinal);
         Assert.DoesNotContain("Deployment-only migrator", setup, StringComparison.Ordinal);
+        Assert.Contains("-RuntimePrincipal", setup, StringComparison.Ordinal);
+        Assert.Contains("-InitialSetup", setup, StringComparison.Ordinal);
+        Assert.Contains("-InstanceId", setup, StringComparison.Ordinal);
+        Assert.Contains("already exist", setup, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ALTER ROLE WorkerDockRuntime ADD MEMBER", setup, StringComparison.Ordinal);
+        Assert.DoesNotContain("CREATE USER", setup, StringComparison.Ordinal);
+        Assert.DoesNotContain("permissions.sql", setup, StringComparison.Ordinal);
         Assert.Contains("database/tenant/current-state.sql", tutorial, StringComparison.Ordinal);
         Assert.Contains("& scripts/Invoke-TenantMigration.ps1", tutorial, StringComparison.Ordinal);
         Assert.DoesNotContain("pwsh -NoProfile -File scripts/Invoke-TenantMigration.ps1", tutorial, StringComparison.Ordinal);
+        Assert.Contains("-RuntimePrincipal", tutorial, StringComparison.Ordinal);
+        Assert.Contains("-InitialSetup", tutorial, StringComparison.Ordinal);
+        Assert.Contains("-InstanceId", tutorial, StringComparison.Ordinal);
+        Assert.Contains("already exist", tutorial, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("WorkerDockRuntime", tutorial, StringComparison.Ordinal);
         Assert.Contains("verify the backup before proceeding", upgrade, StringComparison.Ordinal);
         Assert.DoesNotContain("package manifest", upgrade, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("schema compatibility window", upgrade, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("release compatibility evidence", upgrade, StringComparison.Ordinal);
         Assert.Contains("scripts/Invoke-TenantMigration.ps1", upgrade, StringComparison.Ordinal);
+        Assert.Contains("-RuntimePrincipal", upgrade, StringComparison.Ordinal);
+        Assert.Contains("-InitialSetup", upgrade, StringComparison.Ordinal);
+        Assert.Contains("-InstanceId", upgrade, StringComparison.Ordinal);
+        Assert.Contains("already exist", upgrade, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("permissions.sql", upgrade, StringComparison.Ordinal);
+        var deploy = File.ReadAllText(Path.Combine(root, "docs", "how-to", "deploy-production.md"));
+        var tenants = File.ReadAllText(Path.Combine(root, "docs", "how-to", "configure-tenants.md"));
+        var objects = File.ReadAllText(Path.Combine(root, "docs", "reference", "database-objects.md"));
+        var configuration = File.ReadAllText(Path.Combine(root, "docs", "reference", "configuration.md"));
+        var migrations = File.ReadAllText(Path.Combine(root, "docs", "reference", "database-migrations.md"));
+        Assert.Contains("SQLCMD mode", migrations, StringComparison.Ordinal);
+        Assert.Contains(":ON ERROR EXIT", migrations, StringComparison.Ordinal);
+        var deployment = File.ReadAllText(Path.Combine(root, "docs", "reference", "deployment-model.md"));
+        var observability = File.ReadAllText(Path.Combine(root, "docs", "reference", "observability.md"));
+        foreach (var guide in new[] { deploy, tenants, objects, configuration, migrations, deployment, observability })
+        {
+            Assert.Contains("database user", guide, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("WorkerDockRuntime", guide, StringComparison.Ordinal);
+            Assert.DoesNotContain("permissions.sql", guide, StringComparison.Ordinal);
+        }
+        Assert.Contains("-RuntimePrincipal", deploy, StringComparison.Ordinal);
+        Assert.Contains("-InitialSetup", deploy, StringComparison.Ordinal);
+        Assert.Contains("-InstanceId", deploy, StringComparison.Ordinal);
+        Assert.Contains("-RuntimePrincipal", configuration, StringComparison.Ordinal);
+        Assert.Contains("-InitialSetup", configuration, StringComparison.Ordinal);
+        Assert.Contains("-InstanceId", configuration, StringComparison.Ordinal);
+        Assert.Contains("-RuntimePrincipal", migrations, StringComparison.Ordinal);
+        Assert.Contains("-InitialSetup", migrations, StringComparison.Ordinal);
+        Assert.Contains("-InstanceId", migrations, StringComparison.Ordinal);
         Assert.True(upgrade.IndexOf("verify the backup before proceeding", StringComparison.Ordinal) <
                     upgrade.IndexOf("scripts/Invoke-TenantMigration.ps1", StringComparison.Ordinal));
     }
@@ -116,7 +158,7 @@ public sealed class MigrationInputTests
             foreach (var name in new[] { "manifest.json", "0001_initial.up.sql", "0001_initial.down.sql" })
                 File.Copy(Path.Combine(AppContext.BaseDirectory, "database", "tenant", name), Path.Combine(tenant, name));
             await File.AppendAllTextAsync(Path.Combine(tenant, "0001_initial.up.sql"), "\n-- modified\n");
-            var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), root);
+            var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), "test-runtime", root);
             var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "0001_initial", default));
             Assert.Equal("MigrationChecksumMismatch", error.Code);
         }
@@ -131,7 +173,7 @@ public sealed class MigrationInputTests
     [Fact]
     public async Task Unknown_target_is_rejected_before_connecting()
     {
-        var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), "test-runtime", Path.Combine(AppContext.BaseDirectory, "database"));
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("tenant", "missing", default));
         Assert.Equal("UnknownMigration", error.Code);
     }
@@ -139,7 +181,7 @@ public sealed class MigrationInputTests
     [Fact]
     public async Task Central_database_kind_is_rejected_before_connecting()
     {
-        var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new MigrationRunner("invalid connection", Guid.NewGuid(), "test-runtime", Path.Combine(AppContext.BaseDirectory, "database"));
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () => await runner.ApplyAsync("central", "0001_registry", default));
         Assert.Equal("InvalidDatabaseKind", error.Code);
     }

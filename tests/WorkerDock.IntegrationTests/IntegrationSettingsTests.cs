@@ -17,7 +17,7 @@ public sealed class IntegrationSettingsTests
     public async Task Sql_revision_history_rowversion_audit_and_rollback_guard_are_durable()
     {
         await using var database = new SqlDatabaseFixture(); await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot);
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var settings = new SqlIntegrationSettings(new(database.ConnectionString, database.InstanceId));
         var actor = new ActorContext("manager", "test", Guid.NewGuid());

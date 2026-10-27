@@ -33,7 +33,7 @@ public sealed partial class SqlProfileTests
     [Fact]
     public async Task Migration_round_trip_and_audit_failure_are_atomic()
     {
-        await using var f=new SqlDatabaseFixture();await f.CreateAsync(false);var runner=new WorkerDock.Infrastructure.Migrations.MigrationRunner(f.ConnectionString,f.InstanceId,f.ScriptsRoot);
+        await using var f=new SqlDatabaseFixture();await f.CreateAsync(false);var runner=new WorkerDock.Infrastructure.Migrations.MigrationRunner(f.ConnectionString,f.InstanceId,f.RuntimePrincipal,f.ScriptsRoot);
         await runner.ApplyAsync("tenant","0001_initial",default);await runner.RollbackAsync("tenant","0001_initial",default);await runner.ApplyAsync("tenant","0001_initial",default);
         await f.ExecuteAsync("CREATE TRIGGER [workerdock].SqlProfileAuditFailure ON [workerdock].AuditEvents AFTER INSERT AS THROW 51027,'Synthetic audit failure',1;");
         var store=new SqlConnectionProfiles(new(f.ConnectionString,f.InstanceId));

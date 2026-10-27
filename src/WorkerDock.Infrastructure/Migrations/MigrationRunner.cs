@@ -7,7 +7,7 @@ using WorkerDock.Application.Common;
 
 namespace WorkerDock.Infrastructure.Migrations;
 
-public sealed class MigrationRunner(string connectionString, Guid instanceId, string scriptsRoot)
+public sealed class MigrationRunner(string connectionString, Guid instanceId, string runtimePrincipal, string scriptsRoot)
 {
     public ValueTask ApplyAsync(string databaseKind, string targetMigration, CancellationToken ct) =>
         RunAsync(databaseKind, targetMigration, false, ct);
@@ -17,6 +17,8 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
 
     private async ValueTask RunAsync(string kind, string target, bool rollback, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(runtimePrincipal) || runtimePrincipal.Length > 128)
+            throw new WorkerDockException("RuntimePrincipalInvalid");
         var (directory, entries, index) = await ReadManifestAsync(kind, target, ct);
 
         try
@@ -24,12 +26,15 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
             await using var connection = new SqlConnection(connectionString);
             await connection.OpenAsync(ct);
             await CheckPrerequisitesAsync(connection, ct);
+            await ValidateRuntimePrincipalAsync(connection, ct);
             // Keep validation and every target migration under the same session lock.
             // Individual migrations still commit independently.
             await LockAsync(connection, ct);
             try
             {
                 var appliedCount = await ValidateAppliedHistoryAsync(connection, entries, ct);
+                if (!rollback && appliedCount == 0)
+                    await ValidateFreshDatabaseAsync(connection, ct);
                 if (rollback)
                 {
                     if (index >= appliedCount) throw new WorkerDockException("UnknownMigration");
@@ -86,6 +91,24 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) throw new WorkerDockException("UnsupportedCompatibilityLevel");
         SqlServerPrerequisites.Validate(reader.GetInt32(0), reader.GetInt32(1));
+    }
+
+    private async Task ValidateRuntimePrincipalAsync(SqlConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT type FROM sys.database_principals WHERE name=@RuntimePrincipal";
+        command.Parameters.Add(new SqlParameter("@RuntimePrincipal", SqlDbType.NVarChar, 128) { Value = runtimePrincipal });
+        var type = await command.ExecuteScalarAsync(ct);
+        if (type is not string principalType || principalType is not ("S" or "U"))
+            throw new WorkerDockException("RuntimePrincipalInvalid");
+    }
+
+    private static async Task ValidateFreshDatabaseAsync(SqlConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT CASE WHEN EXISTS (SELECT 1 FROM sys.objects WHERE is_ms_shipped=0) OR EXISTS (SELECT 1 FROM sys.schemas WHERE name NOT IN(N'dbo',N'guest',N'sys',N'INFORMATION_SCHEMA',N'db_owner',N'db_accessadmin',N'db_securityadmin',N'db_ddladmin',N'db_backupoperator',N'db_datareader',N'db_datawriter',N'db_denydatareader',N'db_denydatawriter')) OR EXISTS (SELECT 1 FROM sys.database_principals WHERE type=N'R' AND is_fixed_role=0 AND name<>N'public') OR EXISTS (SELECT 1 FROM sys.types WHERE is_user_defined=1) OR EXISTS (SELECT 1 FROM sys.assemblies WHERE is_user_defined=1) THEN 1 ELSE 0 END";
+        if (Convert.ToInt32(await command.ExecuteScalarAsync(ct)) != 0)
+            throw new WorkerDockException("TenantDatabaseNotEmpty");
     }
 
     private async Task<int> ValidateAppliedHistoryAsync(SqlConnection connection, IReadOnlyList<MigrationEntry> entries, CancellationToken ct)
@@ -222,6 +245,7 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
             command.CommandText = batch;
             command.CommandTimeout = 60;
             command.Parameters.Add(new SqlParameter("@InstanceId", SqlDbType.UniqueIdentifier) { Value = instanceId });
+            command.Parameters.Add(new SqlParameter("@RuntimePrincipal", SqlDbType.NVarChar, 128) { Value = runtimePrincipal });
             await command.ExecuteNonQueryAsync(ct);
         }
     }

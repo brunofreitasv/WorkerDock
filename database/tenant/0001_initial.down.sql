@@ -31,5 +31,4 @@ SET @sql=N'';
 SELECT @sql += N'DROP TABLE '+QUOTENAME(SCHEMA_NAME(schema_id))+N'.'+QUOTENAME(name)+N';'
 FROM sys.tables WHERE schema_id=SCHEMA_ID(N'workerdock');
 EXEC sys.sp_executesql @sql;
-DROP ROLE WorkerDockRuntime;
 DROP SCHEMA [workerdock];

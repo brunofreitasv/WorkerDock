@@ -23,7 +23,7 @@ public sealed class TenantSqlWebStartupTests : IDisposable
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
+        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot)
             .ApplyAsync("tenant", "0001_initial", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var status = new SqlRuntimeStatus(options, 2);

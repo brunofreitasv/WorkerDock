@@ -25,7 +25,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var descriptor = HttpTemplateDescriptors.Get("1.1.0");
@@ -60,7 +60,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var version = await VersionAsync(database, jobId);
@@ -79,7 +79,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
@@ -112,7 +112,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
@@ -136,7 +136,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
@@ -158,7 +158,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
@@ -183,7 +183,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
@@ -202,7 +202,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
@@ -222,7 +222,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var exhaustedJob = await SeedScheduledJobAsync(database, enabled: true);
         var activeJob = await SeedScheduledJobAsync(database, enabled: true);
@@ -243,7 +243,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
@@ -259,7 +259,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
@@ -282,7 +282,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
@@ -303,7 +303,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         for (var i = 0; i < 105; i++) await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
@@ -320,7 +320,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var lifecycle = new SqlJobLifecycle(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), null, new FiveFieldScheduleEvaluator(), TimeProvider.System);
@@ -339,7 +339,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
@@ -358,7 +358,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
@@ -388,7 +388,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var profiles = new SqlConnectionProfiles(options);
@@ -412,7 +412,7 @@ public sealed class JobLifecycleTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
-        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, Path.Combine(AppContext.BaseDirectory, "database"));
+        var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);

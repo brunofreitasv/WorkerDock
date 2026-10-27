@@ -61,7 +61,7 @@ public sealed class TemplateCatalogSqlTests
     public async Task Unrecognized_bootstrap_digest_cannot_be_promoted()
     {
         await using var database=new SqlDatabaseFixture(); await database.CreateAsync(false);
-        var runner=new MigrationRunner(database.ConnectionString,database.InstanceId,database.ScriptsRoot);
+        var runner=new MigrationRunner(database.ConnectionString,database.InstanceId,database.RuntimePrincipal,database.ScriptsRoot);
         await runner.ApplyAsync("tenant","0001_initial",default);
         await database.ExecuteAsync("UPDATE [workerdock].TemplateCatalog SET MetadataDigest=REPLICATE('A',64) WHERE TemplateId=N'workerdock.http'");
         await runner.ApplyAsync("tenant","0001_initial",default);
@@ -76,7 +76,7 @@ public sealed class TemplateCatalogSqlTests
     public async Task Empty_templates_migration_supports_up_down_up(bool snapshot)
     {
         await using var database=new SqlDatabaseFixture(); await database.CreateAsync(snapshot);
-        var runner=new MigrationRunner(database.ConnectionString,database.InstanceId,database.ScriptsRoot);
+        var runner=new MigrationRunner(database.ConnectionString,database.InstanceId,database.RuntimePrincipal,database.ScriptsRoot);
         await runner.ApplyAsync("tenant","0001_initial",default);
         await runner.RollbackAsync("tenant","0001_initial",default);
         await runner.ApplyAsync("tenant","0001_initial",default);

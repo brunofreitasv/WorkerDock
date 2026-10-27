@@ -35,7 +35,7 @@ public sealed class CapacityPolicySqlTests
     public async Task Empty_single_runtime_schema_round_trip_preserves_runtime_status()
     {
         await using var database=new SqlDatabaseFixture(); await database.CreateAsync(false);
-        var runner=new MigrationRunner(database.ConnectionString,database.InstanceId,database.ScriptsRoot);
+        var runner=new MigrationRunner(database.ConnectionString,database.InstanceId,database.RuntimePrincipal,database.ScriptsRoot);
         await runner.ApplyAsync("tenant","0001_initial",default); await runner.RollbackAsync("tenant","0001_initial",default);
         await runner.ApplyAsync("tenant","0001_initial",default);
         Assert.Equal(1,await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].RuntimeStatus WHERE StateId=1 AND Ready=0 AND HostCeiling=1"));

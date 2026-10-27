@@ -13,7 +13,7 @@ public sealed class TenantSettingsTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot).ApplyAsync("tenant", "0001_initial", default);
+        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot).ApplyAsync("tenant", "0001_initial", default);
         var service = new TenantSettingsService(new(database.ConnectionString, database.InstanceId));
         var original = await service.GetAsync(default);
         await database.ExecuteAsync("CREATE TRIGGER [workerdock].TestAuditFailure ON [workerdock].AuditEvents AFTER INSERT AS THROW 51000, 'Injected audit failure', 1;");
@@ -34,7 +34,7 @@ public sealed class TenantSettingsTests
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot).ApplyAsync("tenant", "0001_initial", default);
+        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot).ApplyAsync("tenant", "0001_initial", default);
         var service = new TenantSettingsService(new(database.ConnectionString, database.InstanceId));
         var original = await service.GetAsync(default);
         var updated = await service.UpdateAsync(original with { DisplayName = "Equipe", DisplayTimeZone = "America/Sao_Paulo" },

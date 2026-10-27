@@ -13,7 +13,7 @@ flowchart LR
     Operator --> Snapshot
     MigrationScript --> TenantDb[("Tenant database<br/>[workerdock]")]
     Snapshot --> TenantDb
-    TenantApps["Tenant web and one runtime service"] -->|"restricted WorkerDockRuntime role"| TenantDb
+    TenantApps["Tenant web and one runtime service"] -->|"existing restricted database user"| TenantDb
     CenterApp["Optional Control Center"] --> CenterFiles[("Protected state directory")]
     subgraph Tests["Disposable SQL integration tests only"]
         Fixtures["tests/sql + integration fixture scripts"] --> TestDb[("Generated WorkerDock_Test_* database")]
@@ -40,17 +40,21 @@ The in-memory tutorial needs none of these SQL objects.
 ### Fresh database snapshot
 
 Use `database/tenant/current-state.sql` only for a newly created, empty tenant
-database at compatibility level 160 or later. Generate the stable tenant GUID
-that Web and runtime service will share. In a working copy of the snapshot,
-replace every `__WORKERDOCK_INSTANCE_ID__` token with that GUID. If the runtime
-SQL login already exists on the server, edit the marked `CREATE USER` and
-`ALTER ROLE WorkerDockRuntime ADD MEMBER` statements to bind its database user.
-These statements belong in the same snapshot action so its role membership is
-committed or rolled back with the schema.
+database at compatibility level 160 or later. The selected runtime database
+user must already exist in the target database. The snapshot validates and
+grants that existing user; it does not create users, logins, or roles. Generate
+one tenant GUID and replace every `__WORKERDOCK_INSTANCE_ID__` and
+`__WORKERDOCK_RUNTIME_PRINCIPAL__` token in a working copy with the GUID and
+database-user name. Replace every occurrence of each token.
 
-Send the complete rendered file to the selected database as one SQL batch. Do
-not split it at `GO` separators or execute it in SQLCMD mode; the file contains
-its own transaction and rejects an ambient transaction. Its history rows are
+In SSMS, enable **Query > SQLCMD mode** before running the complete rendered
+file against the selected database. Keep the leading `:ON ERROR EXIT`
+directive: it stops execution on the first error, including a preflight
+failure, so SSMS cannot continue into later `GO` batches. Do not execute
+selected batches or remove the directive. Run on a dedicated connection with
+no open transaction; the file commits its setup transaction only after all
+batches succeed. After an error, close that connection to roll back any
+uncommitted setup changes. Its history rows are
 an equivalent satisfied state baseline, not a record that each earlier
 migration script ran. The snapshot represents the final state only and cannot
 upgrade an existing database. Live SQL parity remains unverified.
@@ -65,20 +69,21 @@ ALTER DATABASE [WorkerDockTenant] SET COMPATIBILITY_LEVEL = 160;
 ```
 
 Provision a separate migration identity with permission to create schemas,
-tables, procedures and roles and to grant permissions in this dedicated
+tables, procedures and grant permissions in this dedicated
 database. A temporary `db_owner` membership is one way to supply these
 installation rights; remove it after migration. Provision a separate long-lived
-application identity as an existing database user. The application identity
-must not be a database owner or receive DDL rights. Use your organization's
-approved SQL or Windows identity process; deployment scripts do not create
-server logins or database users.
+application identity as an existing database user in this target database.
+The application identity must not be a database owner or receive DDL rights.
+Use your organization's approved SQL or Windows identity process to create and
+map it before setup; setup scripts only validate and grant the selected user.
 
 From a PowerShell session at the repository root, apply migrations with an explicit target from
 `database/tenant/manifest.json`. Build or publish the Web application so the
 assembly directory contains `WorkerDock.Web.dll`, its dependency manifest, and
 `WorkerDock.Infrastructure.dll`; for example, use `dotnet publish` with your
-selected configuration. Supply a newly generated stable tenant GUID and the
-separate deployment migration credential:
+selected configuration. Supply the existing runtime database user as
+`-RuntimePrincipal`, choose `-InitialSetup` to generate a GUID on first apply,
+and use the separate deployment migration credential:
 
 The PowerShell host must run on .NET 10 or later; PowerShell 7 alone is not
 sufficient when its host is bound to an earlier .NET runtime. Check
@@ -90,36 +95,28 @@ $assemblyDirectory = (Resolve-Path 'src/WorkerDock.Web/bin/Release/net10.0').Pat
 & scripts/Invoke-TenantMigration.ps1 `
   -Action Apply `
   -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 -Database '<TENANT_DATABASE>' `
-  -Credential $credential -InstanceId '<stable-tenant-guid>' `
+  -Credential $credential -RuntimePrincipal '<TENANT_DATABASE_USER>' -InitialSetup `
   -TargetMigration '0001_initial' `
   -ScriptsRoot (Resolve-Path 'database').Path `
   -AssemblyDirectory $assemblyDirectory
 ```
 
-The manifest contains only `0001_initial`. The script verifies its checksum, schema history, server version, compatibility level, and stable tenant instance ID. Keep the migration identity separate from the long-lived runtime identity and remove its temporary DDL grants after migration.
+The manifest contains only `0001_initial`. The script verifies its checksum,
+schema history, server version, compatibility level, existing runtime database
+user, and stable tenant instance ID. Save the GUID printed after a successful
+initial setup and use it for `Tenant:InstanceId` in Web and runtime
+configuration. For an already initialized tenant, supply that same GUID with
+`-InstanceId` instead of `-InitialSetup`. Keep the migration identity separate
+from the long-lived runtime identity and remove its temporary DDL grants after
+migration.
 
 `WORKERDOCK_DEVELOPMENT_VAULT` and its explicit secret map are for local Development only. Production must follow the organization's approved protected credential process for the migration identity. The script prompts through a PowerShell credential object; do not place credentials in command lines, shell history or source control.
 
 There are no tenant schema upgrades. A future schema change needs a separately reviewed upgrade design before deployment to any existing tenant database.
 
-After migration, ensure the tenant application identity is mapped to a
-database user, then add that principal to the runtime role. From the repository
-root, connect as an administrator with Windows authentication and replace the
-server and database principal placeholders:
-
-```powershell
-sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
-  -v TenantRuntimePrincipal="<TENANT_DB_USER>" `
-  -i .\database\tenant\permissions.sql
-```
-
-`database/tenant/permissions.sql` adds a supplied tenant principal to `WorkerDockRuntime`; the tenant migration defines the grants. The tenant role contains the application's required data access and does not grant schema changes. To remove an explicit role membership:
-
-```powershell
-sqlcmd -S '<SQL_SERVER>' -d WorkerDockTenant -E -b `
-  -v TenantRuntimePrincipal="<TENANT_DB_USER>" `
-  -i .\database\tenant\permissions.rollback.sql
-```
+The migration validates and grants the existing `-RuntimePrincipal` directly.
+It does not create a database user, role, or server login. Use the same
+database user in the tenant SQL connection configuration.
 
 Configure the tenant web and one runtime service with `Tenant:Adapter=Sql`, the same `Tenant:InstanceId`, and `Tenant:Sql:Host`, `Port`, `Database`, `User` and `PasswordReference`. Use the restricted application identity and an explicitly mapped logical reference. SQL connections require encryption and valid server certificate verification; install the issuing CA/server certificate in the host trust store. Do not enable trust-server-certificate bypasses. The deployment tooling configures services and hosts; SQL setup and migration are an explicit operator step. Restart affected processes after rotating a vault password so new connections use it.
 
@@ -136,14 +133,15 @@ tenant.
 
 ## Roll back a database
 
-Take and verify a backup first. The `0001_initial` rollback is guarded against discarding populated state. Stop the web and runtime services before rollback. For a truly empty disposable tenant database, remove the runtime membership, then run:
+Take and verify a backup first. The `0001_initial` rollback is guarded against discarding populated state. Stop the web and runtime services before rollback. For a truly empty disposable tenant database, run:
 
 ```powershell
 $credential = Get-Credential '<TENANT_MIGRATION_LOGIN>'
 & scripts/Invoke-TenantMigration.ps1 `
   -Action Rollback -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 `
   -Database '<TENANT_DATABASE>' -Credential $credential `
-  -InstanceId '<same-tenant-guid>' -TargetMigration '0001_initial' `
+  -RuntimePrincipal '<TENANT_DATABASE_USER>' -InstanceId '<same-tenant-guid>' `
+  -TargetMigration '0001_initial' `
   -ScriptsRoot (Resolve-Path 'database').Path `
   -AssemblyDirectory (Resolve-Path 'src/WorkerDock.Web/bin/Release/net10.0').Path
 ```

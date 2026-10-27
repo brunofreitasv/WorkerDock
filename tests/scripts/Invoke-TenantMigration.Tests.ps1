@@ -18,10 +18,12 @@ if ($parseErrors.Count -gt 0) { throw "Migration script parse failed: $($parseEr
 $harness = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.ps1')
 $source = @'
 param([string]$ScriptPath, [string]$Case, [string]$ScriptsRoot, [string]$AssemblyDirectory)
+$ErrorActionPreference = 'Stop'
 $credential = [pscredential]::new('migration_user', (ConvertTo-SecureString 'SENTINEL-password' -AsPlainText -Force))
 $common = @{
     Action = 'Apply'; SqlHost = 'sql.example.test'; Port = 1433; Database = 'tenant'
-    Credential = $credential; InstanceId = [guid]::NewGuid(); TargetMigration = '0001_initial'
+    Credential = $credential; InstanceId = [guid]::NewGuid(); RuntimePrincipal = 'WorkerDock_Runtime'
+    TargetMigration = '0001_initial'
     ScriptsRoot = $ScriptsRoot; AssemblyDirectory = $AssemblyDirectory
 }
 switch ($Case) {
@@ -32,17 +34,30 @@ switch ($Case) {
     'action' { $common.Action = 'Deploy' }
     'instance' { $common.InstanceId = 'not-a-guid' }
     'missing' { $common.Remove('Port') }
+    'initial-setup' { $common.Remove('InstanceId'); $common.InitialSetup = $true; $common.SqlHost = '127.0.0.1'; $common.Port = '1' }
+    'existing-apply' { $common.InstanceId = [string][guid]::NewGuid(); $common.SqlHost = '127.0.0.1'; $common.Port = '1' }
+    'existing-rollback' { $common.Action = 'Rollback'; $common.SqlHost = '127.0.0.1'; $common.Port = '1' }
+    'absent-id' { $common.Remove('InstanceId') }
+    'malformed-id' { $common.InstanceId = 'not-a-guid' }
+    'both-modes' { $common.InitialSetup = $true }
+    'both-modes-empty-id' { $common.InstanceId = ''; $common.InitialSetup = $true }
+    'initial-rollback' { $common.Action = 'Rollback'; $common.Remove('InstanceId'); $common.InitialSetup = $true }
+    'failed-initial' { $common.Remove('InstanceId'); $common.InitialSetup = $true; $common.SqlHost = '127.0.0.1'; $common.Port = '1' }
+    'runtime-principal' { $common.Remove('RuntimePrincipal') }
     'valid-types' {
         $common.SqlHost = '127.0.0.1'
         $common.Port = '1'
         $common.InstanceId = [string][guid]::NewGuid()
     }
 }
-& $ScriptPath @common
+try { & $ScriptPath @common }
+catch { [Console]::Error.WriteLine('HarnessInvocationFailed'); exit 1 }
 '@
 Set-Content -LiteralPath $harness -Value $source -Encoding utf8
 try {
-    foreach ($case in 'host', 'port', 'assembly', 'credential', 'action', 'instance', 'missing', 'valid-types') {
+    foreach ($case in 'host', 'port', 'assembly', 'credential', 'action', 'instance', 'missing',
+            'absent-id', 'malformed-id', 'both-modes', 'both-modes-empty-id', 'initial-rollback', 'runtime-principal', 'failed-initial',
+            'initial-setup', 'existing-apply', 'existing-rollback', 'valid-types') {
         $start = [System.Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
         $start.ArgumentList.Add('-NoProfile')
         $start.ArgumentList.Add('-File')
@@ -74,6 +89,21 @@ try {
         }
         if ($case -eq 'valid-types' -and -not $output.Contains('PersistenceUnavailable')) {
             throw "Valid string inputs did not reach the migration runner with converted types. Output: $output"
+        }
+        if ($case -in 'initial-setup', 'existing-apply', 'existing-rollback' -and -not $output.Contains('PersistenceUnavailable')) {
+            throw "Valid mode '$case' did not reach the migration runner. Output: $output"
+        }
+        if ($case -in 'absent-id', 'malformed-id' -and -not $output.Contains('InstanceIdInvalid')) {
+            throw "Mode '$case' did not report InstanceIdInvalid. Output: $output"
+        }
+        if ($case -in 'both-modes', 'both-modes-empty-id', 'initial-rollback' -and -not $output.Contains('MigrationModeInvalid')) {
+            throw "Invalid mode '$case' did not report MigrationModeInvalid. Output: $output"
+        }
+        if ($case -eq 'failed-initial' -and $stdout -match '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}') {
+            throw 'Failed initial setup printed a generated instance ID.'
+        }
+        if ($case -eq 'runtime-principal' -and -not $output.Contains('RuntimePrincipalInvalid')) {
+            throw "Missing runtime principal did not report RuntimePrincipalInvalid. Output: $output"
         }
     }
 }
