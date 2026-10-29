@@ -1,7 +1,7 @@
 # Job management and monitoring recovery
 
 Date: 2026-10-28
-Status: Proposed; awaiting user approval before implementation.
+Status: Approved by user on 2026-10-29.
 
 ## Intent and agreed requirements
 
