@@ -15,7 +15,7 @@ Read. Job and execution monitoring is read-only.
 ## Steps
 
 1. Open [Monitoring](#/monitoring) to search jobs, filter by state, and page through results. The table shows each job's template and version, enabled or archived state, active executions, recent failures, and schedule status.
-2. Open an execution from the [Dashboard](#/dashboard) recent executions list to inspect its state, attempts, safe result codes, certainty, and **Timeline**. Timeline entries show when the execution changed state.
+2. Open an execution from the [Dashboard](#/dashboard) recent executions table to inspect its state, attempts, safe result codes, certainty, and **Timeline**. Choose **View all** to open [Execution history](#/executions), filter by period, status, template, or search, and page through results. Timeline entries show when the execution changed state.
 3. Use **Refresh** where available. Views poll while visible, pause while the browser tab is hidden, and show an **Updated** time. When refresh fails, the warning identifies stale data; check the timestamp before acting on it.
 4. Treat safe result codes as summaries. The panel does not expose raw errors, SQL, configuration, or secret values.
 

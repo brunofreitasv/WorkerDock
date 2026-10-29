@@ -15,7 +15,7 @@ Leitura. O monitoramento de tarefas e execuções é somente para consulta.
 ## Etapas
 
 1. Abra [Monitoramento](#/monitoring) para pesquisar tarefas, filtrar por estado e percorrer os resultados. A tabela mostra o modelo e a versão, o estado ativo ou arquivado, execuções ativas, falhas recentes e o estado do agendamento.
-2. Abra uma execução na lista de execuções recentes do [Painel](#/dashboard) para consultar estado, tentativas, códigos de resultado seguros, certeza e **Linha do tempo**. Os eventos mostram quando o estado da execução mudou.
+2. Abra uma execução na tabela de execuções recentes do [Painel](#/dashboard) para consultar estado, tentativas, códigos de resultado seguros, certeza e **Linha do tempo**. Escolha **Ver todas** para abrir o [Histórico de execuções](#/executions), filtrar por período, estado, modelo ou pesquisa e percorrer os resultados. Os eventos mostram quando o estado da execução mudou.
 3. Use **Atualizar** quando disponível. As telas consultam dados enquanto estão visíveis e pausam quando a aba fica oculta; o horário **Atualizado** identifica a última atualização. Se a atualização falhar, o aviso informa que os resultados estão desatualizados. Confira o horário antes de agir.
 4. Use os códigos de resultado apenas como resumos. O painel não exibe erros brutos, SQL, configuração nem valores secretos.
 

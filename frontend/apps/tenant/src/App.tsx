@@ -27,6 +27,7 @@ import { Dashboard } from "./features/monitoring/Dashboard";
 import { JobsTable } from "./features/monitoring/JobsTable";
 import { WorkersPage } from "./features/monitoring/WorkersPage";
 import { ExecutionDetails } from "./features/monitoring/ExecutionDetails";
+import { ExecutionHistoryPage } from "./features/monitoring/ExecutionHistoryPage";
 import { AuditPage } from "./features/monitoring/AuditPage";
 import { AlertRulesPage } from "./features/alerts/AlertRulesPage";
 import RetentionPage from "./features/settings/RetentionPage";
@@ -94,14 +95,14 @@ export default function App() {
   ] : [];
   const flatNavigation = navigation.flatMap((group) => group.items);
   const activePage = active.startsWith("help:") ? "help" : active;
-  const activeNavigation = activePage.startsWith("execution:") ? "monitoring" : activePage;
+  const activeNavigation = activePage.startsWith("execution:") ? "monitoring" : active === "executions" ? "dashboard" : activePage;
   const helpSlug = active.startsWith("help:") ? active.slice("help:".length) : undefined;
-  const title = active.startsWith("execution:") ? "Execution details" : activePage === "help"
+  const title = active.startsWith("execution:") ? "Execution details" : active === "executions" ? t.executionHistory : activePage === "help"
     ? helpTopics.find(topic => topic.slug === helpSlug)?.title[preferences.language] ?? t.help
     : flatNavigation.find((item) => item.id === activeNavigation)?.label ??
       (active === "settings" ? t.settings : t.dashboard);
   const contextualHelp = active === "dashboard" ? "dashboard"
-    : active === "monitoring" || active.startsWith("execution:") ? "monitoring"
+    : active === "monitoring" || active === "executions" || active.startsWith("execution:") ? "monitoring"
     : active === "workers" ? "workers"
     : active === "audit" ? "audit"
     : active === "alerts" ? "alert-rules"
@@ -189,6 +190,8 @@ export default function App() {
                 ) : (
                 active.startsWith("execution:") ? (
                   <ExecutionDetails executionId={active.slice("execution:".length)} language={preferences.language} />
+                ) : active === "executions" ? (
+                  <ExecutionHistoryPage language={preferences.language} timeZone={preferences.timeZone} onExecution={id => navigate(`execution:${id}`)} />
                 ) : active === "monitoring" ? (
                   <JobsTable language={preferences.language} />
                 ) : active === "workers" ? (
@@ -198,7 +201,7 @@ export default function App() {
                 ) : active === "alerts" ? (
                   <AlertRulesPage t={t} canManage={session.canManage} />
                 ) : active === "dashboard" ? (
-                  <Dashboard language={preferences.language} onExecution={id => navigate(`execution:${id}`)} />
+                  <Dashboard language={preferences.language} timeZone={preferences.timeZone} onHistory={() => navigate("executions")} onExecution={id => navigate(`execution:${id}`)} />
                 ) : (
                 <Paper
                   variant="outlined"
