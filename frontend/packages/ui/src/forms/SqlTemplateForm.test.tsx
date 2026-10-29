@@ -9,7 +9,7 @@ const profiles = { status: "ready" as const, items: [
   { current: { profileId: "p1", name: "Warehouse", server: "db-one", allowedCatalogs: ["Ops", "Audit"] }, retired: false },
   { current: { profileId: "p2", name: "Reports", server: "db-two", allowedCatalogs: ["Analytics"] }, retired: false },
 ] };
-function renderForm(value: Record<string, unknown>, sqlProfiles: TemplateFormProps["sqlProfiles"], onChange = () => {}) {
+function renderForm(value: Record<string, unknown>, sqlProfiles: TemplateFormProps["sqlProfiles"], onChange: (next: Record<string, unknown>) => void = () => {}) {
   return render(<SqlTemplateForm descriptor={descriptor} value={value} onChange={onChange} errors={{}} sqlProfiles={sqlProfiles} />);
 }
 
