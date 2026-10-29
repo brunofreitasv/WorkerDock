@@ -25,6 +25,7 @@ export function ExecutionHistoryPage({ language, timeZone, onExecution }: { lang
   const [templateId, setTemplateId] = useState("");
   const [cursor, setCursor] = useState("");
   const [previous, setPrevious] = useState<string[]>([]);
+  const [refreshSequence, setRefreshSequence] = useState(0);
   const range = useMemo(() => toUtcRange(period, timeZone, rangeAnchor, 90), [period, rangeAnchor, timeZone]);
   const params = new URLSearchParams({ limit: "50", fromUtc: range.fromUtc, toUtc: range.toUtc });
   if (cursor) params.set("cursor", cursor);
@@ -32,14 +33,20 @@ export function ExecutionHistoryPage({ language, timeZone, onExecution }: { lang
   if (state) params.set("state", state);
   if (templateId.trim()) params.set("templateId", templateId.trim());
   const url = `/api/monitoring/executions?${params.toString()}`;
-  const { data, loading, error, stale, updatedAt, refresh } = useVisiblePolling(
-    () => read<MonitoringPage<ExecutionHistoryItemDto>>(url).then(result => result.data), url,
+  const { data, loading, error, stale, updatedAt } = useVisiblePolling(
+    () => read<MonitoringPage<ExecutionHistoryItemDto>>(url).then(result => result.data), `${url}:${refreshSequence}`,
   );
   const changePeriod = (value: HistoryPeriod) => {
     setPeriod(value);
     setRangeAnchor(new Date());
     setCursor("");
     setPrevious([]);
+  };
+  const restartBrowse = () => {
+    setRangeAnchor(new Date());
+    setCursor("");
+    setPrevious([]);
+    setRefreshSequence(sequence => sequence + 1);
   };
   const filterChanged = () => { setCursor(""); setPrevious([]); };
   const duration = (value: string | null) => formatDuration(value);
@@ -55,11 +62,11 @@ export function ExecutionHistoryPage({ language, timeZone, onExecution }: { lang
           <MenuItem value="">{label("All statuses", "Todos os estados")}</MenuItem>
           {states.map(value => <MenuItem key={value} value={value}>{statusText(value)}</MenuItem>)}
         </TextField>
-        <Button onClick={refresh}>{label("Refresh", "Atualizar")}</Button>
+        <Button onClick={restartBrowse}>{label("Refresh", "Atualizar")}</Button>
         <Typography variant="caption" sx={{ alignSelf: "center" }}>{label("Updated", "Atualizado")}: {updatedAt?.toLocaleTimeString(locale, { timeZone })}</Typography>
       </Stack>
     </Stack>
-    {error && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={refresh}>{label("Retry", "Tentar novamente")}</Button>}>
+    {error && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={restartBrowse}>{label("Retry", "Tentar novamente")}</Button>}>
       {label("Execution history could not be refreshed.", "Não foi possível atualizar o histórico de execuções.")} {stale && label("Showing stale results.", "Exibindo resultados desatualizados.")}
     </Alert>}
     {loading && !data ? <Typography>{label("Loading execution history…", "Carregando histórico de execuções…")}</Typography> : !data ? <Alert severity="error">{label("Execution history is unavailable.", "Histórico de execuções indisponível.")}</Alert> : <TableContainer sx={{ width: "100%", overflowX: "auto" }}>

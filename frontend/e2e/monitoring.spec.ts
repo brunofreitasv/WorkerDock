@@ -29,7 +29,7 @@ test("viewer can inspect safe dashboard and paged job history", async ({ page })
 test("viewer can open full execution history from the Dashboard", async ({ page }) => {
   await page.goto("/#/dashboard");
   await expect(page.getByRole("table", { name: "Recent executions" })).toBeVisible();
-  await page.getByRole("button", { name: "View all" }).click();
+  await page.getByRole("button", { name: "View all executions" }).click();
   await expect(page).toHaveURL(/#\/executions$/);
   await expect(page.getByRole("table", { name: "Execution history" })).toBeVisible();
   await expect(page.getByText("Nightly report", { exact: true })).toBeVisible();

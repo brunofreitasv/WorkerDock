@@ -15,13 +15,39 @@ export function Dashboard({ language, timeZone, onHistory, onExecution }: { lang
   return <Stack spacing={2}>
     {error && <Alert severity="warning">{label("Monitoring data is unavailable.", "Dados de monitoramento indisponíveis.")} {stale && label("Showing the last successful refresh.", "Exibindo a última atualização bem-sucedida.")}</Alert>}
     {data && <>
-      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><Typography>{label("Status", "Estado")}: <strong>{data.overall}</strong></Typography><Button onClick={refresh}>{label("Refresh", "Atualizar")}</Button><Typography variant="caption">{label("Updated", "Atualizado")}: {updatedAt?.toLocaleTimeString(pt ? "pt-BR" : "en")}</Typography></Stack>
+      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><Typography>{label("Status", "Estado")}: <strong>{data.overall}</strong></Typography><Button onClick={refresh}>{label("Refresh", "Atualizar")}</Button><Typography variant="caption">{label("Updated", "Atualizado")}: {updatedAt?.toLocaleTimeString(pt ? "pt-BR" : "en", { timeZone })}</Typography></Stack>
       <Grid container spacing={2}>{[
         [label("Queued", "Na fila"), data.queued], [label("Running", "Em execução"), data.running], [label("Needs review", "Aguardando revisão"), data.needsReview],
         [label("Succeeded 24h", "Sucesso 24h"), data.succeeded24h], [label("Failed 24h", "Falhas 24h"), data.failed24h], [label("Long running", "Longa duração"), data.longRunning],
         [label("Runtime", "Runtime"), data.runtimeReady ? label("Ready", "Pronto") : label("Unavailable", "Indisponível")], [label("Host capacity", "Capacidade do host"), data.hostCeiling],
       ].map(([title, value]) => <Grid key={String(title)} size={{ xs: 6, md: 3 }}><Card variant="outlined"><CardContent><Typography color="text.secondary">{title}</Typography><Typography variant="h5">{value}</Typography></CardContent></Card></Grid>)}</Grid>
-      <Card variant="outlined"><CardContent><Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between", mb: 1 }}><Typography variant="h6">{label("Recent executions", "Execuções recentes")}</Typography><Button onClick={onHistory}>{label("View all", "Ver todas")}</Button></Stack><TableContainer sx={{ width: "100%", overflowX: "auto" }}><Table size="small" aria-label={label("Recent executions", "Execuções recentes")}><TableHead><TableRow>{[label("Job", "Tarefa"), label("Template", "Modelo"), label("Status", "Estado"), label("Created", "Criada"), label("Duration", "Duração")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead><TableBody>{(data.recentItems ?? []).slice(0, 10).map(item => <TableRow key={item.executionId}><TableCell><Link component="button" onClick={() => onExecution(item.executionId)}>{item.jobName}</Link></TableCell><TableCell>{item.templateId}</TableCell><TableCell>{item.state}</TableCell><TableCell>{new Date(item.createdAtUtc).toLocaleString(pt ? "pt-BR" : "en", { timeZone })}</TableCell><TableCell>{formatDuration(item.duration)}</TableCell></TableRow>)}{(data.recentItems ?? []).length === 0 && <TableRow><TableCell colSpan={5}>{label("No recent executions.", "Nenhuma execução recente.")}</TableCell></TableRow>}</TableBody></Table></TableContainer></CardContent></Card>
+      <Card variant="outlined">
+        <CardContent>
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between", mb: 1 }}>
+            <Typography variant="h6">{label("Recent executions", "Execuções recentes")}</Typography>
+            <Button onClick={onHistory}>{label("View all executions", "Ver todas as execuções")}</Button>
+          </Stack>
+          <TableContainer sx={{ width: "100%", overflowX: "auto" }}>
+            <Table size="small" aria-label={label("Recent executions", "Execuções recentes")}>
+              <TableHead>
+                <TableRow>{[label("Job", "Tarefa"), label("Template", "Modelo"), label("Status", "Estado"), label("Created", "Criada"), label("Duration", "Duração")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow>
+              </TableHead>
+              <TableBody>
+                {(data.recentItems ?? []).slice(0, 10).map(item => (
+                  <TableRow key={item.executionId}>
+                    <TableCell><Link component="button" onClick={() => onExecution(item.executionId)}>{item.jobName}</Link></TableCell>
+                    <TableCell>{item.templateId}</TableCell>
+                    <TableCell>{item.state}</TableCell>
+                    <TableCell>{new Date(item.createdAtUtc).toLocaleString(pt ? "pt-BR" : "en", { timeZone })}</TableCell>
+                    <TableCell>{formatDuration(item.duration)}</TableCell>
+                  </TableRow>
+                ))}
+                {(data.recentItems ?? []).length === 0 && <TableRow><TableCell colSpan={5}>{label("No recent executions.", "Nenhuma execução recente.")}</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
       <Card variant="outlined"><CardContent><Typography variant="h6">{label("Upcoming work", "Próximas tarefas")}</Typography>{(data.upcomingItems ?? []).length ? data.upcomingItems.map(item => <Typography key={item.jobId}>{item.jobName} · {item.templateId} · {new Date(item.scheduledForUtc).toLocaleString(pt ? "pt-BR" : "en", { timeZone })}</Typography>) : <Typography>{label("No upcoming one-time schedules.", "Nenhum agendamento único próximo.")}</Typography>}</CardContent></Card>
     </>}
   </Stack>;

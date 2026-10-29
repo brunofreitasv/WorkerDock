@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { read } from "../../api/client";
@@ -6,7 +6,7 @@ import { ExecutionHistoryPage } from "./ExecutionHistoryPage";
 
 vi.mock("../../api/client", () => ({ read: vi.fn() }));
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => { vi.clearAllMocks(); vi.useRealTimers(); });
 
 const execution = {
   executionId: "execution-1", jobId: "job-1", jobName: "Nightly report", templateId: "http",
@@ -20,6 +20,10 @@ function page(nextCursor: string | null = "cursor-2") {
 
 function requestUrl(path: string) {
   return new URL(path, window.location.origin);
+}
+
+async function flushPolling() {
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
 test("filters history, opens an execution, pages, and resets the cursor when filters change", async () => {
@@ -91,6 +95,41 @@ test("shows unavailable and stale messages without discarding the last page", as
   await user.click(screen.getByRole("button", { name: "Refresh" }));
   expect(await screen.findByText(/Showing stale results\./)).toBeVisible();
   expect(screen.getByText("Nightly report")).toBeVisible();
+});
+
+test("Refresh and Retry restart at page one with a fresh preset range anchor", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-29T12:00:00Z"));
+  const requests: string[] = [];
+  vi.mocked(read).mockImplementation(async (path: string) => {
+    requests.push(path);
+    if (requests.length === 3) throw new Error("offline");
+    const hasCursor = requestUrl(path).searchParams.has("cursor");
+    return { data: { items: [execution], nextCursor: hasCursor ? null : "cursor-2" } } as never;
+  });
+
+  render(<ExecutionHistoryPage language="en" timeZone="UTC" onExecution={vi.fn()} />);
+  await flushPolling();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await flushPolling();
+  expect(screen.getByText("Page 2")).toBeVisible();
+
+  vi.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await flushPolling();
+  const refreshRequest = requestUrl(requests[2]);
+  expect(refreshRequest.searchParams.get("cursor")).toBeNull();
+  expect(refreshRequest.searchParams.get("toUtc")).toBe("2026-10-30T12:00:00.000Z");
+  expect(screen.getByText("Page 1")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+
+  vi.setSystemTime(new Date("2026-10-31T12:00:00Z"));
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await flushPolling();
+  const retryRequest = requestUrl(requests[3]);
+  expect(retryRequest.searchParams.get("cursor")).toBeNull();
+  expect(retryRequest.searchParams.get("toUtc")).toBe("2026-10-31T12:00:00.000Z");
+  expect(screen.getByText("Page 1")).toBeVisible();
 });
 
 test("shows an unavailable message when the first history request fails", async () => {
