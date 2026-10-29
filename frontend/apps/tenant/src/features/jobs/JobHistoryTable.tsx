@@ -57,6 +57,7 @@ export function JobHistoryTable({ jobId, language, timeZone }: { jobId: string; 
   const duration = (value: string | number | null) => typeof value === "string" ? value.split(".")[0] : value == null ? "—" : String(value);
 
   return <Stack spacing={2}>
+    <Typography component="h2" variant="h6">{label("Job history", "Histórico da tarefa")} · {jobId}</Typography>
     <PeriodControl value={period} timeZone={timeZone} maxDays={90} language={pt ? "pt-BR" : "en"} onChange={changePeriod} />
     <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
       <TextField select label={label("Status", "Estado")} value={state} onChange={event => { setState(event.target.value); reset(); }}>

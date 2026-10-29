@@ -34,6 +34,7 @@ test("filters date and state, replaces the page, and links to execution details"
 
   render(<JobHistoryTable jobId="job-1" language="en" timeZone="UTC" />);
   const table = await screen.findByRole("table", { name: "Job execution history" });
+  expect(screen.getByRole("heading", { level: 2, name: "Job history · job-1" })).toBeVisible();
   expect(within(table).getByText("Succeeded")).toBeVisible();
   expect(within(table).getByText("template.test")).toBeVisible();
   expect(within(table).getByRole("link", { name: "execution-1" })).toHaveAttribute("href", "#/execution:execution-1");
@@ -67,4 +68,12 @@ test("renders translated controls and localizes execution timestamps", async () 
   expect(screen.getByRole("button", { name: "Últimos 7 dias" })).toBeVisible();
   expect(within(table).getByText("28/10/2026, 09:00:00")).toBeVisible();
   expect(within(table).getByText("Aguardando revisão")).toBeVisible();
+});
+
+
+test("shows job identity when the history has no results", async () => {
+  vi.mocked(read).mockResolvedValue(response([], null));
+  render(<JobHistoryTable jobId="job-empty" language="en" timeZone="UTC" />);
+  expect(await screen.findByRole("heading", { level: 2, name: "Job history · job-empty" })).toBeVisible();
+  expect(await screen.findByText("No executions match this filter.")).toBeVisible();
 });
