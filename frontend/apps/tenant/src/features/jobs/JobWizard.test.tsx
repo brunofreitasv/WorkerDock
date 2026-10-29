@@ -437,3 +437,40 @@ test("manual enable is available only after a deleted schedule is confirmed abse
   expect(screen.getByText(/Manual job/)).toBeVisible();
   expect(screen.getByRole("button", { name: "Enable job" })).toBeEnabled();
 });
+
+test("SQL configuration loads profiles and passes profile choices to the form", async () => {
+  const descriptor = { id: "workerdock.sql-server", version: "1.1.0", displayName: "SQL Server", description: "SQL Server", configurationSchema: { type: "object", properties: {} } };
+  const profile = { current: { profileId: "profile-1", name: "Warehouse", server: "db-one", allowedCatalogs: ["Ops"] }, retired: false };
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost"); calls.push(url.pathname);
+    const body = url.pathname === "/api/templates" ? { items: [{ selectable: true, descriptor }] } : url.pathname === "/api/connection-profiles/" ? { items: [profile] } : {};
+    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "SQL job");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("combobox", { name: "Connection profile" }));
+  expect(await screen.findByRole("option", { name: "Warehouse (db-one)" })).toBeInTheDocument();
+  expect(calls.filter(path => path === "/api/connection-profiles/")).toHaveLength(1);
+});
+
+test("profile request failure does not block non-SQL job configuration", async () => {
+  const sql = { id: "workerdock.sql-server", version: "1.1.0", displayName: "SQL Server", description: "SQL Server", configurationSchema: { type: "object", properties: {} } };
+  const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost"); calls.push(url.pathname);
+    const body = url.pathname === "/api/templates" ? { items: [{ selectable: true, descriptor: sql }, { selectable: true, descriptor }] } : {};
+    return new Response(JSON.stringify(body), { status: url.pathname === "/api/connection-profiles/" ? 503 : 200, headers: { "Content-Type": "application/json" } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "Regular job");
+  await user.click(screen.getByRole("combobox", { name: "Template" }));
+  await user.click(await screen.findByRole("option", { name: "Sample · 1" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getAllByText("Sample")).toHaveLength(2);
+  expect(calls).toContain("/api/connection-profiles/");
+});

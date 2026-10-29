@@ -13,6 +13,7 @@ import { RunNowDialog } from "./RunNowDialog";
 import type { DynamicValuePreviewRequest } from "./dynamicValueApi";
 
 type Issue = { path: string; code: string };
+type SqlProfile = { current: { profileId: string; name: string; server: string; allowedCatalogs: string[] }; retired: boolean };
 type Revision = { jobId: string; revision: number; name: string; templateId: string; templateVersion: string; configuration: Record<string, unknown>; profileId: string | null; policy: Record<string, unknown>; dynamicValues?: DynamicValuePlan | null };
 type EditorDto = { revision: Revision; version: number[]; enabled: boolean; archived: boolean; concurrencyLimit: number };
 type PersistedScheduleState = "none" | "present" | "unknown" | "dirty";
@@ -44,6 +45,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [configuration, setConfiguration] = useState<Record<string, unknown>>({});
+  const [sqlProfiles, setSqlProfiles] = useState<{ status: "loading" | "ready" | "error"; items: SqlProfile[] }>({ status: "loading", items: [] });
   const [dynamicValues, setDynamicValues] = useState<DynamicValuePlan | null>(null);
   const [policy, setPolicy] = useState({ ...blankPolicy });
   const [missedMode, setMissedMode] = useState("Skip");
@@ -76,6 +78,13 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
   const labels = [t.stageTemplate, t.stageConfiguration, t.stageSchedule, t.stagePolicy, t.stageReview, t.stageActivation];
   useEffect(() => { let current = true; void read<{ items: CatalogItem[] }>("/api/templates").then(result => { if (current) { const initial = selectDefaultTemplate(result.data.items); setCatalog(result.data.items); setSelected(initial); setConfiguration(initial ? createSchemaDefault(initial.descriptor.configurationSchema, initial.descriptor.configurationSchema) as Record<string, unknown> : {}); setDynamicValues(initial && hasDynamicAnnotation(initial.descriptor.configurationSchema) ? emptyDynamicPlan("UTC") : null); } }).catch(() => { if (current) setMessage(t.requestError); }).finally(() => { if (current) setLoading(false); }); return () => { current = false; }; }, []);
   useEffect(() => { if (message) summary.current?.focus(); }, [message]);
+  useEffect(() => {
+    if (selected?.descriptor.id !== "workerdock.sql-server") return;
+    let current = true;
+    setSqlProfiles(previous => ({ ...previous, status: "loading" }));
+    void read<{ items: SqlProfile[] }>("/api/connection-profiles/").then(result => { if (current) setSqlProfiles({ status: "ready", items: result.data.items }); }).catch(() => { if (current) setSqlProfiles(previous => ({ ...previous, status: "error" })); });
+    return () => { current = false; };
+  }, [selected?.descriptor.id]);
   const saveDraft = async () => {
     if (staleConflict || !reviewAcknowledged) return false;
     if (!selected || !name.trim()) { setMessage(t.templateRequired); setStep(0); return false; }
@@ -280,7 +289,7 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
       {message && <Alert ref={summary} tabIndex={-1} role="alert" severity={message === t.requestError || message === t.validation ? "error" : "info"}>{message}{issues.length > 0 && <ul>{issues.map((issue, index) => <li key={`${issue.path}-${index}`}>{issue.path}: {issue.code}</li>)}</ul>}</Alert>}
       <Stepper activeStep={step} alternativeLabel sx={{ overflowX: "auto" }}>{labels.map((label, index) => <Step key={label}><StepButton onClick={() => setStep(index)}>{label}</StepButton></Step>)}</Stepper>
       {step === 0 && <Stack spacing={2}><TextField label={t.jobName} value={name} onChange={event => setName(event.target.value)} required autoFocus fullWidth /><TemplatePicker label={t.template} value={selected} onChange={selectTemplate} /></Stack>}
-      {step === 1 && selected && <><TemplateForm descriptor={selected.descriptor} value={configuration} onChange={value => { setConfiguration(value); setIssues([]); }} errors={fieldErrors} dynamicValues={dynamicValues} onDynamicValuesChange={setDynamicValues} t={t} jobTimeout={policy.timeout} />{localIssues.length > 0 && <Alert severity="warning">{t.localValidation}: {localIssues.length}</Alert>}<DynamicValuePreview request={previewRequest} t={t} /><Button onClick={() => { setBusy(true); void mutate<{ issues: Issue[] }>("/api/template-validation", "POST", { templateId: selected.descriptor.id, templateVersion: selected.descriptor.version, configuration, dynamicValues, jobTimeout: policy.timeout, triggerKind: scheduleEnabled ? "Scheduled" : "Manual" }).then(result => { setIssues(result.issues); setMessage(result.issues.length ? t.validation : t.configurationValid); }).catch(() => setMessage(t.requestError)).finally(() => setBusy(false)); }} disabled={busy}>{t.validateConfiguration}</Button></>}
+      {step === 1 && selected && <><TemplateForm descriptor={selected.descriptor} value={configuration} onChange={value => { setConfiguration(value); setIssues([]); }} errors={fieldErrors} dynamicValues={dynamicValues} onDynamicValuesChange={setDynamicValues} t={t} jobTimeout={policy.timeout} sqlProfiles={selected.descriptor.id === "workerdock.sql-server" ? sqlProfiles : undefined} />{localIssues.length > 0 && <Alert severity="warning">{t.localValidation}: {localIssues.length}</Alert>}<DynamicValuePreview request={previewRequest} t={t} /><Button onClick={() => { setBusy(true); void mutate<{ issues: Issue[] }>("/api/template-validation", "POST", { templateId: selected.descriptor.id, templateVersion: selected.descriptor.version, configuration, dynamicValues, jobTimeout: policy.timeout, triggerKind: scheduleEnabled ? "Scheduled" : "Manual" }).then(result => { setIssues(result.issues); setMessage(result.issues.length ? t.validation : t.configurationValid); }).catch(() => setMessage(t.requestError)).finally(() => setBusy(false)); }} disabled={busy}>{t.validateConfiguration}</Button></>}
       {step === 2 && <Stack spacing={2}><FormControlLabel control={<Switch checked={scheduleEnabled} onChange={event => setScheduleEnabled(event.target.checked)} />} label={t.useSchedule} />{scheduleEnabled && <ScheduleEditor value={schedule} onChange={setSchedule} preview={preview} t={t} />}{scheduleEnabled && dynamicValues && schedule.zoneId !== dynamicValues.timeZoneId && <Button onClick={() => setDynamicValues({ ...dynamicValues, timeZoneId: schedule.zoneId, bindings: dynamicValues.bindings.map(binding => binding.timeZoneId ? { ...binding, timeZoneId: schedule.zoneId } : binding) })}>{t.useScheduleTimeZone}</Button>}{job && scheduleEnabled && <Button color="error" onClick={() => setDeleteScheduleOpen(true)}>{t.deleteSchedule}</Button>}<Dialog open={deleteScheduleOpen} onClose={() => setDeleteScheduleOpen(false)}><DialogTitle>{t.confirmDeleteScheduleTitle}</DialogTitle><DialogContent>{t.confirmDeleteSchedule}</DialogContent><DialogActions><Button onClick={() => setDeleteScheduleOpen(false)}>{t.cancel}</Button><Button color="error" disabled={busy} onClick={() => void deleteSchedule()}>{t.deleteSchedule}</Button></DialogActions></Dialog></Stack>}
       {step === 3 && <Stack spacing={2}>
         <TextField label={t.timeout} type="number" value={timeSpanSeconds(policy.timeout)} onChange={event => updatePolicy("timeout", event.target.value === "" ? null : secondsToTimeSpan(Number(event.target.value)))} helperText={t.timeoutHelp} />
