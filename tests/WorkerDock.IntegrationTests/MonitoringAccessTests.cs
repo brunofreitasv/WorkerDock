@@ -27,6 +27,7 @@ public sealed class MonitoringAccessTests
         Assert.Equal(HttpStatusCode.BadRequest, badAuditRange.StatusCode);
         using var invalidDate = await client.GetAsync("/api/monitoring/jobs?fromUtc=not-a-date");
         Assert.Equal(HttpStatusCode.BadRequest, invalidDate.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/monitoring/jobs/{Guid.NewGuid()}/executions")).StatusCode);
         using var history = await client.GetAsync("/api/monitoring/executions");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, history.StatusCode);
         using var invalidHistoryState = await client.GetAsync("/api/monitoring/executions?state=Enabled");

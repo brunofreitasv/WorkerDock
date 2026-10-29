@@ -60,6 +60,16 @@ public sealed class ExecutionHistorySqlTests
             await query.ExecutionsAsync(filter with { State = "Running" }, new(page.NextCursor, 10), default));
         Assert.Equal("ValidationFailed", changedFilterError.Code);
         Assert.Contains(runningId, second.Items.Select(x => x.ExecutionId));
+
+        var scopedFilter = filter with { JobId = Guid.NewGuid() };
+        var scoped = await query.ExecutionsAsync(scopedFilter, new(null, 10), default);
+        Assert.Empty(scoped.Items);
+        var firstJobFilter = filter with { JobId = jobId };
+        var firstJobPage = await query.ExecutionsAsync(firstJobFilter, new(null, 1), default);
+        Assert.All(firstJobPage.Items, item => Assert.Equal(jobId, item.JobId));
+        var scopeMismatch = await Assert.ThrowsAsync<WorkerDockException>(async () =>
+            await query.ExecutionsAsync(filter, new(firstJobPage.NextCursor, 10), default));
+        Assert.Equal("ValidationFailed", scopeMismatch.Code);
     }
 
     private static Task SeedExecutionAsync(SqlDatabaseFixture database, Guid executionId, Guid jobId, long revision, string state, DateTimeOffset created) =>

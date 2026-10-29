@@ -37,6 +37,14 @@ public static class MonitoringEndpoints
             catch { return Results.Problem(statusCode: 503, extensions: new Dictionary<string, object?> { ["code"] = "MonitoringUnavailable" }); }
         }).RequireAuthorization(AccessPolicies.Read);
 
+        endpoints.MapGet("/api/monitoring/jobs/{jobId:guid}/executions", async (Guid jobId, HttpRequest request, IMonitoringQueries queries, TimeProvider clock, CancellationToken ct) =>
+        {
+            if (!TryPage(request, out var page) || !TryExecutionHistoryFilter(request, clock, out var filter)) return ValidationProblem();
+            try { return Results.Ok(await queries.ExecutionsAsync(filter! with { JobId = jobId }, page!, ct)); }
+            catch (WorkerDockException error) when (error.Code == "ValidationFailed") { return ValidationProblem(); }
+            catch { return Results.Problem(statusCode: 503, extensions: new Dictionary<string, object?> { ["code"] = "MonitoringUnavailable" }); }
+        }).RequireAuthorization(AccessPolicies.Manage);
+
         endpoints.MapGet("/api/monitoring/executions/{executionId:guid}", async (Guid executionId, IMonitoringQueries queries, CancellationToken ct) =>
         {
             try { return Results.Ok(await queries.ExecutionAsync(executionId, ct)); }

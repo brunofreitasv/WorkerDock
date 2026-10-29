@@ -116,6 +116,7 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
                   FROM [workerdock].Executions e
                   JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
                  WHERE e.CreatedAtUtc>=@from AND e.CreatedAtUtc<@to
+                   AND (@jobId IS NULL OR e.JobId=@jobId)
                    AND (@search IS NULL OR r.Name LIKE @nameSearch ESCAPE N'\' OR CONVERT(nvarchar(36),e.ExecutionId)=@search)
                    AND (@state IS NULL OR e.State=@state)
                    AND (@template IS NULL OR r.TemplateId=@template)
@@ -139,6 +140,7 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         Add(command, "@take", SqlDbType.Int, page.Limit + 1);
         Add(command, "@from", SqlDbType.DateTime2, filter.FromUtc.UtcDateTime);
         Add(command, "@to", SqlDbType.DateTime2, filter.ToUtc.UtcDateTime);
+        Add(command, "@jobId", SqlDbType.UniqueIdentifier, (object?)filter.JobId ?? DBNull.Value);
         Add(command, "@search", SqlDbType.NVarChar, (object?)filter.Search ?? DBNull.Value, 100);
         Add(command, "@nameSearch", SqlDbType.NVarChar, escapedSearch is null ? DBNull.Value : "%" + escapedSearch + "%", 204);
         Add(command, "@state", SqlDbType.NVarChar, (object?)filter.State ?? DBNull.Value, 20);
@@ -279,7 +281,8 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         toUtc = filter.ToUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
         search = filter.Search,
         state = filter.State,
-        templateId = filter.TemplateId
+        templateId = filter.TemplateId,
+        jobId = filter.JobId
     });
 
     private static void Validate(MonitoringFilter filter, PageRequest page)

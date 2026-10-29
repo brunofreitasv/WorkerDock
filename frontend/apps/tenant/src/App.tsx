@@ -25,6 +25,7 @@ import { ProfileEditor } from "./features/profiles/ProfileEditor";
 import { TemplatePicker, type CatalogItem } from "./features/templates/TemplatePicker";
 import { Dashboard } from "./features/monitoring/Dashboard";
 import { JobsTable } from "./features/monitoring/JobsTable";
+import { JobHistoryTable } from "./features/jobs/JobHistoryTable";
 import { WorkersPage } from "./features/monitoring/WorkersPage";
 import { ExecutionDetails } from "./features/monitoring/ExecutionDetails";
 import { ExecutionHistoryPage } from "./features/monitoring/ExecutionHistoryPage";
@@ -95,9 +96,9 @@ export default function App() {
   ] : [];
   const flatNavigation = navigation.flatMap((group) => group.items);
   const activePage = active.startsWith("help:") ? "help" : active;
-  const activeNavigation = activePage.startsWith("execution:") ? "monitoring" : active === "executions" ? "dashboard" : activePage;
+  const activeNavigation = active.startsWith("job-history:") || activePage.startsWith("execution:") ? "monitoring" : active === "executions" ? "dashboard" : activePage;
   const helpSlug = active.startsWith("help:") ? active.slice("help:".length) : undefined;
-  const title = active.startsWith("execution:") ? "Execution details" : active === "executions" ? t.executionHistory : activePage === "help"
+  const title = active.startsWith("job-history:") ? (preferences.language === "pt-BR" ? "Histórico da tarefa" : "Job history") : active.startsWith("execution:") ? "Execution details" : active === "executions" ? t.executionHistory : activePage === "help"
     ? helpTopics.find(topic => topic.slug === helpSlug)?.title[preferences.language] ?? t.help
     : flatNavigation.find((item) => item.id === activeNavigation)?.label ??
       (active === "settings" ? t.settings : t.dashboard);
@@ -177,7 +178,9 @@ export default function App() {
                     : <RetentionPage />}
                 </>
               ) : (
-                active === "jobs" ? (
+                active.startsWith("job-history:") ? (
+                  session.canManage ? <JobHistoryTable jobId={active.slice("job-history:".length)} language={preferences.language} timeZone={preferences.timeZone} /> : <Alert severity="error">{t.permission}</Alert>
+                ) : active === "jobs" ? (
                   session.canManage ? <ManualJobEditor t={t} defaultZone={preferences.timeZone} /> : <Alert severity="error">{t.permission}</Alert>
                 ) : active === "templates" ? (
                   <Paper variant="outlined" sx={{ p: 3, mb: 3, maxWidth: 900 }}>
@@ -193,7 +196,7 @@ export default function App() {
                 ) : active === "executions" ? (
                   <ExecutionHistoryPage language={preferences.language} timeZone={preferences.timeZone} onExecution={id => navigate(`execution:${id}`)} />
                 ) : active === "monitoring" ? (
-                  <JobsTable language={preferences.language} />
+                  <JobsTable language={preferences.language} canManage={session.canManage} onHistory={id => navigate(`job-history:${id}`)} />
                 ) : active === "workers" ? (
                   <WorkersPage language={preferences.language} />
                 ) : active === "audit" ? (
