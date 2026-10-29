@@ -468,9 +468,52 @@ test("profile request failure does not block non-SQL job configuration", async (
   const user = userEvent.setup();
   render(<JobWizard t={translations.en} />);
   await user.type(await screen.findByRole("textbox", { name: "Job name" }), "Regular job");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText(translations.en.sqlProfilesError);
+  await user.click(screen.getByRole("tab", { name: "Template" }));
   await user.click(screen.getByRole("combobox", { name: "Template" }));
   await user.click(await screen.findByRole("option", { name: "Sample · 1" }));
   await user.click(screen.getByRole("button", { name: "Next" }));
   expect(screen.getAllByText("Sample")).toHaveLength(2);
   expect(calls).toContain("/api/connection-profiles/");
+});
+
+test("editing a duplicated saved SQL job preserves unavailable profile and catalog values", async () => {
+  const descriptor = { id: "workerdock.sql-server", version: "1.1.0", displayName: "SQL Server", description: "SQL Server", configurationSchema: { type: "object", properties: {} } };
+  const jobId = "11111111-1111-4111-8111-111111111111";
+  let targetJobId = "";
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    const method = init?.method ?? "GET";
+    let status = 200;
+    let body: any = {};
+    if (url.pathname === "/api/templates") body = { items: [{ selectable: true, descriptor }] };
+    else if (url.pathname === "/api/connection-profiles/") body = { items: [{ current: { profileId: "active-id", name: "Warehouse", server: "db-one", allowedCatalogs: ["Ops"] }, retired: false }] };
+    else if (url.pathname === "/api/jobs" && method === "POST") { status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}/configuration`) body = { revision: { jobId, revision: 1, name: "SQL edit", templateId: descriptor.id, templateVersion: descriptor.version, configuration: { profileId: "active-id", catalog: "Ops", commandTimeoutSeconds: 10 }, profileId: "active-id", policy: { timeout: null } }, version: [1], enabled: false, archived: false, concurrencyLimit: 1 };
+    else if (url.pathname === `/api/jobs/${jobId}/actions` && method === "POST") { targetJobId = JSON.parse(String(init?.body)).targetJobId; status = 202; body = { targetId: targetJobId }; }
+    else if (url.pathname === `/api/jobs/${targetJobId}/configuration`) body = { revision: { jobId: targetJobId, revision: 1, name: "SQL edit copy", templateId: descriptor.id, templateVersion: descriptor.version, configuration: { profileId: "retired-id", catalog: "RemovedCatalog", commandTimeoutSeconds: 10 }, profileId: "retired-id", policy: { timeout: null } }, version: [1], enabled: false, archived: false, concurrencyLimit: 1 };
+    else if (url.pathname.endsWith("/schedule")) { status = 404; body = { code: "NotFound" }; }
+    else if (url.pathname === "/api/antiforgery") body = { requestToken: "test" };
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ETag: '"current"' } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "SQL edit");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("combobox", { name: "Connection profile" }));
+  await user.click(await screen.findByRole("option", { name: "Warehouse (db-one)" }));
+  await user.click(screen.getByRole("combobox", { name: "Catalog" }));
+  await user.click(await screen.findByRole("option", { name: "Ops" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getByText("Disabled draft saved.")).toBeVisible());
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Duplicate" }));
+  await waitFor(() => expect(screen.getByText(translations.en.draftMustBeReviewed)).toBeVisible());
+  await user.click(screen.getByRole("tab", { name: "Configuration" }));
+  expect(screen.getByRole("combobox", { name: "Connection profile" })).toHaveTextContent("Unavailable profile (retired-id)");
+  expect(screen.getByRole("combobox", { name: "Catalog" })).toHaveTextContent("Unavailable catalog (RemovedCatalog)");
 });

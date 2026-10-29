@@ -81,8 +81,8 @@ export function JobWizard({ t, defaultZone = "UTC", language = "en", setLanguage
   useEffect(() => {
     if (selected?.descriptor.id !== "workerdock.sql-server") return;
     let current = true;
-    setSqlProfiles(previous => ({ ...previous, status: "loading" }));
-    void read<{ items: SqlProfile[] }>("/api/connection-profiles/").then(result => { if (current) setSqlProfiles({ status: "ready", items: result.data.items }); }).catch(() => { if (current) setSqlProfiles(previous => ({ ...previous, status: "error" })); });
+    setSqlProfiles({ status: "loading", items: [] });
+    void read<{ items: SqlProfile[] }>("/api/connection-profiles/").then(result => { if (current) setSqlProfiles({ status: "ready", items: result.data.items }); }).catch(() => { if (current) setSqlProfiles({ status: "error", items: [] }); });
     return () => { current = false; };
   }, [selected?.descriptor.id]);
   const saveDraft = async () => {
