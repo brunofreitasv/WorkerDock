@@ -23,6 +23,10 @@ export interface TemplateFormProps {
   onDynamicValuesChange?(next: DynamicValuePlan | null): void;
   t?: Labels;
   jobTimeout?: string | null;
+  sqlProfiles?: {
+    status: "loading" | "ready" | "error";
+    items: { current: { profileId: string; name: string; server: string; allowedCatalogs: string[] }; retired: boolean }[];
+  };
 }
 
 export function TemplateForm(props: TemplateFormProps) {

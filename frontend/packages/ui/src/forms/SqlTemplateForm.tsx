@@ -14,6 +14,12 @@ export function SqlTemplateForm(props: TemplateFormProps) {
   const parameters = Array.isArray(value.parameters) ? value.parameters as Record<string, unknown>[] : [];
   const kind = value.commandKind === "Procedure" ? "Procedure" : "Query";
   const set = (key: string, next: unknown) => onChange({ ...value, [key]: next });
+  const profiles = props.sqlProfiles?.items ?? [];
+  const profileId = String(value.profileId ?? "");
+  const selectedProfile = profiles.find(item => !item.retired && item.current.profileId === profileId);
+  const savedProfileExists = Boolean(selectedProfile);
+  const catalog = String(value.catalog ?? "");
+  const allowedCatalogs = selectedProfile?.current.allowedCatalogs ?? [];
   const updatePlan = (next: DynamicValuePlan | null) => props.onDynamicValuesChange?.(next);
   const updateRow = (index: number, row: Record<string, unknown>, plan: DynamicValuePlan | null) => {
     onChange({ ...value, parameters: parameters.map((item, i) => i === index ? row : item) });
@@ -23,8 +29,24 @@ export function SqlTemplateForm(props: TemplateFormProps) {
     <Typography component="legend" variant="h6">{descriptor.displayName}</Typography>
     <Typography color="text.secondary">{descriptor.description}</Typography>
     {errors.configuration && <Typography color="error" role="alert">Configuration: {errors.configuration}</Typography>}
-    <TextField label={t.sqlProfileId} value={String(value.profileId ?? "")} onChange={event => set("profileId", event.target.value)} error={Boolean(errors["configuration.profileId"])} helperText={errors["configuration.profileId"]} />
-    <TextField label={t.sqlCatalog} value={String(value.catalog ?? "")} onChange={event => set("catalog", event.target.value)} error={Boolean(errors["configuration.catalog"])} helperText={errors["configuration.catalog"]} />
+    {props.sqlProfiles ? <>
+      <TextField select label={t.sqlProfileLabel} value={profileId} onChange={event => onChange({ ...value, profileId: event.target.value, catalog: event.target.value === profileId ? value.catalog : "" })} error={Boolean(errors["configuration.profileId"])} helperText={errors["configuration.profileId"]}>
+        <MenuItem value="">{t.sqlSelectProfile}</MenuItem>
+        {profiles.filter(item => !item.retired).map(item => <MenuItem key={item.current.profileId} value={item.current.profileId}>{item.current.name} ({item.current.server})</MenuItem>)}
+        {profileId && !savedProfileExists && <MenuItem value={profileId}>{t.sqlUnavailableProfile.replace("{profileId}", profileId)}</MenuItem>}
+      </TextField>
+      {props.sqlProfiles.status === "loading" && <Typography color="text.secondary">{t.sqlProfilesLoading}</Typography>}
+      {props.sqlProfiles.status === "error" && <Typography color="error" role="status">{t.sqlProfilesError}</Typography>}
+      {props.sqlProfiles.status === "ready" && profiles.every(item => item.retired) && <Typography color="text.secondary">{t.sqlProfilesEmpty}</Typography>}
+      <TextField select label={t.sqlCatalog} value={catalog} onChange={event => set("catalog", event.target.value)} error={Boolean(errors["configuration.catalog"])} helperText={errors["configuration.catalog"]}>
+        <MenuItem value="">{t.sqlSelectCatalog}</MenuItem>
+        {allowedCatalogs.map(item => <MenuItem key={item} value={item}>{item}</MenuItem>)}
+        {catalog && !allowedCatalogs.includes(catalog) && <MenuItem value={catalog}>{t.sqlUnavailableCatalog.replace("{catalog}", catalog)}</MenuItem>}
+      </TextField>
+    </> : <>
+      <TextField label={t.sqlProfileId} value={profileId} onChange={event => set("profileId", event.target.value)} error={Boolean(errors["configuration.profileId"])} helperText={errors["configuration.profileId"]} />
+      <TextField label={t.sqlCatalog} value={catalog} onChange={event => set("catalog", event.target.value)} error={Boolean(errors["configuration.catalog"])} helperText={errors["configuration.catalog"]} />
+    </>}
     <TextField select label={t.sqlCommandKind} value={kind} onChange={event => set("commandKind", event.target.value)}>
       <MenuItem value="Query">{t.sqlQuery}</MenuItem><MenuItem value="Procedure">{t.sqlProcedure}</MenuItem>
     </TextField>
