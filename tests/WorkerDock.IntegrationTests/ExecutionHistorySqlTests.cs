@@ -28,9 +28,11 @@ public sealed class ExecutionHistorySqlTests
         var insideId = Guid.NewGuid();
         var runningId = Guid.NewGuid();
         var outsideId = Guid.NewGuid();
+        var exactBoundaryId = Guid.NewGuid();
         await SeedExecutionAsync(database, insideId, jobId, 1, "Succeeded", now.AddHours(-1));
         await SeedExecutionAsync(database, runningId, jobId, 1, "Running", now.AddHours(-2));
         await SeedExecutionAsync(database, outsideId, jobId, 1, "Failed", now.AddDays(-10));
+        await SeedExecutionAsync(database, exactBoundaryId, jobId, 1, "Failed", now);
         var start = now.AddHours(-3);
         var end = now.AddMinutes(-30);
         await database.ExecuteAsync($"""
@@ -47,11 +49,13 @@ public sealed class ExecutionHistorySqlTests
         Assert.Equal(start, row.StartedAtUtc);
         Assert.Equal(end - start, row.Duration);
         Assert.DoesNotContain(outsideId, page.Items.Select(x => x.ExecutionId));
+        Assert.DoesNotContain(exactBoundaryId, page.Items.Select(x => x.ExecutionId));
         Assert.NotNull(page.NextCursor);
         var second = await query.ExecutionsAsync(filter, new(page.NextCursor, 10), default);
         var ids = page.Items.Concat(second.Items).Select(x => x.ExecutionId).ToArray();
         Assert.Equal(ids.Length, ids.Distinct().Count());
         Assert.DoesNotContain(outsideId, ids);
+        Assert.DoesNotContain(exactBoundaryId, ids);
         var changedFilterError = await Assert.ThrowsAsync<WorkerDockException>(async () =>
             await query.ExecutionsAsync(filter with { State = "Running" }, new(page.NextCursor, 10), default));
         Assert.Equal("ValidationFailed", changedFilterError.Code);

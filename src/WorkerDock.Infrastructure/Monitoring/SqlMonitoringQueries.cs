@@ -115,7 +115,7 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
                 SELECT TOP(@take) e.ExecutionId,e.JobId,r.Name,r.TemplateId,e.State,e.TriggerKind,e.CreatedAtUtc
                   FROM [workerdock].Executions e
                   JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-                 WHERE e.CreatedAtUtc>=@from AND e.CreatedAtUtc<=@to
+                 WHERE e.CreatedAtUtc>=@from AND e.CreatedAtUtc<@to
                    AND (@search IS NULL OR r.Name LIKE @nameSearch ESCAPE N'\' OR CONVERT(nvarchar(36),e.ExecutionId)=@search)
                    AND (@state IS NULL OR e.State=@state)
                    AND (@template IS NULL OR r.TemplateId=@template)

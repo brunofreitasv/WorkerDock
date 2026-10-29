@@ -33,7 +33,8 @@ public sealed class MonitoringAccessTests
         Assert.Equal(HttpStatusCode.BadRequest, invalidHistoryState.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/jobs/{Guid.NewGuid()}/executions")).StatusCode);
         var csrf = await client.GetFromJsonAsync<CsrfView>("/api/antiforgery");
-        using var mutationRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/jobs/{Guid.NewGuid()}/enable-manual");
+        using var mutationRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/jobs/{Guid.NewGuid()}/actions");
+        mutationRequest.Content = JsonContent.Create(new { Action = "EnableManual" });
         mutationRequest.Headers.TryAddWithoutValidation("If-Match", "\"AAAAAAAAAAA=\"");
         mutationRequest.Headers.Add("X-WorkerDock-CSRF", csrf!.RequestToken);
         mutationRequest.Headers.Add("Origin", "https://localhost");
