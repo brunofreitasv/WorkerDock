@@ -15,6 +15,8 @@ The Alerts page separates incidents and delivery attempts. Read users can inspec
 3. For a failed delivery, check its safe code, sink host/port policy, provider reference, and receiver health. Use the delivery ID to correlate receiver logs.
 4. The tenant UI is read-only for delivery records and has no retry control. An authorized Manage user can request a retry of a **Failed** delivery through the supported API route `POST /api/alerts/deliveries/{id}/retry`, with `AdditionalAttempts` from 1 to 20. The retry preserves the delivery ID and is bounded by retry limits. Check the updated count and status in the tenant table.
 
+Use the incident and delivery history filters to select a period, state, rule, delivery status, or notification kind. Results are ordered by latest incident activity or delivery creation time and are paged independently. Open and Unknown incidents remain visible in the default active view even when they are older than the selected period.
+
 ## Example
 
 The delivery table shows `Failed` with safe code `DestinationDenied`. Check the sink URL and `tenant-alerts` policy, approve the needed host and port, then have an authorized Manage user request a retry through the supported API. The same delivery ID lets the receiver correlate the repeated request.

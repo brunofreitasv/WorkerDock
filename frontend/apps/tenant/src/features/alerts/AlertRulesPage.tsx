@@ -3,13 +3,13 @@ import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogCo
 import { ApiError, mutate, read } from "../../api/client";
 import type { Labels } from "../../../../../packages/ui/src/preferences";
 import { createRuleDraft, createSinkDraft, rulePayload, sinkPayload, type AlertRule, type AlertSink } from "./alertDrafts";
+import { IncidentHistoryTable } from "./IncidentHistoryTable";
+import { DeliveryHistoryTable } from "./DeliveryHistoryTable";
 
 const conditions = ["RepeatedFailure", "RetryExhausted", "Timeout", "LongRunning", "MissedExecution", "WorkerUnavailable"] as const;
 const forbiddenHeaders = new Set(["host", "content-length", "transfer-encoding", "connection", "keep-alive", "proxy-connection", "upgrade", "te", "trailer", "expect"]);
 const controls = /[\u0000-\u001f\u007f]/;
 interface HeaderReference { name: string; secretReference: string }
-interface Incident { incidentId: string; ruleName: string; condition: string; subjectKey: string; state: string; openedAtUtc: string; lastObservedAtUtc: string; resolvedAtUtc: string | null; safeCode: string | null }
-interface Delivery { deliveryId: string; incidentId: string; kind: string; status: string; attemptCount: number; nextAvailableAtUtc: string; completedAtUtc: string | null; safeCode: string | null }
 const integer = (value: number, min: number, max: number) => Number.isInteger(value) && value >= min && value <= max;
 function safeSink(sink: AlertSink): AlertSink {
   const config = sink.configuration as AlertSink["configuration"] & { headers?: Array<{ name?: unknown; secretReference?: unknown; value?: unknown }> };
@@ -28,7 +28,7 @@ function validHeaders(headers: HeaderReference[]) {
   return headers.length <= 32 && headers.every(h => validHeaderName(h.name) && validSecretReference(h.secretReference)) && new Set(headers.map(h => h.name.toLowerCase())).size === headers.length;
 }
 
-export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean }) {
+export function AlertRulesPage({ t, canManage, language = "en", timeZone = "UTC" }: { t: Labels; canManage: boolean; language?: string; timeZone?: string }) {
   const [rules, setRules] = useState<AlertRule[]>([]); const [sinks, setSinks] = useState<AlertSink[]>([]);
   const [ruleId, setRuleId] = useState(""); const [sinkId, setSinkId] = useState("");
   const [ruleDraft, setRuleDraft] = useState<AlertRule>(); const [sinkDraft, setSinkDraft] = useState<AlertSink>();
@@ -37,7 +37,6 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
   const [creatingRule, setCreatingRule] = useState(false);
   const [sinksLoaded, setSinksLoaded] = useState(false);
   const [createdSink, setCreatedSink] = useState(false);
-  const [incidents, setIncidents] = useState<Incident[]>([]); const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [error, setError] = useState(""); const [saved, setSaved] = useState(false); const [busy, setBusy] = useState(false); const [invalid, setInvalid] = useState(false);
   const [ruleDirty, setRuleDirty] = useState(false); const [sinkDirty, setSinkDirty] = useState(false);
   const [pendingSelection, setPendingSelection] = useState<{ kind: "rule" | "sink"; id: string | undefined }>();
@@ -66,7 +65,7 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
   const load = () => {
     setError("");
     const generation = permissionGeneration.current;
-    const tasks: Promise<unknown>[] = [read<Incident[]>("/api/alerts/incidents?limit=100").then(x => setIncidents(x.data)), read<Delivery[]>("/api/alerts/deliveries?limit=100").then(x => setDeliveries(x.data))];
+    const tasks: Promise<unknown>[] = [];
     if (canManage) {
       tasks.push(read<AlertRule[]>("/api/alert-rules").then(x => { if (generation !== permissionGeneration.current || !canManage) return; setRules(x.data); setRuleId(id => id || x.data[0]?.id || ""); }), read<AlertSink[]>("/api/alert-sinks").then(x => { if (generation !== permissionGeneration.current || !canManage) return; const data = x.data.map(safeSink); setSinks(data); setSinksLoaded(true); setSinkId(id => id || data[0]?.id || ""); }));
     }
@@ -167,7 +166,6 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
   const updateRule = (patch: Partial<AlertRule>) => { setRuleDirty(true); setRuleDraft(current => current ? { ...current, ...patch } : current); };
   const updateSink = (patch: Partial<AlertSink>) => { setSinkDirty(true); setSinkDraft(current => current ? { ...current, ...patch } : current); };
   const updateHeader = (index: number, patch: Partial<HeaderReference>) => { if (!sinkDraft) return; updateSink({ configuration: { ...sinkDraft.configuration, headers: sinkDraft.configuration.headers.map((h, i) => i === index ? { ...h, ...patch } : h) } }); };
-  const date = (value: string, pt: boolean) => new Intl.DateTimeFormat(pt ? "pt-BR" : "en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
   const pt = t.settings === "Configurações";
 
   return <Stack spacing={3}>
@@ -178,14 +176,8 @@ export function AlertRulesPage({ t, canManage }: { t: Labels; canManage: boolean
       <DialogActions><Button onClick={() => setPendingSelection(undefined)}>{t.cancel}</Button><Button color="error" onClick={() => { if (pendingSelection) applySelection(pendingSelection.kind, pendingSelection.id); }}>{t.alertDiscardConfirm}</Button></DialogActions>
     </Dialog>
     {saved && <Alert severity="success">{createdSink ? t.alertSinkCreated : t.saved}</Alert>}
-    <Paper variant="outlined" sx={{ p: 3 }}>
-      <Typography component="h2" variant="h6" sx={{ mb: 2 }}>{t.alertIncidents}</Typography>
-      <Table size="small" aria-label={t.alertIncidents}><TableHead><TableRow>{[t.alertRule, t.alertCondition, t.alertSubject, t.alertState, t.alertLastObserved, t.alertCode].map(x => <TableCell key={x}>{x}</TableCell>)}</TableRow></TableHead><TableBody>{incidents.map(i => <TableRow key={i.incidentId}><TableCell>{i.ruleName}</TableCell><TableCell>{i.condition}</TableCell><TableCell>{i.subjectKey}</TableCell><TableCell>{i.state}</TableCell><TableCell>{date(i.lastObservedAtUtc, pt)}</TableCell><TableCell>{i.safeCode ?? "—"}</TableCell></TableRow>)}{!incidents.length && <TableRow><TableCell colSpan={6}>{t.alertNoIncidents}</TableCell></TableRow>}</TableBody></Table>
-    </Paper>
-    <Paper variant="outlined" sx={{ p: 3 }}>
-      <Typography component="h2" variant="h6" sx={{ mb: 2 }}>{t.alertDeliveries}</Typography>
-      <Table size="small" aria-label={t.alertDeliveries}><TableHead><TableRow>{[t.alertDelivery, t.alertKind, t.alertState, t.alertAttempts, t.alertNextAttempt, t.alertCode].map(x => <TableCell key={x}>{x}</TableCell>)}</TableRow></TableHead><TableBody>{deliveries.map(d => <TableRow key={d.deliveryId}><TableCell>{d.deliveryId}</TableCell><TableCell>{d.kind}</TableCell><TableCell>{d.status}</TableCell><TableCell>{d.attemptCount}</TableCell><TableCell>{date(d.nextAvailableAtUtc, pt)}</TableCell><TableCell>{d.safeCode ?? "—"}</TableCell></TableRow>)}{!deliveries.length && <TableRow><TableCell colSpan={6}>{t.alertNoDeliveries}</TableCell></TableRow>}</TableBody></Table>
-    </Paper>
+    <IncidentHistoryTable language={language} timeZone={timeZone} />
+    <DeliveryHistoryTable language={language} timeZone={timeZone} />
     {canManage && <>
       <Paper variant="outlined" sx={{ p: 3, maxWidth: 900 }}><Stack spacing={2}>
         <Typography component="h2" variant="h6">{t.alertRules}</Typography><Typography color="text.secondary">{t.alertDuplicateDeliveryHelp}</Typography>

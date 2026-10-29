@@ -202,7 +202,7 @@ export default function App() {
                 ) : active === "audit" ? (
                   <AuditPage language={preferences.language} />
                 ) : active === "alerts" ? (
-                  <AlertRulesPage t={t} canManage={session.canManage} />
+                  <AlertRulesPage t={t} canManage={session.canManage} language={preferences.language} timeZone={preferences.timeZone} />
                 ) : active === "dashboard" ? (
                   <Dashboard language={preferences.language} timeZone={preferences.timeZone} onHistory={() => navigate("executions")} onExecution={id => navigate(`execution:${id}`)} />
                 ) : (

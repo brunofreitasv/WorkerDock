@@ -257,8 +257,9 @@ public partial class Program;
 internal sealed class UnavailableAlertQueries : IAlertQueries
 {
     private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
-    public ValueTask<IReadOnlyList<AlertIncidentDto>> ListIncidentsAsync(int limit, CancellationToken ct) => Unavailable<IReadOnlyList<AlertIncidentDto>>();
-    public ValueTask<IReadOnlyList<AlertDeliveryDto>> ListDeliveriesAsync(int limit, CancellationToken ct) => Unavailable<IReadOnlyList<AlertDeliveryDto>>();
+    public ValueTask<Page<AlertRuleOptionDto>> RuleOptionsAsync(CancellationToken ct) => Unavailable<Page<AlertRuleOptionDto>>();
+    public ValueTask<Page<AlertIncidentDto>> IncidentsAsync(IncidentFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<AlertIncidentDto>>();
+    public ValueTask<Page<AlertDeliveryDto>> DeliveriesAsync(DeliveryFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<AlertDeliveryDto>>();
 }
 internal sealed class UnavailableAlertDeliveryStore : IAlertDeliveryStore
 {

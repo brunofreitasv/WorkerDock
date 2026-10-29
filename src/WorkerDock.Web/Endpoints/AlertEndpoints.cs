@@ -1,4 +1,6 @@
 using System.Text.Json.Serialization;
+using System.Globalization;
+using WorkerDock.Application.Monitoring;
 using WorkerDock.Application.Alerts;
 using WorkerDock.Application.Common;
 using WorkerDock.Domain.Alerts;
@@ -80,14 +82,21 @@ public static class AlertEndpoints
         });
 
         var views = routes.MapGroup("/api/alerts").RequireAuthorization(AccessPolicies.Read);
-        views.MapGet("/incidents", async (int? limit, IAlertQueries queries, CancellationToken ct) =>
+        views.MapGet("/rule-options", async (IAlertQueries queries, CancellationToken ct) =>
         {
-            try { return Results.Ok(await queries.ListIncidentsAsync(limit ?? 100, ct)); }
+            try { return Results.Ok(await queries.RuleOptionsAsync(ct)); }
             catch (WorkerDockException error) { return Error(error); }
         });
-        views.MapGet("/deliveries", async (int? limit, IAlertQueries queries, CancellationToken ct) =>
+        views.MapGet("/incidents", async (HttpRequest request, TimeProvider clock, IAlertQueries queries, CancellationToken ct) =>
         {
-            try { return Results.Ok(await queries.ListDeliveriesAsync(limit ?? 100, ct)); }
+            if (!TryPage(request, out var page) || !TryIncidentFilter(request, clock, out var filter)) return ValidationProblem();
+            try { return Results.Ok(await queries.IncidentsAsync(filter!, page!, ct)); }
+            catch (WorkerDockException error) { return Error(error); }
+        });
+        views.MapGet("/deliveries", async (HttpRequest request, TimeProvider clock, IAlertQueries queries, CancellationToken ct) =>
+        {
+            if (!TryPage(request, out var page) || !TryDeliveryFilter(request, clock, out var filter)) return ValidationProblem();
+            try { return Results.Ok(await queries.DeliveriesAsync(filter!, page!, ct)); }
             catch (WorkerDockException error) { return Error(error); }
         });
         routes.MapPost("/api/alerts/deliveries/{id:guid}/retry", async (Guid id, AlertRetryRequest input, HttpContext context,
@@ -119,6 +128,53 @@ public static class AlertEndpoints
         Version = Convert.ToBase64String(value.Version)
     };
 
+    private static bool TryPage(HttpRequest request, out PageRequest? page)
+    {
+        page = null;
+        var rawLimit = request.Query["limit"].FirstOrDefault();
+        var limit = rawLimit is null ? 50 : int.TryParse(rawLimit, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
+        var cursor = request.Query["cursor"].FirstOrDefault();
+        if (request.Query["limit"].Count > 1 || request.Query["cursor"].Count > 1 || limit is < 1 or > 100 || cursor is { Length: > 2048 }) return false;
+        page = new(cursor, limit); return true;
+    }
+
+    private static bool TryIncidentFilter(HttpRequest request, TimeProvider clock, out IncidentFilter? filter)
+    {
+        filter = null;
+        var state = request.Query["state"].FirstOrDefault() ?? "Active";
+        if (state is not ("Active" or "All" or "Resolved")) return false;
+        var rawFrom = request.Query["fromUtc"].FirstOrDefault(); var rawTo = request.Query["toUtc"].FirstOrDefault();
+        var from = ParseDate(rawFrom); var to = ParseDate(rawTo);
+        if ((rawFrom is not null && from is null) || (rawTo is not null && to is null) || (rawFrom is null) != (rawTo is null)) return false;
+        var now = clock.GetUtcNow().ToUniversalTime();
+        if (rawFrom is null && state != "Active") { from = now.AddDays(-30); to = now; }
+        if (from is { } start && to is { } end && (end <= start || end - start > TimeSpan.FromDays(90))) return false;
+        var rawRule = request.Query["ruleId"].FirstOrDefault(); Guid? ruleId = null;
+        if (rawRule is not null) { if (!Guid.TryParse(rawRule, out var parsed) || parsed == Guid.Empty) return false; ruleId = parsed; }
+        if (request.Query["state"].Count > 1 || request.Query["fromUtc"].Count > 1 || request.Query["toUtc"].Count > 1 || request.Query["ruleId"].Count > 1) return false;
+        filter = new(from, to, state, ruleId); return true;
+    }
+
+    private static bool TryDeliveryFilter(HttpRequest request, TimeProvider clock, out DeliveryFilter? filter)
+    {
+        filter = null; var now = clock.GetUtcNow().ToUniversalTime();
+        var rawFrom = request.Query["fromUtc"].FirstOrDefault(); var rawTo = request.Query["toUtc"].FirstOrDefault();
+        var from = ParseDate(rawFrom); var to = ParseDate(rawTo);
+        if ((rawFrom is not null && from is null) || (rawTo is not null && to is null) || (rawFrom is null) != (rawTo is null)) return false;
+        from ??= now.AddDays(-30); to ??= now;
+        if (to <= from || to - from > TimeSpan.FromDays(90)) return false;
+        var status = request.Query["status"].FirstOrDefault(); var kind = request.Query["kind"].FirstOrDefault();
+        if (status is not (null or "Pending" or "Leased" or "Delivered" or "Failed" or "Cancelled") ||
+            kind is not (null or "Open" or "Reminder" or "Resolve") || request.Query["status"].Count > 1 || request.Query["kind"].Count > 1 ||
+            request.Query["fromUtc"].Count > 1 || request.Query["toUtc"].Count > 1) return false;
+        filter = new(from.Value, to.Value, status, kind); return true;
+    }
+
+    private static DateTimeOffset? ParseDate(string? value) => value is null ? null : DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture,
+        DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed) ? parsed : null;
+
+    private static IResult ValidationProblem() => Results.Problem(statusCode: 400,
+        extensions: new Dictionary<string, object?> { ["code"] = "ValidationFailed" });
     private static byte[]? Version(HttpContext context, bool required)
     {
         var header = context.Request.Headers.IfMatch.ToString();

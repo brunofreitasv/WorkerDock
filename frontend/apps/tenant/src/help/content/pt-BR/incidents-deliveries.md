@@ -15,6 +15,8 @@ A página Alertas separa incidentes e tentativas de entrega. Usuários com acess
 3. Para uma falha, confira código seguro, política de host/porta, referência do provedor e saúde do receptor. Use o ID para correlacionar os logs do receptor.
 4. A interface do tenant permite apenas consultar as entregas e não oferece controle de nova tentativa. Um usuário autorizado com acesso Gerenciar pode solicitar nova tentativa de uma entrega **Failed** pela rota de API `POST /api/alerts/deliveries/{id}/retry`, com `AdditionalAttempts` entre 1 e 20. A tentativa mantém o ID da entrega e respeita os limites. Confira a quantidade e o estado atualizados na tabela do tenant.
 
+Use os filtros de histórico de incidentes e entregas para selecionar período, estado, regra, situação da entrega ou tipo de notificação. Os resultados são ordenados pela atividade mais recente do incidente ou criação da entrega e têm paginação independente. Incidentes Abertos e Desconhecidos continuam visíveis na visão ativa padrão, mesmo quando são anteriores ao período selecionado.
+
 ## Exemplo
 
 A tabela mostra uma entrega `Failed` com o código seguro `DestinationDenied`. Confira URL e política `tenant-alerts`, aprove o host e a porta necessários e peça a um usuário autorizado com acesso Gerenciar para solicitar uma nova tentativa pela API suportada. O mesmo ID permite que o receptor correlacione a solicitação repetida.

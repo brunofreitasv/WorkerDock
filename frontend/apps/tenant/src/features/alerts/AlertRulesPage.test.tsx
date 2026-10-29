@@ -21,7 +21,7 @@ test("webhook updates send only secret references with If-Match and never expose
   let submittedHeaders: HeadersInit | undefined;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname === "/api/alerts/incidents" || url.pathname === "/api/alerts/deliveries") return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [], nextCursor: null })); if (url.pathname === "/api/alerts/incidents" || url.pathname === "/api/alerts/deliveries") return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response(JSON.stringify([rule]));
     if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
     if (url.pathname.endsWith(`/api/alert-rules/${rule.id}`)) return new Response(JSON.stringify(rule), { headers: { ETag: '"rule-etag"' } });
@@ -55,7 +55,7 @@ test("managers create webhook sinks without If-Match and load the saved ETag", a
   vi.stubGlobal("crypto", { randomUUID: () => id });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost"); calls.push({ path: url.pathname, init });
-    if (url.pathname === "/api/alerts/incidents" || url.pathname === "/api/alerts/deliveries") return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [], nextCursor: null })); if (url.pathname === "/api/alerts/incidents" || url.pathname === "/api/alerts/deliveries") return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response("[]");
     if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
     if (url.pathname === `/api/alert-sinks/${id}` && init?.method === "PUT") return new Response(JSON.stringify({ definition: { ...sink, id }, version: "bmV3" }));
@@ -87,7 +87,7 @@ test("managers create disabled rules then enable them with the loaded ETag", asy
   vi.stubGlobal("crypto", { randomUUID: () => id });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost"); calls.push({ path: url.pathname, init });
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response("[]");
     if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
     if (url.pathname === `/api/alert-rules/${id}` && init?.method === "PUT") {
@@ -120,7 +120,7 @@ test("managers create disabled rules then enable them with the loaded ETag", asy
 test("rule creation without an enabled sink gives guidance and keeps the draft", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response("[]");
     if (url.pathname === "/api/alert-sinks") return new Response("[]");
     return new Response("{}", { status: 404 });
@@ -137,7 +137,7 @@ test("rule creation without an enabled sink gives guidance and keeps the draft",
 test("invalid condition threshold and timing fields retain the rule draft", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response("[]");
     if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
     if (url.pathname === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
@@ -174,7 +174,7 @@ test("invalid webhook fields keep a new sink draft without sending it", async ()
   const id = "33333333-3333-4333-8333-333333333333";
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response("[]");
     if (url.pathname === "/api/alert-sinks") return new Response("[]");
     if (url.pathname === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
@@ -201,7 +201,7 @@ test("a stale sink creation recovers the saved item after a 412", async () => {
   vi.stubGlobal("crypto", { randomUUID: () => id });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost"); calls.push({ path: url.pathname, init });
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response("[]");
     if (url.pathname === "/api/alert-sinks") return new Response("[]");
     if (url.pathname === `/api/alert-sinks/${id}` && init?.method === "PUT") return new Response("{}", { status: 412 });
@@ -224,7 +224,7 @@ test("a stale sink creation recovers the saved item after a 412", async () => {
 test("non-managers cannot create sinks or request management resources", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname === "/api/alerts/incidents" || url.pathname === "/api/alerts/deliveries") return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [], nextCursor: null })); if (url.pathname === "/api/alerts/incidents" || url.pathname === "/api/alerts/deliveries") return new Response(JSON.stringify({ items: [], nextCursor: null }));
     return new Response("{}", { status: 403 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -237,7 +237,7 @@ test("non-managers cannot create sinks or request management resources", async (
 test("shows stale-version errors for concurrent rule edits", async () => {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response(JSON.stringify([rule]));
     if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
     if (url.pathname === `/api/alert-rules/${rule.id}` && init?.method === "PUT") return new Response("{}", { status: 412 });
@@ -256,8 +256,9 @@ test("shows stale-version errors for concurrent rule edits", async () => {
 test("read users can view incidents and deliveries without requesting management resources", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.endsWith("/incidents")) return new Response(JSON.stringify([{ incidentId: "i-1", ruleName: "Restart failures", condition: "RepeatedFailure", subjectKey: "job/demo", state: "Open", openedAtUtc: "2026-10-19T10:00:00Z", lastObservedAtUtc: "2026-10-19T10:01:00Z", resolvedAtUtc: null, safeCode: null }]));
-    if (url.pathname.endsWith("/deliveries")) return new Response(JSON.stringify([{ deliveryId: "d-1", incidentId: "i-1", kind: "Opened", status: "Pending", attemptCount: 1, nextAvailableAtUtc: "2026-10-19T10:02:00Z", completedAtUtc: null, safeCode: null }]));
+    if (url.pathname.endsWith("/rule-options")) return new Response(JSON.stringify({ items: [{ ruleId: "r-1", name: "Restart failures" }], nextCursor: null }));
+    if (url.pathname.endsWith("/incidents")) return new Response(JSON.stringify({ items: [{ incidentId: "i-1", ruleId: "r-1", ruleName: "Restart failures", condition: "RepeatedFailure", subjectKey: "job/demo", state: "Open", openedAtUtc: "2026-10-19T10:00:00Z", lastObservedAtUtc: "2026-10-19T10:01:00Z", resolvedAtUtc: null, safeCode: null }], nextCursor: null }));
+    if (url.pathname.endsWith("/deliveries")) return new Response(JSON.stringify({ items: [{ deliveryId: "d-1", incidentId: "i-1", ruleName: "Restart failures", subjectKey: "job/demo", kind: "Open", status: "Pending", attemptCount: 1, nextAvailableAtUtc: "2026-10-19T10:02:00Z", completedAtUtc: null, safeCode: null }], nextCursor: null }));
     return new Response("{}", { status: 403 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -272,7 +273,7 @@ test("canceling a selection change preserves the current draft and confirming sw
   const secondRule = { ...rule, id: "55555555-5555-4555-8555-555555555555", name: "Second rule" };
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response(JSON.stringify([rule, secondRule]));
     if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
     if (url.pathname === `/api/alert-rules/${rule.id}`) return new Response(JSON.stringify(rule), { headers: { ETag: '"first"' } });
@@ -301,7 +302,7 @@ test("a 412 during sink create recovers the same UUID", async () => {
   vi.stubGlobal("crypto", { randomUUID: () => id });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost"); calls.push(`${init?.method ?? "GET"} ${url.pathname}`);
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response("[]");
     if (url.pathname === "/api/alert-sinks") return new Response("[]");
     if (url.pathname === `/api/alert-sinks/${id}` && init?.method === "PUT") return new Response("{}", { status: 412 });
@@ -325,7 +326,7 @@ test("a failed 412 recovery GET preserves and announces the draft", async () => 
   vi.stubGlobal("crypto", { randomUUID: () => id });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response("[]");
     if (url.pathname === "/api/alert-sinks") return new Response("[]");
     if (url.pathname === `/api/alert-sinks/${id}` && init?.method === "PUT") return new Response("{}", { status: 412 });
@@ -349,7 +350,7 @@ test("late reads for a superseded selection cannot replace the current draft", a
   let oldReadCount = 0;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response(JSON.stringify([rule, { ...rule, id: "55555555-5555-4555-8555-555555555555", name: "Second rule" }]));
     if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
     if (url.pathname === `/api/alert-rules/${rule.id}`) {
@@ -372,7 +373,7 @@ test("late reads for a superseded selection cannot replace the current draft", a
 test("losing manager permission clears management UI and does not fetch management data again", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response(JSON.stringify([rule]));
     if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
     if (url.pathname === `/api/alert-rules/${rule.id}`) return new Response(JSON.stringify(rule), { headers: { ETag: '"rule"' } });
@@ -401,7 +402,7 @@ test("a sink recovery response after manager permission is lost cannot repopulat
   vi.stubGlobal("crypto", { randomUUID: () => id });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return new Response("[]");
     if (url.pathname === "/api/alert-sinks") {
       sinkListCount++;
@@ -435,7 +436,7 @@ test("a failed management list request after permission loss does not show a sta
   const pendingRules = new Promise<Response>((_, reject) => { rejectRules = reject; });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname.startsWith("/api/alerts/")) return new Response("[]");
+    if (url.pathname === "/api/alerts/rule-options") return new Response(JSON.stringify({ items: [{ ruleId: "22222222-2222-4222-8222-222222222222", name: "Repeated failures" }], nextCursor: null })); if (url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
     if (url.pathname === "/api/alert-rules") return pendingRules;
     if (url.pathname === "/api/alert-sinks") return new Response("[]");
     return new Response("{}", { status: 404 });
