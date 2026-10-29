@@ -9,7 +9,7 @@ Operators need to know why a queued run is waiting, change how many runs of a jo
 - Two capacity limits: host capacity across all jobs and job capacity for each job. Only actively running attempts count against either numeric limit. Queued, `RetryWaiting`, and `NeedsReview` consume no numeric capacity.
 - No template capacity limit or template-specific capacity control. A template may use any available host capacity, subject to the jobs' own limits.
 - Managers can see and change job capacity in the job UI. The default is 1. `Allow` permits parallel runs up to job and host capacity; `Queue` remains serial; `Skip` drops overlapping occurrences.
-- A clearly named setting, “Pause new runs while an earlier run needs review,” appears with Overlap. It applies only to `Queue` and `Skip`. `Allow` continues regardless of this setting.
+- One review setting appears with Overlap. For `Queue`, label it “Wait for review before starting new runs”; for `Skip`, label it “Skip new runs while review is pending.” Both labels control the same per-job setting. `Allow` continues regardless and needs no review switch.
 - Existing jobs start with the setting on; newly created jobs start with it off. Operators can change it later. Historical execution and attempt records remain intact.
 - The UI explains which rule holds or skips a run, including capacity, review hold, and overlap, without implying that `NeedsReview` consumes capacity.
 
