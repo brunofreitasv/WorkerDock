@@ -1,6 +1,7 @@
 using System.Data;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Monitoring;
@@ -37,8 +38,22 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
               JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision
              WHERE s.Removed=0 AND s.Paused=0 AND j.Enabled=1 AND s.Kind=N'Once' AND s.OneTimeUtc>SYSUTCDATETIME()
              ORDER BY s.OneTimeUtc,s.ScheduleId;
-            SELECT TOP(10) e.ExecutionId,e.JobId,r.Name,e.State,e.CreatedAtUtc,e.CorrelationId
-              FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
+            WITH recent AS (
+                SELECT TOP(10) e.ExecutionId,e.JobId,r.Name,r.TemplateId,e.State,e.CreatedAtUtc,e.CorrelationId
+                  FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
+                 ORDER BY e.CreatedAtUtc DESC,e.ExecutionId DESC
+            ), attemptSummary AS (
+                SELECT a.ExecutionId,MIN(a.StartedAtUtc) AS StartedAtUtc,
+                       MAX(CASE WHEN a.AttemptNumber=lastAttempt.AttemptNumber THEN a.EndedAtUtc END) AS TerminalEndedAtUtc
+                  FROM recent e JOIN [workerdock].Attempts a ON a.ExecutionId=e.ExecutionId
+                  JOIN (SELECT a2.ExecutionId,MAX(a2.AttemptNumber) AS AttemptNumber FROM [workerdock].Attempts a2 JOIN recent s2 ON s2.ExecutionId=a2.ExecutionId GROUP BY a2.ExecutionId) lastAttempt
+                    ON lastAttempt.ExecutionId=a.ExecutionId
+                 GROUP BY a.ExecutionId
+            )
+            SELECT e.ExecutionId,e.JobId,e.Name,e.TemplateId,e.State,e.CreatedAtUtc,e.CorrelationId,
+                   a.StartedAtUtc,CASE WHEN e.State IN(N'Succeeded',N'Failed',N'TimedOut',N'Stopped',N'Skipped') AND a.StartedAtUtc IS NOT NULL AND a.TerminalEndedAtUtc IS NOT NULL
+                       THEN DATEDIFF_BIG(nanosecond,a.StartedAtUtc,a.TerminalEndedAtUtc)/100 END AS DurationTicks
+              FROM recent e LEFT JOIN attemptSummary a ON a.ExecutionId=e.ExecutionId
              ORDER BY e.CreatedAtUtc DESC,e.ExecutionId DESC;
             """;
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -52,7 +67,7 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         while (await reader.ReadAsync(ct)) upcomingItems.Add(new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), Utc(reader.GetDateTime(3)), "Scheduled"));
         await reader.NextResultAsync(ct);
         var recent = new List<RecentExecutionDto>();
-        while (await reader.ReadAsync(ct)) recent.Add(new(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), Utc(reader.GetDateTime(4)), reader.GetGuid(5)));
+        while (await reader.ReadAsync(ct)) recent.Add(new(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(4), Utc(reader.GetDateTime(5)), reader.GetGuid(6), reader.GetString(3), reader.IsDBNull(8) ? null : TimeSpan.FromTicks(reader.GetInt64(8))));
         var overall = runtimeReady && heartbeat >= observed.AddSeconds(-30) ? "Healthy" : "Degraded";
         return new(instanceId, observed, overall, queued, running, review, succeeded, failed, longRunning, upcoming, runtimeReady, hostCeiling, heartbeat, upcomingItems, recent);
     }
@@ -86,6 +101,67 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
             while (await reader.ReadAsync(ct)) items.Add(new(reader.GetGuid(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetBoolean(5), reader.GetBoolean(6), reader.GetBoolean(7), reader.GetBoolean(8), reader.GetInt32(9), reader.GetInt32(10), Utc(reader.GetDateTime(11))));
         var hasMore = items.Count > page.Limit; if (hasMore) items.RemoveAt(items.Count - 1);
         return new(items, hasMore ? EncodeCursor(items[^1].CreatedAtUtc, items[^1].JobId) : null);
+    }
+
+    public async ValueTask<Page<ExecutionHistoryItemDto>> ExecutionsAsync(ExecutionHistoryFilter filter, PageRequest page, CancellationToken ct)
+    {
+        ValidateExecutionHistory(filter, page);
+        var filterKey = ExecutionHistoryFilterKey(filter);
+        var cursor = HistoryCursorCodec.Decode(page.Cursor, options.InstanceId, "execution-history", filterKey);
+        await using var connection = await OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            WITH selected AS (
+                SELECT TOP(@take) e.ExecutionId,e.JobId,r.Name,r.TemplateId,e.State,e.TriggerKind,e.CreatedAtUtc
+                  FROM [workerdock].Executions e
+                  JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
+                 WHERE e.CreatedAtUtc>=@from AND e.CreatedAtUtc<=@to
+                   AND (@search IS NULL OR r.Name LIKE @nameSearch ESCAPE N'\' OR CONVERT(nvarchar(36),e.ExecutionId)=@search)
+                   AND (@state IS NULL OR e.State=@state)
+                   AND (@template IS NULL OR r.TemplateId=@template)
+                   AND (@cursorTime IS NULL OR e.CreatedAtUtc<@cursorTime OR (e.CreatedAtUtc=@cursorTime AND e.ExecutionId<@cursorId))
+                 ORDER BY e.CreatedAtUtc DESC,e.ExecutionId DESC
+            ), attemptSummary AS (
+                SELECT a.ExecutionId,MIN(a.StartedAtUtc) AS StartedAtUtc,
+                       MAX(CASE WHEN a.AttemptNumber=lastAttempt.AttemptNumber THEN a.EndedAtUtc END) AS TerminalEndedAtUtc
+                  FROM selected e JOIN [workerdock].Attempts a ON a.ExecutionId=e.ExecutionId
+                  JOIN (SELECT a2.ExecutionId,MAX(a2.AttemptNumber) AS AttemptNumber FROM [workerdock].Attempts a2 JOIN selected s2 ON s2.ExecutionId=a2.ExecutionId GROUP BY a2.ExecutionId) lastAttempt
+                    ON lastAttempt.ExecutionId=a.ExecutionId
+                 GROUP BY a.ExecutionId
+            )
+            SELECT e.ExecutionId,e.JobId,e.Name,e.TemplateId,e.State,e.TriggerKind,e.CreatedAtUtc,
+                   a.StartedAtUtc,CASE WHEN e.State IN(N'Succeeded',N'Failed',N'TimedOut',N'Stopped',N'Skipped') AND a.StartedAtUtc IS NOT NULL AND a.TerminalEndedAtUtc IS NOT NULL
+                       THEN DATEDIFF_BIG(nanosecond,a.StartedAtUtc,a.TerminalEndedAtUtc)/100 END AS DurationTicks
+              FROM selected e LEFT JOIN attemptSummary a ON a.ExecutionId=e.ExecutionId
+             ORDER BY e.CreatedAtUtc DESC,e.ExecutionId DESC;
+            """;
+        var escapedSearch = filter.Search?.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal).Replace("[", "\\[", StringComparison.Ordinal);
+        Add(command, "@take", SqlDbType.Int, page.Limit + 1);
+        Add(command, "@from", SqlDbType.DateTime2, filter.FromUtc.UtcDateTime);
+        Add(command, "@to", SqlDbType.DateTime2, filter.ToUtc.UtcDateTime);
+        Add(command, "@search", SqlDbType.NVarChar, (object?)filter.Search ?? DBNull.Value, 100);
+        Add(command, "@nameSearch", SqlDbType.NVarChar, escapedSearch is null ? DBNull.Value : "%" + escapedSearch + "%", 204);
+        Add(command, "@state", SqlDbType.NVarChar, (object?)filter.State ?? DBNull.Value, 20);
+        Add(command, "@template", SqlDbType.NVarChar, (object?)filter.TemplateId ?? DBNull.Value, 100);
+        Add(command, "@cursorTime", SqlDbType.DateTime2, cursor is null ? DBNull.Value : cursor.Time.UtcDateTime);
+        Add(command, "@cursorId", SqlDbType.UniqueIdentifier, cursor?.Id ?? (object)DBNull.Value);
+        var items = new List<ExecutionHistoryItemDto>();
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                var state = reader.GetString(4);
+                var started = NullableUtc(reader, 7);
+                TimeSpan? duration = !reader.IsDBNull(8) ? TimeSpan.FromTicks(reader.GetInt64(8)) : null;
+                items.Add(new(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), state,
+                    reader.GetString(5), Utc(reader.GetDateTime(6)), started, duration));
+            }
+        }
+        var hasMore = items.Count > page.Limit;
+        if (hasMore) items.RemoveAt(items.Count - 1);
+        var nextCursor = hasMore ? HistoryCursorCodec.Encode(options.InstanceId, "execution-history", filterKey,
+            items[^1].CreatedAtUtc.ToUniversalTime(), items[^1].ExecutionId) : null;
+        return new(items, nextCursor);
     }
 
     public async ValueTask<ExecutionDetailsDto> ExecutionAsync(Guid executionId, CancellationToken ct)
@@ -185,6 +261,26 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         await using var command = connection.CreateCommand(); command.CommandText = "SELECT SYSUTCDATETIME()";
         return Utc((DateTime)(await command.ExecuteScalarAsync(ct))!);
     }
+
+    private static readonly string[] ExecutionStates = ["Queued", "Running", "RetryWaiting", "NeedsReview", "Succeeded", "Failed", "TimedOut", "Stopped", "Skipped"];
+
+    private static void ValidateExecutionHistory(ExecutionHistoryFilter filter, PageRequest page)
+    {
+        if (page.Limit is < 1 or > 100 ||
+            filter.ToUtc < filter.FromUtc || filter.ToUtc - filter.FromUtc > MaxRange ||
+            filter.Search is { Length: > 100 } || filter.TemplateId is { Length: > 100 } ||
+            filter.State is not null && !ExecutionStates.Contains(filter.State, StringComparer.Ordinal))
+            throw new WorkerDockException("ValidationFailed");
+    }
+
+    private static string ExecutionHistoryFilterKey(ExecutionHistoryFilter filter) => JsonSerializer.Serialize(new
+    {
+        fromUtc = filter.FromUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+        toUtc = filter.ToUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+        search = filter.Search,
+        state = filter.State,
+        templateId = filter.TemplateId
+    });
 
     private static void Validate(MonitoringFilter filter, PageRequest page)
     {

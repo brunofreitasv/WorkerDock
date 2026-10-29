@@ -17,6 +17,9 @@ public sealed class MonitoringAccessTests
         await using var host = new AccessHost(issuer, "Manager");
         using var client = host.Client();
         await issuer.SignIn(client);
+        var session = await client.GetFromJsonAsync<SessionView>("/api/session");
+        Assert.True(session!.CanRead);
+        Assert.False(session.CanManage);
 
         using var badJobsPage = await client.GetAsync("/api/monitoring/jobs?limit=101");
         Assert.Equal(HttpStatusCode.BadRequest, badJobsPage.StatusCode);
@@ -24,6 +27,18 @@ public sealed class MonitoringAccessTests
         Assert.Equal(HttpStatusCode.BadRequest, badAuditRange.StatusCode);
         using var invalidDate = await client.GetAsync("/api/monitoring/jobs?fromUtc=not-a-date");
         Assert.Equal(HttpStatusCode.BadRequest, invalidDate.StatusCode);
+        using var history = await client.GetAsync("/api/monitoring/executions");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, history.StatusCode);
+        using var invalidHistoryState = await client.GetAsync("/api/monitoring/executions?state=Enabled");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidHistoryState.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/jobs/{Guid.NewGuid()}/executions")).StatusCode);
+        var csrf = await client.GetFromJsonAsync<CsrfView>("/api/antiforgery");
+        using var mutationRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/jobs/{Guid.NewGuid()}/enable-manual");
+        mutationRequest.Headers.TryAddWithoutValidation("If-Match", "\"AAAAAAAAAAA=\"");
+        mutationRequest.Headers.Add("X-WorkerDock-CSRF", csrf!.RequestToken);
+        mutationRequest.Headers.Add("Origin", "https://localhost");
+        using var forbiddenMutation = await client.SendAsync(mutationRequest);
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenMutation.StatusCode);
         using var dashboard = await client.GetAsync("/api/dashboard");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, dashboard.StatusCode);
         Assert.DoesNotContain("ConfigurationJson", await dashboard.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);

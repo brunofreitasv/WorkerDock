@@ -330,6 +330,7 @@ internal sealed class UnavailableMonitoringQueries(Guid instanceId, TimeProvider
     private static ValueTask<T> Unavailable<T>() => ValueTask.FromException<T>(new WorkerDockException("PersistenceUnavailable"));
     public ValueTask<DashboardDto> DashboardAsync(CancellationToken ct) => Unavailable<DashboardDto>();
     public ValueTask<Page<JobSummaryDto>> JobsAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<JobSummaryDto>>();
+    public ValueTask<Page<ExecutionHistoryItemDto>> ExecutionsAsync(ExecutionHistoryFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<ExecutionHistoryItemDto>>();
     public ValueTask<ExecutionDetailsDto> ExecutionAsync(Guid executionId, CancellationToken ct) => Unavailable<ExecutionDetailsDto>();
     public ValueTask<Page<AuditSummaryDto>> AuditAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<AuditSummaryDto>>();
     public ValueTask<RuntimeStatusDto> WorkersAsync(CancellationToken ct) => Unavailable<RuntimeStatusDto>();
