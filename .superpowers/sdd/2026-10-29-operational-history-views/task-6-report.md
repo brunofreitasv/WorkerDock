@@ -14,3 +14,9 @@ Added focused UI tests, SQL integration tests, and EN/pt-BR alert history help. 
 ## Scope note
 
 The worktree had unrelated pre-existing edits in `App.tsx` and `Program.cs`. Only the alert prop hunk in `App.tsx` and unavailable `IAlertQueries` adapter hunk in `Program.cs` are part of Task 6; other hunks must remain unstaged.
+
+## Review fix round 1
+
+- Active incident period is now explicit and visible. The period control remains displayed for every incident state; Active starts with its period checkbox off and sends no date bounds. Selecting a period enables the checkbox, switching state preserves the selected range, and unchecking it clears the Active bounds. Focused UI coverage verifies default-unbounded, enable, preset change, state switch/retention, and clear behavior.
+- Added a SQL boundary test proving active rows use `LastObservedAtUtc`, resolved rows use the later of `LastObservedAtUtc` and `ResolvedAtUtc`, and `toUtc` is exclusive. The .NET test project compiled with isolated output; all three SQL tests are blocked at fixture construction because `WORKERDOCK_TEST_SQL` is unset. The two unrelated malformed test files were restored byte-for-byte and SHA256 verified.
+- Verification: focused alert UI 23/23 passed; frontend center and tenant builds passed with the existing Vite chunk-size advisory; serial alerts E2E passed 2/2 after the review fix.

@@ -43,6 +43,42 @@ public sealed class AlertHistorySqlTests
     }
 
     [Fact]
+    public async Task Incident_period_uses_latest_observation_or_resolution_activity_with_exclusive_end()
+    {
+        await using var database = new SqlDatabaseFixture();
+        await database.CreateAsync(false);
+        await database.ApplyLatestSchemaAsync();
+        var sink = Guid.NewGuid(); var revision = Guid.NewGuid(); var rule = Guid.NewGuid();
+        await SeedRuleAsync(database, sink, revision, rule);
+
+        var now = DateTimeOffset.UtcNow;
+        var from = now.AddDays(-3); var to = now.AddDays(-1);
+        var activeInside = Guid.NewGuid(); var activeOutside = Guid.NewGuid();
+        var resolvedByResolution = Guid.NewGuid(); var resolvedByObservation = Guid.NewGuid(); var resolvedAtEnd = Guid.NewGuid();
+        static string SqlTime(DateTimeOffset value) => value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffffff", System.Globalization.CultureInfo.InvariantCulture);
+        await database.ExecuteAsync($$"""
+            INSERT [workerdock].AlertIncidents(IncidentId,RuleId,SubjectKey,Condition,State,OpenedAtUtc,LastObservedAtUtc,ResolvedAtUtc) VALUES
+            ('{{activeInside}}','{{rule}}',N'job:active-inside',N'Timeout',N'Open','{{SqlTime(from.AddDays(-10))}}','{{SqlTime(now.AddDays(-2))}}',NULL),
+            ('{{activeOutside}}','{{rule}}',N'job:active-outside',N'Timeout',N'Unknown','{{SqlTime(now.AddDays(-5))}}','{{SqlTime(now.AddDays(-4))}}',NULL),
+            ('{{resolvedByResolution}}','{{rule}}',N'job:resolved-by-resolution',N'Timeout',N'Resolved','{{SqlTime(now.AddDays(-10))}}','{{SqlTime(now.AddDays(-9))}}','{{SqlTime(now.AddDays(-2))}}'),
+            ('{{resolvedByObservation}}','{{rule}}',N'job:resolved-by-observation',N'Timeout',N'Resolved','{{SqlTime(now.AddDays(-10))}}','{{SqlTime(now.AddDays(-2))}}','{{SqlTime(now.AddDays(-4))}}'),
+            ('{{resolvedAtEnd}}','{{rule}}',N'job:resolved-at-end',N'Timeout',N'Resolved','{{SqlTime(now.AddDays(-10))}}','{{SqlTime(now.AddDays(-2))}}','{{SqlTime(to)}}');
+            """);
+
+        var query = new SqlAlertQueries(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId));
+        var all = await query.IncidentsAsync(new(from, to, "All", null), new(null, 100), default);
+        var ids = all.Items.Select(item => item.IncidentId).ToArray();
+        Assert.Contains(activeInside, ids);
+        Assert.DoesNotContain(activeOutside, ids);
+        Assert.Contains(resolvedByResolution, ids);
+        Assert.Contains(resolvedByObservation, ids);
+        Assert.DoesNotContain(resolvedAtEnd, ids);
+
+        var active = await query.IncidentsAsync(new(from, to, "Active", null), new(null, 100), default);
+        Assert.Equal(new[] { activeInside }, active.Items.Select(item => item.IncidentId));
+    }
+
+    [Fact]
     public async Task Deliveries_page_independently_and_include_safe_incident_context()
     {
         await using var database = new SqlDatabaseFixture();

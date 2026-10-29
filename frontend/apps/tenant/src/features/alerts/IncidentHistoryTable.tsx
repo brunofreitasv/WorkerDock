@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Button, Checkbox, FormControlLabel, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { read } from "../../api/client";
 import { CursorPager } from "../monitoring/CursorPager";
 import { PeriodControl } from "../monitoring/PeriodControl";
@@ -20,14 +20,14 @@ export function IncidentHistoryTable({ language, timeZone }: { language: string;
   const [state, setState] = useState("Active");
   const [ruleId, setRuleId] = useState("");
   const [period, setPeriod] = useState<HistoryPeriod>({ kind: "30d" });
-  const [periodChosen, setPeriodChosen] = useState(false);
+  const [activePeriodEnabled, setActivePeriodEnabled] = useState(false);
   const [anchor, setAnchor] = useState(() => new Date());
   const [cursor, setCursor] = useState(""); const [previous, setPrevious] = useState<string[]>([]); const [refreshSequence, setRefreshSequence] = useState(0);
   const [rules, setRules] = useState<RuleOption[]>([]);
   useEffect(() => { let active = true; void read<MonitoringPage<RuleOption>>("/api/alerts/rule-options?limit=100").then(x => { if (active) setRules(x.data.items); }).catch(() => undefined); return () => { active = false; }; }, []);
   const range = useMemo(() => toUtcRange(period, timeZone, anchor, 90), [period, timeZone, anchor]);
   const params = new URLSearchParams({ limit: "50", state });
-  if (state !== "Active" || periodChosen) { params.set("fromUtc", range.fromUtc); params.set("toUtc", range.toUtc); }
+  if (state !== "Active" || activePeriodEnabled) { params.set("fromUtc", range.fromUtc); params.set("toUtc", range.toUtc); }
   if (ruleId) params.set("ruleId", ruleId);
   if (cursor) params.set("cursor", cursor);
   const url = `/api/alerts/incidents?${params.toString()}`;
@@ -35,7 +35,8 @@ export function IncidentHistoryTable({ language, timeZone }: { language: string;
     () => read<MonitoringPage<Incident>>(url).then(x => x.data), `${url}:${refreshSequence}`,
   );
   const reset = () => { setCursor(""); setPrevious([]); };
-  const changePeriod = (value: HistoryPeriod) => { setPeriod(value); setPeriodChosen(true); setAnchor(new Date()); reset(); };
+  const changePeriod = (value: HistoryPeriod) => { setPeriod(value); setActivePeriodEnabled(true); setAnchor(new Date()); reset(); };
+  const toggleActivePeriod = (enabled: boolean) => { setActivePeriodEnabled(enabled); setAnchor(new Date()); reset(); };
   const restart = () => { setAnchor(new Date()); reset(); setRefreshSequence(x => x + 1); };
   const stateLabel = (value: string) => value === "Active" ? label("Open and unknown", "Abertos e desconhecidos") : value === "Resolved" ? label("Resolved", "Resolvidos") : label("All incidents", "Todos os incidentes");
   const displayState = (value: string) => value === "Open" ? label("Open", "Aberto") : value === "Unknown" ? label("Unknown", "Desconhecido") : label("Resolved", "Resolvido");
@@ -44,9 +45,11 @@ export function IncidentHistoryTable({ language, timeZone }: { language: string;
     <Stack spacing={2}>
       <Typography component="h2" variant="h6">{label("Incidents", "Incidentes")}</Typography>
       <Stack spacing={1}>
-        {state !== "Active" && <PeriodControl value={period} timeZone={timeZone} maxDays={90} language={pt ? "pt-BR" : "en"} onChange={changePeriod} />}
+        <PeriodControl value={period} timeZone={timeZone} maxDays={90} language={pt ? "pt-BR" : "en"} onChange={changePeriod} />
+        {state === "Active" && <FormControlLabel control={<Checkbox checked={activePeriodEnabled} onChange={event => toggleActivePeriod(event.target.checked)} />}
+          label={label("Filter active incidents by period", "Filtrar incidentes ativos por período")} />}
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-          <TextField select label={label("Incident state", "Estado do incidente")} value={state} onChange={event => { setState(event.target.value); setAnchor(new Date()); reset(); }}>
+          <TextField select label={label("Incident state", "Estado do incidente")} value={state} onChange={event => { setState(event.target.value); reset(); }}>
             {["Active", "All", "Resolved"].map(value => <MenuItem key={value} value={value}>{stateLabel(value)}</MenuItem>)}
           </TextField>
           <TextField select label={label("Incident rule", "Regra do incidente")} value={ruleId} onChange={event => { setRuleId(event.target.value); reset(); }}>

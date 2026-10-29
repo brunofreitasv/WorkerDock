@@ -39,6 +39,33 @@ test("active incidents include old open items and do not apply a date bound by d
   expect(initial.searchParams.get("state")).toBe("Active");
   expect(initial.searchParams.has("fromUtc")).toBe(false);
   expect(initial.searchParams.has("toUtc")).toBe(false);
+  expect(screen.getByRole("checkbox", { name: "Filter active incidents by period" })).not.toBeChecked();
+});
+
+test("active incident period can be enabled, changed, retained visibly, and cleared", async () => {
+  const calls = stubPages();
+  const user = userEvent.setup();
+  render(<IncidentHistoryTable language="en" timeZone="UTC" />);
+  await screen.findByRole("table", { name: "Incidents" });
+  const enabled = screen.getByRole("checkbox", { name: "Filter active incidents by period" });
+  await user.click(enabled);
+  await waitFor(() => expect(calls.at(-1)?.searchParams.has("fromUtc")).toBe(true));
+  expect(screen.getByRole("checkbox", { name: "Filter active incidents by period" })).toBeChecked();
+
+  await user.click(screen.getByRole("button", { name: "Last 7 days" }));
+  await waitFor(() => expect(calls.at(-1)?.searchParams.get("fromUtc")).not.toBeNull());
+  const selectedRange = calls.at(-1)!.searchParams.get("fromUtc");
+  const state = screen.getByRole("combobox", { name: "Incident state" });
+  await user.click(state);
+  await user.click(await screen.findByRole("option", { name: "Resolved" }));
+  await user.click(state);
+  await user.click(await screen.findByRole("option", { name: "Open and unknown" }));
+  await waitFor(() => expect(calls.at(-1)?.searchParams.get("fromUtc")).toBe(selectedRange));
+  expect(screen.getByRole("checkbox", { name: "Filter active incidents by period" })).toBeChecked();
+
+  await user.click(screen.getByRole("checkbox", { name: "Filter active incidents by period" }));
+  await waitFor(() => expect(calls.at(-1)?.searchParams.has("fromUtc")).toBe(false));
+  expect(screen.getByRole("checkbox", { name: "Filter active incidents by period" })).not.toBeChecked();
 });
 
 test("incident state and rule filters restart paging and query the server", async () => {
