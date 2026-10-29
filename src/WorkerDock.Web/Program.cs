@@ -42,9 +42,7 @@ builder.Services.TryAddSingleton<TenantSqlStartup>();
 builder.Services.TryAddSingleton<IScheduleEvaluator, FiveFieldScheduleEvaluator>();
 var trustedTemplates = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
 {
-    new SqlTemplate("1.0.0").Descriptor,
     new SqlTemplate("1.1.0").Descriptor,
-    HttpTemplateDescriptors.Get("1.0.0"),
     HttpTemplateDescriptors.Get("1.1.0")
 };
 builder.Services.TryAddSingleton<ITemplateAuthoringService>(_ => BuiltInAuthoringValidators.Create());
@@ -185,6 +183,8 @@ builder.Services.TryAddSingleton<IRetentionService>(provider =>
 });
 var app = builder.Build();
 await app.Services.GetRequiredService<TenantSqlStartup>().InitializeAsync(app.Lifetime.ApplicationStopping);
+if (app.Configuration["Tenant:Adapter"] != "Memory")
+    await app.Services.GetRequiredService<ITemplateCatalog>().RegisterAsync(trustedTemplates, app.Lifetime.ApplicationStopping);
 var access = app.Services.GetRequiredService<AccessOptions>();
 if (!access.AuthenticationConfigured)
     app.Services.GetRequiredService<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>().RemoveScheme("oidc");
@@ -226,7 +226,7 @@ app.MapGet("/api/settings", async (HttpResponse response, ITenantSettingsService
         return Results.Ok(new { settings.DisplayName, settings.DisplayTimeZone, Version = Convert.ToBase64String(settings.Version) });
     }
     catch { return SafeProblem(503, "PersistenceUnavailable"); }
-}).RequireAuthorization(AccessPolicies.Manage);
+}).RequireAuthorization(AccessPolicies.Read);
 
 app.MapPut("/api/settings", async (HttpRequest request, SettingsUpdate input, ITenantSettingsService service, CancellationToken ct) =>
 {

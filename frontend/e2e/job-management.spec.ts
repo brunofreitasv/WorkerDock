@@ -177,7 +177,7 @@ test("guided create, stale edit, lifecycle, duplicate, retry and confirmed force
 test("viewer has no configuration or management controls", async ({ page }) => {
   await page.route("**/api/session", route => route.fulfill({ json: { authenticated: true, canRead: true, canManage: false, mode: "RoleProtected", language: "en", timeZone: "UTC" } }));
   await page.goto("/#/monitoring");
-  await expect(page.getByRole("heading", { name: "Monitoring" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Job monitoring" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Jobs" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /run now|duplicate|disable|archive/i })).toHaveCount(0);
   await expect(page.getByLabel(/configuration/i)).toHaveCount(0);

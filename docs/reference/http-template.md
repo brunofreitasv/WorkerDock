@@ -1,6 +1,6 @@
 # HTTP template
 
-`workerdock.http` version `1.0.0` is installed explicitly by both Worker and Executor from the same package descriptor. The package depends only on Contracts. Worker registers its descriptor with the catalog; Executor creates the handler through `ValidatedConnectionFactory` and the deployment outbound policy.
+`workerdock.http` version `1.1.0` is the sole supported built-in HTTP template. Worker and Executor use the same immutable descriptor. Worker registers it with the catalog; Executor creates the handler through `ValidatedConnectionFactory` and the deployment outbound policy.
 
 The configuration is bounded and uses camelCase properties: `method`, `url`, `query`, `headers`, `secretHeaders`, `parameters`, `contentType`, `body`, `timeoutSeconds`, `successStatuses`, `idempotencyHeader`, `maxResponseBytes` and `responseMode`. Methods are GET, POST, PUT, PATCH, DELETE and HEAD. URL length is at most 2 KiB; body at most 64 KiB; query keys/values, ordinary headers and parameters are bounded; response bodies are limited to 2 MiB. Empty `successStatuses` means 200–299. `SafeSummary` is the default response mode and retains only status, elapsed milliseconds and byte count. `Discard` returns an empty summary. Neither mode stores or returns response text.
 

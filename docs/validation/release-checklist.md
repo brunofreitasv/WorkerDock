@@ -6,7 +6,7 @@ Use this checklist for a candidate release. A checked source build or portable s
 
 - [ ] Select a version and record the operator-selected build and deployment process.
 - [ ] Build from a clean, reviewed source checkout using locked dependencies; record the selected tooling and artifact inventory.
-- [ ] Record artifact SHA-256 values and the `0001_initial` manifest checksums. Verify the target tenant database is new and empty before baseline installation.
+- [ ] Record artifact SHA-256 values and all tenant migration checksums, including `0001_initial` and `0002_template_catalog_registration`. Verify the target database follows the documented fresh-install or `0002` patch path.
 - [ ] Verify SQL Server 2022+ and compatibility level 160 using a disposable tenant database; record SQL checks as unverified if `WORKERDOCK_TEST_SQL` is unavailable.
 - [ ] Confirm packages and deployment examples contain no secrets or customer data.
 - [ ] Review third-party licenses/notices and include required attribution in distributed artifacts.

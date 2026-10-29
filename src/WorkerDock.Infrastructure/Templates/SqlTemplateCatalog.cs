@@ -1,5 +1,7 @@
 using System.Data;
 using System.Data.Common;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
@@ -37,20 +39,25 @@ public sealed class SqlTemplateCatalog(TenantDatabaseOptions options,IReadOnlyLi
                     var priorDigest=exists?reader.GetString(0):null;
                     var missingDescriptor=exists && reader.IsDBNull(1);
                     await reader.CloseAsync();
-                    if(exists && !TemplateMetadata.IsBootstrapPlaceholder(d.Id,d.Version,priorDigest!,missingDescriptor))
+                    var bootstrapDigest=BootstrapDigest(d.Id,d.Version);
+                    var promotePlaceholder=exists && missingDescriptor && bootstrapDigest is not null && priorDigest==bootstrapDigest;
+                    if(exists && !missingDescriptor)
                     {
-                        if(priorDigest!=d.MetadataDigest || missingDescriptor) throw new WorkerDockException("MetadataVersionConflict");
+                        if(priorDigest!=d.MetadataDigest) throw new WorkerDockException("MetadataVersionConflict");
                         continue;
                     }
+                    if(exists && !promotePlaceholder) throw new WorkerDockException("MetadataVersionConflict");
                     await using var write=Query(c,t,exists?"""
                         UPDATE [workerdock].TemplateCatalog SET MetadataDigest=@digest,DescriptorJson=@json
-                        WHERE TemplateId=@id AND TemplateVersion=@version;
+                        WHERE TemplateId=@id AND TemplateVersion=@version AND DescriptorJson IS NULL AND MetadataDigest=@placeholderDigest;
+                        IF @@ROWCOUNT<>1 THROW 51021,'MetadataVersionConflict',1;
                         """:"""
                         INSERT [workerdock].TemplateCatalog(TemplateId,TemplateVersion,MetadataDigest,DescriptorJson,Enabled,Retired)
                         VALUES(@id,@version,@digest,@json,1,0);
                         """);
                     Add(write,"@id",SqlDbType.NVarChar,d.Id,100); Add(write,"@version",SqlDbType.NVarChar,d.Version,40);
                     Add(write,"@digest",SqlDbType.Char,d.MetadataDigest,64); Add(write,"@json",SqlDbType.NVarChar,JsonSerializer.Serialize(d));
+                    if(exists) Add(write,"@placeholderDigest",SqlDbType.Char,bootstrapDigest!,64);
                     await write.ExecuteNonQueryAsync(token);
                 }
                 return TemplateMetadata.AggregateDigest(prepared);
@@ -58,6 +65,11 @@ public sealed class SqlTemplateCatalog(TenantDatabaseOptions options,IReadOnlyLi
         }
         catch(SqlException e) when(e.Number==51021) { throw new WorkerDockException("MetadataVersionConflict"); }
         catch(SqlException) { throw new WorkerDockException("PersistenceUnavailable"); }
+    }
+    private static string? BootstrapDigest(string id,string version)
+    {
+        if(version is not ("1.0.0" or "1.1.0") || id is not ("workerdock.http" or "workerdock.sql-server")) return null;
+        return Convert.ToHexString(SHA256.HashData(Encoding.Unicode.GetBytes(id+"|"+version)));
     }
     public async ValueTask<IReadOnlyList<TemplateDescriptor>> ListAsync(CancellationToken ct) => await ReadAsync(null,null,ct);
     public async ValueTask<TemplateDescriptor?> GetAsync(string id,string version,CancellationToken ct) => (await ReadAsync(id,version,ct)).SingleOrDefault();

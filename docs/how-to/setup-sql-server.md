@@ -7,7 +7,7 @@ WorkerDock tenant databases require SQL Server 2022 or newer with database compa
 ```mermaid
 flowchart LR
     Operator["Operator chooses a preparation path"]
-    Manifest["0001_initial fresh-install baseline"] --> MigrationScript["Explicit target via Invoke-TenantMigration.ps1"]
+    Manifest["0001_initial + 0002_template_catalog_registration"] --> MigrationScript["Explicit target via Invoke-TenantMigration.ps1"]
     Snapshot["Fresh-only current-state.sql snapshot"]
     Operator --> MigrationScript
     Operator --> Snapshot
@@ -20,11 +20,13 @@ flowchart LR
     end
 ```
 
-For a new tenant database, apply the single checksummed `0001_initial` baseline using
-`scripts/Invoke-TenantMigration.ps1`, or apply
+For a new tenant database, apply the checksummed manifest through
+`0002_template_catalog_registration` using `scripts/Invoke-TenantMigration.ps1`, or apply
 `database/tenant/current-state.sql` to a fresh empty database. Both create the
-same final schema. Neither is an upgrade path; no tenant databases are deployed
-and no upgrade converter is provided. The `tests/sql` scripts create only
+same final schema. Migration `0002` lets the Web host promote the two built-in
+catalog placeholders to their trusted descriptors. The snapshot already
+includes that state. The baseline and snapshot do not convert older tenant
+schemas. The `tests/sql` scripts create only
 fixture objects in generated disposable databases; never apply them to a
 runtime tenant. SQL behavior remains unverified until run against a disposable
 SQL Server 2022+ instance.
@@ -96,14 +98,12 @@ $assemblyDirectory = (Resolve-Path 'src/WorkerDock.Web/bin/Release/net10.0').Pat
   -Action Apply `
   -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 -Database '<TENANT_DATABASE>' `
   -Credential $credential -RuntimePrincipal '<TENANT_DATABASE_USER>' -InitialSetup `
-  -TargetMigration '0001_initial' `
+  -TargetMigration '0002_template_catalog_registration' `
   -ScriptsRoot (Resolve-Path 'database').Path `
   -AssemblyDirectory $assemblyDirectory
 ```
 
-The manifest contains only `0001_initial`. The script verifies its checksum,
-schema history, server version, compatibility level, existing runtime database
-user, and stable tenant instance ID. Save the GUID printed after a successful
+The manifest contains the `0001_initial` baseline and `0002_template_catalog_registration` patch. The script verifies every checksum, schema history, server version, compatibility level, existing runtime database user, and stable tenant instance ID. Save the GUID printed after a successful
 initial setup and use it for `Tenant:InstanceId` in Web and runtime
 configuration. For an already initialized tenant, supply that same GUID with
 `-InstanceId` instead of `-InitialSetup`. Keep the migration identity separate

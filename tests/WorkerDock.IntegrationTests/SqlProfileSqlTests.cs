@@ -12,7 +12,7 @@ public sealed partial class SqlProfileTests
     [InlineData(true)]
     public async Task Restricted_profile_revisions_pin_and_diagnostics_are_durable(bool snapshot)
     {
-        await using var f=new TenantSqlFixture();await f.CreateAsync(snapshot);await f.Runner.ApplyAsync("tenant","0001_initial",default);
+        await using var f=new TenantSqlFixture();await f.CreateAsync(snapshot);await f.Runner.ApplyAsync("tenant","0002_template_catalog_registration",default);
         var options=new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(f.RuntimeConnectionString,f.Database.InstanceId);
         var store=new SqlConnectionProfiles(options);var proposed=SqlTemplateTests.Profile();await store.SaveAsync(proposed,null,Actor,default);var first=await store.GetCurrentAsync(proposed.ProfileId,default);
         await store.SaveAsync(proposed with { Server="rotated" },first.Version,Actor,default);var current=await store.GetCurrentAsync(proposed.ProfileId,default);
@@ -21,8 +21,7 @@ public sealed partial class SqlProfileTests
         var descriptor=new SqlTemplate().Descriptor;await new SqlTemplateCatalog(options,[descriptor]).RegisterAsync([descriptor],default);
         var receipt=await new SqlProfileDiagnostics(options).StartAsync(proposed.ProfileId,"Target",Actor,default);
         Assert.Equal("Pending",receipt.State);
-        Assert.Equal(1,await f.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision WHERE e.ExecutionId='{receipt.TargetId}' AND e.TriggerKind=N'Diagnostic' AND e.ProfileRevisionId='{current.Current.ProfileRevisionId}' AND r.TemplateId=N'workerdock.sql-server' AND JSON_VALUE(r.PolicyJson,'$.Timeout')=N'00:00:30' AND JSON_VALUE(r.ConfigurationJson,'$.commandText')=N'SELECT 1'"));
-        Assert.Equal(1,await f.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Outbox WHERE EntityId='{receipt.TargetId}' AND EventType=N'ExecutionDispatch'"));
+        Assert.Equal(1,await f.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision WHERE e.ExecutionId='{receipt.TargetId}' AND e.TriggerKind=N'Diagnostic' AND e.ProfileRevisionId='{current.Current.ProfileRevisionId}' AND r.TemplateId=N'workerdock.sql-server' AND r.TemplateVersion=N'1.1.0' AND JSON_VALUE(r.PolicyJson,'$.Timeout')=N'00:00:30' AND JSON_VALUE(r.ConfigurationJson,'$.commandText')=N'SELECT 1'"));
         await store.RetireAsync(proposed.ProfileId,current.Version,Actor,default);Assert.Empty(await store.ListAsync(default));
         Assert.Equal(proposed.Server,(await store.GetRevisionAsync(first.Current.ProfileRevisionId,default)).Server);
         await Assert.ThrowsAsync<WorkerDockException>(async()=>await new SqlProfileDiagnostics(options).StartAsync(proposed.ProfileId,"Target",Actor,default));

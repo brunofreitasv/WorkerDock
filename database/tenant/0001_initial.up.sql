@@ -527,7 +527,7 @@ CREATE TABLE [workerdock].ArchiveBatches
     BatchId uniqueidentifier NOT NULL CONSTRAINT PK_ArchiveBatches PRIMARY KEY,
     RelativePath nvarchar(500) NOT NULL,
     Sha256 char(64) NOT NULL,
-    RowCount bigint NOT NULL,
+    [RowCount] bigint NOT NULL,
     EligibleThroughUtc datetime2(7) NOT NULL,
     LogCutoffUtc datetime2(7) NOT NULL,
     State nvarchar(16) NOT NULL,
@@ -538,7 +538,7 @@ CREATE TABLE [workerdock].ArchiveBatches
     CONSTRAINT UQ_ArchiveBatches_Path UNIQUE(RelativePath),
     CONSTRAINT CK_ArchiveBatches_Path CHECK(LEN(RelativePath)>0 AND LEFT(RelativePath,1)<>N'/' AND RelativePath NOT LIKE N'%..%'),
     CONSTRAINT CK_ArchiveBatches_Checksum CHECK(LEN(Sha256)=64 AND Sha256 NOT LIKE '%[^0-9A-Fa-f]%'),
-    CONSTRAINT CK_ArchiveBatches_Rows CHECK(RowCount>=0 AND PurgedRowCount BETWEEN 0 AND RowCount),
+    CONSTRAINT CK_ArchiveBatches_Rows CHECK([RowCount]>=0 AND PurgedRowCount BETWEEN 0 AND [RowCount]),
     CONSTRAINT CK_ArchiveBatches_State CHECK((State=N'Writing' AND FinalizedAtUtc IS NULL) OR (State=N'Finalized' AND FinalizedAtUtc IS NOT NULL AND FinalizedAtUtc>=CreatedAtUtc) OR (State=N'Failed' AND FinalizedAtUtc IS NULL))
 );
 GO
@@ -599,17 +599,17 @@ BEGIN
           (
               SELECT 1 FROM inserted i
               WHERE i.BatchId=d.BatchId AND d.ArchiveRemovedAtUtc IS NULL AND i.ArchiveRemovedAtUtc IS NOT NULL
-                AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.RowCount=d.RowCount
+                AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.[RowCount]=d.[RowCount]
                 AND i.EligibleThroughUtc=d.EligibleThroughUtc AND i.LogCutoffUtc=d.LogCutoffUtc
                 AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
-                AND i.PurgedRowCount>=d.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
+                AND i.PurgedRowCount>=d.PurgedRowCount AND i.PurgedRowCount<=i.[RowCount]
                 AND USER_NAME()=N'dbo' AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId
           )
           AND NOT EXISTS
           (
               SELECT 1 FROM inserted i
-              WHERE i.BatchId=d.BatchId AND d.PurgedRowCount<i.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
-                AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.RowCount=d.RowCount
+              WHERE i.BatchId=d.BatchId AND d.PurgedRowCount<i.PurgedRowCount AND i.PurgedRowCount<=i.[RowCount]
+                AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.[RowCount]=d.[RowCount]
                 AND i.EligibleThroughUtc=d.EligibleThroughUtc AND i.LogCutoffUtc=d.LogCutoffUtc
                 AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
                 AND (i.ArchiveRemovedAtUtc IS NULL AND d.ArchiveRemovedAtUtc IS NULL OR i.ArchiveRemovedAtUtc=d.ArchiveRemovedAtUtc)
@@ -626,13 +626,13 @@ BEGIN
         SELECT 1 FROM inserted i JOIN deleted d ON d.BatchId=i.BatchId
         WHERE d.State=N'Finalized'
           AND NOT ((d.ArchiveRemovedAtUtc IS NULL AND i.ArchiveRemovedAtUtc IS NOT NULL
-              AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.RowCount=d.RowCount
+              AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.[RowCount]=d.[RowCount]
               AND i.EligibleThroughUtc=d.EligibleThroughUtc AND i.LogCutoffUtc=d.LogCutoffUtc
               AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
-              AND i.PurgedRowCount>=d.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
+              AND i.PurgedRowCount>=d.PurgedRowCount AND i.PurgedRowCount<=i.[RowCount]
               AND USER_NAME()=N'dbo' AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId)
-            OR ((d.ArchiveRemovedAtUtc IS NULL AND i.ArchiveRemovedAtUtc IS NULL OR d.ArchiveRemovedAtUtc=i.ArchiveRemovedAtUtc) AND d.PurgedRowCount<i.PurgedRowCount AND i.PurgedRowCount<=i.RowCount
-              AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.RowCount=d.RowCount
+            OR ((d.ArchiveRemovedAtUtc IS NULL AND i.ArchiveRemovedAtUtc IS NULL OR d.ArchiveRemovedAtUtc=i.ArchiveRemovedAtUtc) AND d.PurgedRowCount<i.PurgedRowCount AND i.PurgedRowCount<=i.[RowCount]
+              AND i.RelativePath=d.RelativePath AND i.Sha256=d.Sha256 AND i.[RowCount]=d.[RowCount]
               AND i.EligibleThroughUtc=d.EligibleThroughUtc AND i.LogCutoffUtc=d.LogCutoffUtc
               AND i.State=d.State AND i.CreatedAtUtc=d.CreatedAtUtc AND i.FinalizedAtUtc=d.FinalizedAtUtc
               AND TRY_CONVERT(uniqueidentifier,SESSION_CONTEXT(N'WDArchivePurgeBatchId'))=d.BatchId))
@@ -642,7 +642,7 @@ BEGIN
         SELECT 1 FROM inserted i JOIN deleted d ON d.BatchId=i.BatchId
         WHERE d.ArchiveRemovedAtUtc IS NOT NULL AND (i.ArchiveRemovedAtUtc IS NULL OR i.ArchiveRemovedAtUtc<>d.ArchiveRemovedAtUtc)
     ) THROW 51046,'Archive expiry can be marked only once',1;
-    IF EXISTS(SELECT 1 FROM inserted b WHERE b.State=N'Finalized' AND b.RowCount<>(SELECT COUNT_BIG(*) FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=b.BatchId))
+    IF EXISTS(SELECT 1 FROM inserted b WHERE b.State=N'Finalized' AND b.[RowCount]<>(SELECT COUNT_BIG(*) FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=b.BatchId))
         THROW 51036,'Archive row count must match its staged items',1;
 END;
 GO
@@ -669,6 +669,145 @@ BEGIN
     IF USER_NAME() <> N'dbo'
         THROW 51001, 'Audit events are append-only', 1;
 END;
+GO
+-- 0013_operational_retention
+ALTER TABLE [workerdock].TenantSettings ADD
+    LogRetentionDays int NOT NULL CONSTRAINT DF_TenantSettings_LogRetentionDays DEFAULT(30),
+    ExecutionRetentionDays int NOT NULL CONSTRAINT DF_TenantSettings_ExecutionRetentionDays DEFAULT(90),
+    AuditRetentionDays int NOT NULL CONSTRAINT DF_TenantSettings_AuditRetentionDays DEFAULT(365),
+    ArchiveBeforeDelete bit NOT NULL CONSTRAINT DF_TenantSettings_ArchiveBeforeDelete DEFAULT(0),
+    ArchiveRetentionDays int NOT NULL CONSTRAINT DF_TenantSettings_ArchiveRetentionDays DEFAULT(0),
+    RetentionVersion bigint NOT NULL CONSTRAINT DF_TenantSettings_RetentionVersion DEFAULT(1);
+GO
+ALTER TABLE [workerdock].TenantSettings ADD CONSTRAINT CK_TenantSettings_Retention CHECK
+    (LogRetentionDays BETWEEN 1 AND 3650 AND ExecutionRetentionDays BETWEEN 1 AND 3650 AND AuditRetentionDays BETWEEN 1 AND 3650
+     AND ArchiveRetentionDays BETWEEN 0 AND 3650 AND RetentionVersion>0 AND (ArchiveBeforeDelete=0 OR ArchiveRetentionDays>0));
+GO
+ALTER TABLE [workerdock].Executions ADD ManualRequestExpiresAtUtc datetime2(7) NULL;
+GO
+GO
+-- 0009_dynamic_values
+ALTER TABLE [workerdock].JobRevisions ADD DynamicValuesJson nvarchar(max) NULL;
+GO
+ALTER TABLE [workerdock].JobRevisions ADD CONSTRAINT CK_JobRevisions_DynamicValuesJson CHECK (DynamicValuesJson IS NULL OR ISJSON(DynamicValuesJson)=1);
+
+ALTER TABLE [workerdock].Executions ADD
+    ValueContextJson nvarchar(max) NULL,
+    FirstStartedAtUtc datetime2(7) NULL,
+    ValueSnapshotJson nvarchar(max) NULL,
+    ValueResolutionError nvarchar(80) NULL;
+GO
+ALTER TABLE [workerdock].Executions ADD CONSTRAINT CK_Executions_ValueContextJson CHECK (ValueContextJson IS NULL OR ISJSON(ValueContextJson)=1);
+ALTER TABLE [workerdock].Executions ADD CONSTRAINT CK_Executions_ValueSnapshotJson CHECK (ValueSnapshotJson IS NULL OR ISJSON(ValueSnapshotJson)=1);
+ALTER TABLE [workerdock].Executions ADD CONSTRAINT CK_Executions_ValueSnapshotError CHECK (ValueSnapshotJson IS NULL OR ValueResolutionError IS NULL);
+
+GO
+CREATE TRIGGER [workerdock].Executions_ValueStateImmutable ON [workerdock].Executions AFTER UPDATE AS
+BEGIN
+    SET NOCOUNT ON;
+    IF EXISTS (
+        SELECT 1 FROM inserted i JOIN deleted d ON d.ExecutionId=i.ExecutionId
+        WHERE (d.ValueContextJson IS NOT NULL AND (i.ValueContextJson IS NULL OR CONVERT(varbinary(max),i.ValueContextJson)<>CONVERT(varbinary(max),d.ValueContextJson)))
+           OR (d.FirstStartedAtUtc IS NOT NULL AND (i.FirstStartedAtUtc IS NULL OR i.FirstStartedAtUtc<>d.FirstStartedAtUtc))
+           OR (d.ValueSnapshotJson IS NOT NULL AND (i.ValueSnapshotJson IS NULL OR CONVERT(varbinary(max),i.ValueSnapshotJson)<>CONVERT(varbinary(max),d.ValueSnapshotJson)))
+           OR (d.ValueResolutionError IS NOT NULL AND (i.ValueResolutionError IS NULL OR CONVERT(varbinary(max),i.ValueResolutionError)<>CONVERT(varbinary(max),d.ValueResolutionError)))
+    ) THROW 51061, 'Execution value state is immutable once populated', 1;
+END;
+GO
+
+GO
+-- 0010_remove_builtin_v1
+DISABLE TRIGGER [workerdock].JobRevisions_Immutable ON [workerdock].JobRevisions;
+DISABLE TRIGGER [workerdock].TemplateCatalog_Immutable ON [workerdock].TemplateCatalog;
+
+UPDATE [workerdock].JobRevisions
+SET TemplateVersion=N'1.1.0'
+WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server');
+
+
+DELETE FROM [workerdock].TemplateCatalog
+WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server');
+
+ENABLE TRIGGER [workerdock].JobRevisions_Immutable ON [workerdock].JobRevisions;
+ENABLE TRIGGER [workerdock].TemplateCatalog_Immutable ON [workerdock].TemplateCatalog;
+
+IF EXISTS(SELECT 1 FROM [workerdock].JobRevisions WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server'))
+    THROW 51003,'LegacyTemplateRevisionRemains',1;
+IF EXISTS(SELECT 1 FROM [workerdock].TemplateCatalog WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server'))
+    THROW 51003,'LegacyTemplateCatalogRemains',1;
+
+GO
+-- 0011_single_node_transition
+CREATE TABLE [workerdock].RuntimeStatus (
+    StateId tinyint NOT NULL CONSTRAINT PK_RuntimeStatus PRIMARY KEY,
+    BootId uniqueidentifier NULL,
+    Ready bit NOT NULL,
+    HostCeiling int NOT NULL,
+    LastHeartbeatUtc datetime2(7) NULL,
+    CONSTRAINT CK_RuntimeStatus_SingleRow CHECK (StateId=1),
+    CONSTRAINT CK_RuntimeStatus_HostCeiling CHECK (HostCeiling BETWEEN 1 AND 1000)
+);
+INSERT [workerdock].RuntimeStatus(StateId,BootId,Ready,HostCeiling,LastHeartbeatUtc) VALUES(1,NULL,0,1,NULL);
+
+GO
+-- 0012_execution_manual_dedup
+ALTER TABLE [workerdock].Executions ADD
+    ManualActorScopeHash char(64) NULL,
+    ManualRequestKeyHash char(64) NULL,
+    ManualActorMode nvarchar(40) NULL,
+    ManualActorSubject nvarchar(300) NULL,
+    ManualRequestHash char(64) NULL,
+    ManualCommandId uniqueidentifier NULL,
+    ManualResponseState nvarchar(20) NULL,
+    HoldsJobSlot bit NOT NULL CONSTRAINT DF_Executions_HoldsJobSlot DEFAULT(0);
+ALTER TABLE [workerdock].TemplateCatalog ADD ConcurrencyLimit int NOT NULL CONSTRAINT DF_TemplateCatalog_ConcurrencyLimit DEFAULT(1);
+ALTER TABLE [workerdock].IntegrationSettings ADD EgressPoliciesJson nvarchar(max) NOT NULL CONSTRAINT DF_IntegrationSettings_EgressPolicies DEFAULT(N'[]');
+GO
+UPDATE settings SET EgressPoliciesJson=(SELECT p.Name AS [name],p.Revision AS [revision],JSON_QUERY(p.HostsJson) AS [hosts],JSON_QUERY(p.PortsJson) AS [ports],
+    JSON_QUERY(p.PrivateCidrsJson) AS [privateCidrs],p.AllowHttp AS [allowHttp] FROM [workerdock].TenantEgressPolicies p ORDER BY p.Name FOR JSON PATH)
+FROM [workerdock].IntegrationSettings settings WHERE settings.SettingsId=1;
+
+CREATE UNIQUE INDEX UX_Executions_ManualRequest ON [workerdock].Executions(JobId,ManualActorScopeHash,ManualRequestKeyHash)
+    WHERE ManualActorScopeHash IS NOT NULL AND ManualRequestKeyHash IS NOT NULL;
+DROP TABLE [workerdock].TenantEgressPolicies;
+
+GO
+
+ALTER TABLE [workerdock].AlertRules ADD LastEvaluatedAtUtc datetime2(7) NULL,LastSubjectKey nvarchar(256) NULL;
+CREATE TABLE [workerdock].OperationalEvents
+(
+    EventId uniqueidentifier NOT NULL CONSTRAINT PK_OperationalEvents PRIMARY KEY,
+    EventKind nvarchar(24) NOT NULL,
+    ExecutionId uniqueidentifier NULL,
+    AttemptId uniqueidentifier NULL,
+    AttemptScopeId AS ISNULL(AttemptId,CONVERT(uniqueidentifier,'00000000-0000-0000-0000-000000000000')) PERSISTED,
+    Source nvarchar(20) NULL,
+    Sequence bigint NULL,
+    AtUtc datetime2(7) NOT NULL,
+    Code nvarchar(80) NOT NULL,
+    SafeFieldsJson nvarchar(2048) NOT NULL CONSTRAINT DF_OperationalEvents_Fields DEFAULT(N'{}'),
+    ScheduleId uniqueidentifier NULL,
+    ScheduleRevision bigint NULL,
+    FromUtc datetime2(7) NULL,
+    ThroughUtc datetime2(7) NULL,
+    Policy nvarchar(16) NULL,
+    CreatedExecutions int NULL,
+    ExactMissedCount bigint NULL,
+    SkippedOccurrences bigint NULL,
+    CONSTRAINT CK_OperationalEvents_Kind CHECK
+    ((EventKind=N'Execution' AND ExecutionId IS NOT NULL AND Source IN(N'Lifecycle',N'Supervisor',N'Handler') AND Sequence>=0
+       AND ScheduleId IS NULL AND ScheduleRevision IS NULL AND FromUtc IS NULL AND ThroughUtc IS NULL AND Policy IS NULL)
+     OR (EventKind=N'ScheduleRecovery' AND ExecutionId IS NULL AND AttemptId IS NULL AND Source IS NULL AND Sequence IS NULL
+       AND ScheduleId IS NOT NULL AND ScheduleRevision>0 AND FromUtc IS NOT NULL AND ThroughUtc>=FromUtc
+       AND Policy IN(N'Skip',N'Coalesce',N'CatchUp') AND CreatedExecutions>=0 AND (ExactMissedCount IS NULL OR ExactMissedCount>=0) AND SkippedOccurrences>=0)),
+    CONSTRAINT CK_OperationalEvents_Json CHECK(ISJSON(SafeFieldsJson)=1),
+    CONSTRAINT CK_OperationalEvents_Code CHECK(LEN(Code)>0)
+);
+CREATE INDEX IX_OperationalEvents_ExecutionPage ON [workerdock].OperationalEvents(EventKind,ExecutionId,AtUtc,EventId)
+    INCLUDE(AttemptId,Source,Sequence,Code,SafeFieldsJson);
+CREATE INDEX IX_OperationalEvents_Recovery ON [workerdock].OperationalEvents(EventKind,ScheduleId,AtUtc)
+    INCLUDE(FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount,SkippedOccurrences);
+GO
 GO
 CREATE PROCEDURE [workerdock].PurgeAuditEvents
     @CutoffUtc datetime2(7),
@@ -811,7 +950,7 @@ BEGIN
     IF @ArchiveDays IS NULL OR @AuditDays IS NULL THROW 51040,'Retention policy is missing',1;
     IF @FinalizedBeforeUtc>SYSUTCDATETIME() OR @AuditCutoffUtc>DATEADD(day,-@AuditDays,SYSUTCDATETIME())
         THROW 51050,'Archive or audit cutoff is newer than configured retention permits',1;
-    SELECT @FinalizedAtUtc=FinalizedAtUtc,@RowCount=RowCount,@PurgedRowCount=PurgedRowCount,@ArchiveRemovedAtUtc=ArchiveRemovedAtUtc
+    SELECT @FinalizedAtUtc=FinalizedAtUtc,@RowCount=[RowCount],@PurgedRowCount=PurgedRowCount,@ArchiveRemovedAtUtc=ArchiveRemovedAtUtc
       FROM [workerdock].ArchiveBatches WITH(UPDLOCK,HOLDLOCK)
       WHERE BatchId=@BatchId AND State=N'Finalized' AND FinalizedAtUtc IS NOT NULL;
     IF @FinalizedAtUtc IS NULL OR @FinalizedAtUtc>=@FinalizedBeforeUtc OR @FinalizedAtUtc>DATEADD(day,-@ArchiveDays,SYSUTCDATETIME())
@@ -838,139 +977,6 @@ BEGIN
     EXEC sys.sp_set_session_context @key=N'WDArchivePurgeBatchId',@value=NULL;
     COMMIT TRANSACTION;
 END;
-GO
-
-GO
--- 0009_dynamic_values
-ALTER TABLE [workerdock].JobRevisions ADD DynamicValuesJson nvarchar(max) NULL;
-ALTER TABLE [workerdock].JobRevisions ADD CONSTRAINT CK_JobRevisions_DynamicValuesJson CHECK (DynamicValuesJson IS NULL OR ISJSON(DynamicValuesJson)=1);
-
-ALTER TABLE [workerdock].Executions ADD
-    ValueContextJson nvarchar(max) NULL,
-    FirstStartedAtUtc datetime2(7) NULL,
-    ValueSnapshotJson nvarchar(max) NULL,
-    ValueResolutionError nvarchar(80) NULL;
-ALTER TABLE [workerdock].Executions ADD CONSTRAINT CK_Executions_ValueContextJson CHECK (ValueContextJson IS NULL OR ISJSON(ValueContextJson)=1);
-ALTER TABLE [workerdock].Executions ADD CONSTRAINT CK_Executions_ValueSnapshotJson CHECK (ValueSnapshotJson IS NULL OR ISJSON(ValueSnapshotJson)=1);
-ALTER TABLE [workerdock].Executions ADD CONSTRAINT CK_Executions_ValueSnapshotError CHECK (ValueSnapshotJson IS NULL OR ValueResolutionError IS NULL);
-
-GO
-CREATE TRIGGER [workerdock].Executions_ValueStateImmutable ON [workerdock].Executions AFTER UPDATE AS
-BEGIN
-    SET NOCOUNT ON;
-    IF EXISTS (
-        SELECT 1 FROM inserted i JOIN deleted d ON d.ExecutionId=i.ExecutionId
-        WHERE (d.ValueContextJson IS NOT NULL AND (i.ValueContextJson IS NULL OR CONVERT(varbinary(max),i.ValueContextJson)<>CONVERT(varbinary(max),d.ValueContextJson)))
-           OR (d.FirstStartedAtUtc IS NOT NULL AND (i.FirstStartedAtUtc IS NULL OR i.FirstStartedAtUtc<>d.FirstStartedAtUtc))
-           OR (d.ValueSnapshotJson IS NOT NULL AND (i.ValueSnapshotJson IS NULL OR CONVERT(varbinary(max),i.ValueSnapshotJson)<>CONVERT(varbinary(max),d.ValueSnapshotJson)))
-           OR (d.ValueResolutionError IS NOT NULL AND (i.ValueResolutionError IS NULL OR CONVERT(varbinary(max),i.ValueResolutionError)<>CONVERT(varbinary(max),d.ValueResolutionError)))
-    ) THROW 51061, 'Execution value state is immutable once populated', 1;
-END;
-GO
-
-GO
--- 0010_remove_builtin_v1
-DISABLE TRIGGER [workerdock].JobRevisions_Immutable ON [workerdock].JobRevisions;
-DISABLE TRIGGER [workerdock].TemplateCatalog_Immutable ON [workerdock].TemplateCatalog;
-
-UPDATE [workerdock].JobRevisions
-SET TemplateVersion=N'1.1.0'
-WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server');
-
-
-DELETE FROM [workerdock].TemplateCatalog
-WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server');
-
-ENABLE TRIGGER [workerdock].JobRevisions_Immutable ON [workerdock].JobRevisions;
-ENABLE TRIGGER [workerdock].TemplateCatalog_Immutable ON [workerdock].TemplateCatalog;
-
-IF EXISTS(SELECT 1 FROM [workerdock].JobRevisions WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server'))
-    THROW 51003,'LegacyTemplateRevisionRemains',1;
-IF EXISTS(SELECT 1 FROM [workerdock].TemplateCatalog WHERE TemplateVersion=N'1.0.0' AND TemplateId IN(N'workerdock.http',N'workerdock.sql-server'))
-    THROW 51003,'LegacyTemplateCatalogRemains',1;
-
-GO
--- 0011_single_node_transition
-CREATE TABLE [workerdock].RuntimeStatus (
-    StateId tinyint NOT NULL CONSTRAINT PK_RuntimeStatus PRIMARY KEY,
-    BootId uniqueidentifier NULL,
-    Ready bit NOT NULL,
-    HostCeiling int NOT NULL,
-    LastHeartbeatUtc datetime2(7) NULL,
-    CONSTRAINT CK_RuntimeStatus_SingleRow CHECK (StateId=1),
-    CONSTRAINT CK_RuntimeStatus_HostCeiling CHECK (HostCeiling BETWEEN 1 AND 1000)
-);
-INSERT [workerdock].RuntimeStatus(StateId,BootId,Ready,HostCeiling,LastHeartbeatUtc) VALUES(1,NULL,0,1,NULL);
-
-GO
--- 0012_execution_manual_dedup
-ALTER TABLE [workerdock].Executions ADD
-    ManualActorScopeHash char(64) NULL,
-    ManualRequestKeyHash char(64) NULL,
-    ManualActorMode nvarchar(40) NULL,
-    ManualActorSubject nvarchar(300) NULL,
-    ManualRequestHash char(64) NULL,
-    ManualCommandId uniqueidentifier NULL,
-    ManualResponseState nvarchar(20) NULL,
-    ManualRequestExpiresAtUtc datetime2(7) NULL,
-    HoldsJobSlot bit NOT NULL CONSTRAINT DF_Executions_HoldsJobSlot DEFAULT(0);
-ALTER TABLE [workerdock].TemplateCatalog ADD ConcurrencyLimit int NOT NULL CONSTRAINT DF_TemplateCatalog_ConcurrencyLimit DEFAULT(1);
-ALTER TABLE [workerdock].IntegrationSettings ADD EgressPoliciesJson nvarchar(max) NOT NULL CONSTRAINT DF_IntegrationSettings_EgressPolicies DEFAULT(N'[]');
-UPDATE settings SET EgressPoliciesJson=(SELECT p.Name AS [name],p.Revision AS [revision],JSON_QUERY(p.HostsJson) AS [hosts],JSON_QUERY(p.PortsJson) AS [ports],
-    JSON_QUERY(p.PrivateCidrsJson) AS [privateCidrs],p.AllowHttp AS [allowHttp] FROM [workerdock].TenantEgressPolicies p ORDER BY p.Name FOR JSON PATH)
-FROM [workerdock].IntegrationSettings settings WHERE settings.SettingsId=1;
-
-CREATE UNIQUE INDEX UX_Executions_ManualRequest ON [workerdock].Executions(JobId,ManualActorScopeHash,ManualRequestKeyHash)
-    WHERE ManualActorScopeHash IS NOT NULL AND ManualRequestKeyHash IS NOT NULL;
-DROP TABLE [workerdock].TenantEgressPolicies;
-
-GO
--- 0013_operational_retention
-ALTER TABLE [workerdock].TenantSettings ADD
-    LogRetentionDays int NOT NULL CONSTRAINT DF_TenantSettings_LogRetentionDays DEFAULT(30),
-    ExecutionRetentionDays int NOT NULL CONSTRAINT DF_TenantSettings_ExecutionRetentionDays DEFAULT(90),
-    AuditRetentionDays int NOT NULL CONSTRAINT DF_TenantSettings_AuditRetentionDays DEFAULT(365),
-    ArchiveBeforeDelete bit NOT NULL CONSTRAINT DF_TenantSettings_ArchiveBeforeDelete DEFAULT(0),
-    ArchiveRetentionDays int NOT NULL CONSTRAINT DF_TenantSettings_ArchiveRetentionDays DEFAULT(0),
-    RetentionVersion bigint NOT NULL CONSTRAINT DF_TenantSettings_RetentionVersion DEFAULT(1);
-ALTER TABLE [workerdock].TenantSettings ADD CONSTRAINT CK_TenantSettings_Retention CHECK
-    (LogRetentionDays BETWEEN 1 AND 3650 AND ExecutionRetentionDays BETWEEN 1 AND 3650 AND AuditRetentionDays BETWEEN 1 AND 3650
-     AND ArchiveRetentionDays BETWEEN 0 AND 3650 AND RetentionVersion>0 AND (ArchiveBeforeDelete=0 OR ArchiveRetentionDays>0));
-
-ALTER TABLE [workerdock].AlertRules ADD LastEvaluatedAtUtc datetime2(7) NULL,LastSubjectKey nvarchar(256) NULL;
-CREATE TABLE [workerdock].OperationalEvents
-(
-    EventId uniqueidentifier NOT NULL CONSTRAINT PK_OperationalEvents PRIMARY KEY,
-    EventKind nvarchar(24) NOT NULL,
-    ExecutionId uniqueidentifier NULL,
-    AttemptId uniqueidentifier NULL,
-    AttemptScopeId AS ISNULL(AttemptId,CONVERT(uniqueidentifier,'00000000-0000-0000-0000-000000000000')) PERSISTED,
-    Source nvarchar(20) NULL,
-    Sequence bigint NULL,
-    AtUtc datetime2(7) NOT NULL,
-    Code nvarchar(80) NOT NULL,
-    SafeFieldsJson nvarchar(2048) NOT NULL CONSTRAINT DF_OperationalEvents_Fields DEFAULT(N'{}'),
-    ScheduleId uniqueidentifier NULL,
-    ScheduleRevision bigint NULL,
-    FromUtc datetime2(7) NULL,
-    ThroughUtc datetime2(7) NULL,
-    Policy nvarchar(16) NULL,
-    CreatedExecutions int NULL,
-    ExactMissedCount bigint NULL,
-    SkippedOccurrences bigint NULL,
-    CONSTRAINT CK_OperationalEvents_Kind CHECK
-    ((EventKind=N'Execution' AND ExecutionId IS NOT NULL AND Source IN(N'Lifecycle',N'Supervisor',N'Handler') AND Sequence>=0
-       AND ScheduleId IS NULL AND ScheduleRevision IS NULL AND FromUtc IS NULL AND ThroughUtc IS NULL AND Policy IS NULL)
-     OR (EventKind=N'ScheduleRecovery' AND ExecutionId IS NULL AND AttemptId IS NULL AND Source IS NULL AND Sequence IS NULL
-       AND ScheduleId IS NOT NULL AND ScheduleRevision>0 AND FromUtc IS NOT NULL AND ThroughUtc>=FromUtc
-       AND Policy IN(N'Skip',N'Coalesce',N'CatchUp') AND CreatedExecutions>=0 AND (ExactMissedCount IS NULL OR ExactMissedCount>=0) AND SkippedOccurrences>=0)),
-    CONSTRAINT CK_OperationalEvents_Json CHECK(ISJSON(SafeFieldsJson)=1),
-    CONSTRAINT CK_OperationalEvents_Code CHECK(LEN(Code)>0)
-);
-CREATE INDEX IX_OperationalEvents_ExecutionPage ON [workerdock].OperationalEvents(EventKind,ExecutionId,AtUtc,EventId)
-    INCLUDE(AttemptId,Source,Sequence,Code,SafeFieldsJson);
-CREATE INDEX IX_OperationalEvents_Recovery ON [workerdock].OperationalEvents(EventKind,ScheduleId,AtUtc)
-    INCLUDE(FromUtc,ThroughUtc,Policy,CreatedExecutions,ExactMissedCount,SkippedOccurrences);
 GO
 CREATE PROCEDURE [workerdock].PurgeOperationalEvents
     @LogCutoffUtc datetime2(7),@MaxRows int,@BatchId uniqueidentifier=NULL,@PurgedRows int OUTPUT

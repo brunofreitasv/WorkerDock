@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -7,7 +7,6 @@ import {
   CssBaseline,
   Paper,
   Stack,
-  TextField,
   ThemeProvider,
   Typography,
   createTheme,
@@ -15,11 +14,10 @@ import {
 import {
   AppShell,
   usePreferences,
-  timeZones,
-  type Labels,
+  type NavigationGroup,
 } from "@workerdock/ui";
 import { useSession } from "./auth/SessionProvider";
-import { ApiError, mutate, read, signOut } from "./api/client";
+import { signOut } from "./api/client";
 import { VaultSettingsPage } from "./features/settings/VaultSettingsPage";
 import { OutboundPolicyPage } from "./features/settings/OutboundPolicyPage";
 import { ManualJobEditor } from "./features/jobs/ManualJobEditor";
@@ -34,6 +32,9 @@ import { AlertRulesPage } from "./features/alerts/AlertRulesPage";
 import RetentionPage from "./features/settings/RetentionPage";
 import { HelpPage } from "./help/HelpPage";
 import { helpTopics } from "./help/topics";
+import { useTenantSettings } from "./features/settings/useTenantSettings";
+import { TenantSettingsForm } from "./features/settings/TenantSettingsForm";
+import { PersonalSettings } from "./features/settings/PersonalSettings";
 const theme = createTheme({
   palette: {
     primary: { main: "#0b6c61", dark: "#064f47", light: "#dff2ed" },
@@ -52,137 +53,16 @@ function routeFromHash(hash: string): string {
   return hash.slice(2) || "dashboard";
 }
 
-interface Settings {
-  displayName: string;
-  displayTimeZone: string;
-  version: string;
-}
-function SettingsForm({ t }: { t: Labels }) {
-  const [settings, setSettings] = useState<Settings>();
-  const [etag, setEtag] = useState<string>();
-  const [name, setName] = useState("");
-  const [zone, setZone] = useState("UTC");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
-  const [invalid, setInvalid] = useState(false);
-  const load = () => {
-    setError("");
-    void read<Settings>("/api/settings")
-      .then((result) => {
-        setSettings(result.data);
-        setEtag(result.etag ?? undefined);
-        setName(result.data.displayName);
-        setZone(result.data.displayTimeZone);
-      })
-      .catch(() => setError(t.requestError));
-  };
-  useEffect(load, [t]);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setSaved(false);
-    setInvalid(true);
-    if (!name.trim() || name.length > 200 || !timeZones.includes(zone)) return;
-    setBusy(true);
-    setError("");
-    try {
-      const updated = await mutate<Settings>(
-        "/api/settings",
-        "PUT",
-        { displayName: name, displayTimeZone: zone },
-        etag,
-      );
-      setSettings(updated);
-      setEtag('"' + updated.version + '"');
-      setSaved(true);
-      setInvalid(false);
-    } catch (error) {
-      setError(
-        error instanceof ApiError && error.status === 412
-          ? t.stale
-          : t.requestError,
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Paper variant="outlined" sx={{ p: 3, maxWidth: 620 }}>
-      {error && (
-        <Alert
-          severity="error"
-          action={
-            <Button color="inherit" onClick={load}>
-              {t.reload}
-            </Button>
-          }
-          sx={{ mb: 2 }}
-        >
-          {error}
-        </Alert>
-      )}
-      {saved && (
-        <Alert severity="success" sx={{ mb: 2 }}>
-          {t.saved}
-        </Alert>
-      )}
-      {!settings && !error ? (
-        <CircularProgress aria-label={t.loading} />
-      ) : (
-        <Box component="form" onSubmit={submit} noValidate>
-          <Stack spacing={3}>
-            <TextField
-              label={t.displayName}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              error={invalid && (!name.trim() || name.length > 200)}
-              helperText={
-                invalid && (!name.trim() || name.length > 200)
-                  ? t.requiredName
-                  : undefined
-              }
-              required
-              fullWidth
-            />
-            <TextField
-              label={t.displayTimeZone}
-              value={zone}
-              onChange={(e) => setZone(e.target.value)}
-              error={invalid && !timeZones.includes(zone)}
-              helperText={
-                invalid && !timeZones.includes(zone) ? t.invalidZone : undefined
-              }
-              select
-              slotProps={{ select: { native: true } }}
-            >
-              {timeZones.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </TextField>
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={busy || !settings || !etag}
-              sx={{ alignSelf: "flex-start" }}
-            >
-              {busy ? t.loading : t.save}
-            </Button>
-          </Stack>
-        </Box>
-      )}
-    </Paper>
-  );
-}
 export default function App() {
   const { session, loading, error, retry } = useSession();
   const preferences = usePreferences(session?.timeZone);
   const { t } = preferences;
+  const tenantSettings = useTenantSettings(Boolean(session?.canRead));
+  const displayName = tenantSettings.current?.data.displayName || "WorkerDock";
   const [active, setActive] = useState(
     () => routeFromHash(window.location.hash),
   );
-  const [settingsTab, setSettingsTab] = useState("general");
+  const [settingsTab, setSettingsTab] = useState("personal");
   const [catalogItem, setCatalogItem] = useState<CatalogItem>();
   const [actionError, setActionError] = useState(false);
   useEffect(() => {
@@ -195,25 +75,31 @@ export default function App() {
     setActive(route);
     window.history.replaceState(null, "", "#/" + route);
   };
-  const navigation = session?.canRead
-    ? [
-        { id: "dashboard", label: t.dashboard },
-        { id: "help", label: t.help },
-        { id: "monitoring", label: t.monitoring },
-        { id: "workers", label: preferences.language === "pt-BR" ? "Workers" : "Workers" },
-        { id: "audit", label: t.audit },
-        { id: "alerts", label: t.alerts },
-        { id: "templates", label: t.templates },
-        ...(session.canManage ? [{ id: "jobs", label: t.jobs }] : []),
-        ...(session.canManage ? [{ id: "settings", label: t.settings }] : []),
-      ]
-    : [];
+  const navigation: NavigationGroup[] = session?.canRead ? [
+    { id: "monitoring", label: t.navMonitoring, items: [
+      { id: "dashboard", label: t.dashboard },
+      { id: "monitoring", label: t.jobMonitoring },
+      { id: "workers", label: t.workers },
+      { id: "alerts", label: t.alerts },
+    ] },
+    { id: "maintenance", label: t.navMaintenance, items: [
+      ...(session.canManage ? [{ id: "jobs", label: t.jobs }] : []),
+      { id: "templates", label: t.templates },
+    ] },
+    { id: "administration", label: t.navAdministration, items: [
+      { id: "help", label: t.help },
+      { id: "audit", label: t.audit },
+      { id: "settings", label: t.settings },
+    ] },
+  ] : [];
+  const flatNavigation = navigation.flatMap((group) => group.items);
   const activePage = active.startsWith("help:") ? "help" : active;
+  const activeNavigation = activePage.startsWith("execution:") ? "monitoring" : activePage;
   const helpSlug = active.startsWith("help:") ? active.slice("help:".length) : undefined;
-  const title = activePage === "help"
+  const title = active.startsWith("execution:") ? "Execution details" : activePage === "help"
     ? helpTopics.find(topic => topic.slug === helpSlug)?.title[preferences.language] ?? t.help
-    : navigation.find((item) => item.id === activePage)?.label ??
-      (active === "settings" ? t.settings : active.startsWith("execution:") ? "Execution details" : t.dashboard);
+    : flatNavigation.find((item) => item.id === activeNavigation)?.label ??
+      (active === "settings" ? t.settings : t.dashboard);
   const contextualHelp = active === "dashboard" ? "dashboard"
     : active === "monitoring" || active.startsWith("execution:") ? "monitoring"
     : active === "workers" ? "workers"
@@ -225,6 +111,7 @@ export default function App() {
     : active === "settings" ? "settings"
     : undefined;
   const contextualTopic = helpTopics.find(topic => topic.slug === contextualHelp);
+  useEffect(() => { document.title = displayName; }, [displayName]);
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -248,11 +135,11 @@ export default function App() {
       ) : (
         <AppShell
           t={t}
+          displayName={displayName}
           navigation={navigation}
-          active={activePage}
+          active={activeNavigation}
           onNavigate={navigate}
           mode={session.mode}
-          canManage={session.canManage}
           authenticated={session.authenticated}
           onSignOut={() => {
             void signOut().catch(() => setActionError(true));
@@ -270,23 +157,27 @@ export default function App() {
           {session.canRead ? (
             <>
               {activePage === "help" ? <HelpPage language={preferences.language} slug={helpSlug} canManage={session.canManage} onNavigate={navigate} /> : active === "settings" ? (
-                session.canManage ? (
-                  <>
-                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 3 }}>
-                      <Button variant={settingsTab === "general" ? "contained" : "outlined"} onClick={() => setSettingsTab("general")}>{t.settings}</Button>
+                <>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 3, flexWrap: "wrap" }}>
+                    <Button variant={settingsTab === "personal" ? "contained" : "outlined"} onClick={() => setSettingsTab("personal")}>{t.personalSettings}</Button>
+                    {session.canManage && <>
+                      <Button variant={settingsTab === "general" ? "contained" : "outlined"} onClick={() => setSettingsTab("general")}>{t.tenantConfiguration}</Button>
                       <Button variant={settingsTab === "vault" ? "contained" : "outlined"} onClick={() => setSettingsTab("vault")}>{t.vaultSettings}</Button>
                       <Button variant={settingsTab === "outbound" ? "contained" : "outlined"} onClick={() => setSettingsTab("outbound")}>{t.outboundSettings}</Button>
                       <Button variant={settingsTab === "profiles" ? "contained" : "outlined"} onClick={() => setSettingsTab("profiles")}>{t.profiles}</Button>
-                      <Button variant={settingsTab === "retention" ? "contained" : "outlined"} onClick={() => setSettingsTab("retention")}>Retention</Button>
-                    </Stack>
-                    {settingsTab === "general" ? <SettingsForm t={t} /> : settingsTab === "vault" ? <VaultSettingsPage t={t} /> : settingsTab === "outbound" ? <OutboundPolicyPage t={t} /> : settingsTab === "profiles" ? <ProfileEditor /> : <RetentionPage />}
-                  </>
-                ) : (
-                  <Alert severity="error">{t.permission}</Alert>
-                )
+                      <Button variant={settingsTab === "retention" ? "contained" : "outlined"} onClick={() => setSettingsTab("retention")}>{t.retention}</Button>
+                    </>}
+                  </Stack>
+                  {settingsTab === "personal" || !session.canManage ? <PersonalSettings t={t} mode={session.mode} canManage={session.canManage} language={preferences.language} setLanguage={preferences.setLanguage} timeZone={preferences.timeZone} setTimeZone={preferences.setTimeZone} />
+                    : settingsTab === "general" ? <TenantSettingsForm t={t} current={tenantSettings.current} loading={tenantSettings.loading} error={tenantSettings.error} reload={tenantSettings.reload} acceptSave={tenantSettings.acceptSave} />
+                    : settingsTab === "vault" ? <VaultSettingsPage t={t} />
+                    : settingsTab === "outbound" ? <OutboundPolicyPage t={t} />
+                    : settingsTab === "profiles" ? <ProfileEditor />
+                    : <RetentionPage />}
+                </>
               ) : (
                 active === "jobs" ? (
-                  session.canManage ? <ManualJobEditor t={t} defaultZone={preferences.timeZone} language={preferences.language} setLanguage={preferences.setLanguage} /> : <Alert severity="error">{t.permission}</Alert>
+                  session.canManage ? <ManualJobEditor t={t} defaultZone={preferences.timeZone} /> : <Alert severity="error">{t.permission}</Alert>
                 ) : active === "templates" ? (
                   <Paper variant="outlined" sx={{ p: 3, mb: 3, maxWidth: 900 }}>
                     <Stack spacing={2}>
@@ -322,61 +213,6 @@ export default function App() {
                 </Paper>
                 )
               ))}
-              <Paper variant="outlined" sx={{ p: 3, mt: 3 }}>
-                <Typography component="h2" variant="h6" sx={{ mb: 1 }}>
-                  {t.preferences}
-                </Typography>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mb: 3 }}
-                >
-                  {t.localPreferences}
-                </Typography>
-                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                  <TextField
-                    select
-                    label={t.language}
-                    value={preferences.language}
-                    onChange={(e) =>
-                      preferences.setLanguage(
-                        e.target.value === "pt-BR" ? "pt-BR" : "en",
-                      )
-                    }
-                    slotProps={{ select: { native: true } }}
-                    sx={{ minWidth: 180 }}
-                  >
-                    <option value="en">English</option>
-                    <option value="pt-BR">Português (Brasil)</option>
-                  </TextField>
-                  <TextField
-                    select
-                    label={t.timeZone}
-                    value={preferences.timeZone}
-                    onChange={(e) => preferences.setTimeZone(e.target.value)}
-                    slotProps={{ select: { native: true } }}
-                    sx={{ minWidth: 200 }}
-                  >
-                    {timeZones.map((zone) => (
-                      <option key={zone} value={zone}>
-                        {zone}
-                      </option>
-                    ))}
-                  </TextField>
-                </Stack>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mt: 2 }}
-                >
-                  {t.updated}:{" "}
-                  {new Intl.DateTimeFormat(preferences.language, {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                    timeZone: preferences.timeZone,
-                  }).format(new Date())}
-                </Typography>
-              </Paper>
             </>
           ) : (
             <Alert severity="info" sx={{ mt: 3 }}>

@@ -6,7 +6,7 @@ Memory data is disposable and is lost when either process stops.
 
 ## Prerequisites
 
-- Windows, .NET SDK 10.0.402 (see `global.json`), and Node.js 24.15.0 or a
+- Windows, .NET SDK 10.0.402 or a newer patch in the same feature band (see `global.json`), and Node.js 24.15.0 or a
   compatible maintained Node release.
 - From the repository root, restore and build the UI:
 

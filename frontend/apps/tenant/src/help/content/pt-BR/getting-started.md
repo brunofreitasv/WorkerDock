@@ -8,13 +8,13 @@ Entre no seu tenant do WorkerDock. As páginas disponíveis dependem de a sua co
 
 ## Funções de acesso
 
-Qualquer pessoa com acesso de Leitura pode consultar o painel e os guias. Gerenciar tarefas e configurações do tenant exige acesso de Gerenciar.
+Qualquer pessoa com acesso Read pode consultar o painel e os guias e abrir as Configurações pessoais. Gerenciar tarefas e a configuração do tenant exige acesso Manage.
 
 ## Etapas
 
 1. Abra o [painel](#/dashboard) para consultar a atividade atual e as execuções recentes.
-2. Use a navegação do tenant para acessar monitoramento, tarefas e configurações permitidas pela sua função.
-3. Escolha **Português (Brasil)** ou **English** nas preferências de idioma para alterar o idioma da interface.
+2. Use os grupos Monitoramento, Manutenção e Administração para acessar as páginas permitidas pela sua função.
+3. Abra [Configurações](#/settings) para escolher **Português (Brasil)** ou **English** e seu fuso horário pessoal. O nome salvo do tenant aparece ao lado do logotipo e na aba do navegador.
 4. Gerentes podem abrir [tarefas](#/jobs) para criar e gerenciar trabalhos. Leitores podem consultar informações de tarefas e execuções quando disponíveis.
 
 ## Exemplo

@@ -1,14 +1,11 @@
+using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using WorkerDock.Contracts.Templates;
 namespace WorkerDock.Infrastructure.Templates;
 
 public static class TemplateMetadata
 {
-    public static bool IsBootstrapPlaceholder(string id,string version,string digest,bool missingDescriptor) =>
-        missingDescriptor && version=="1.0.0" && id is "workerdock.http" or "workerdock.sql-server" &&
-        digest==Convert.ToHexString(SHA256.HashData(Encoding.Unicode.GetBytes(id+"|"+version)));
     public static TemplateDescriptor WithDigest(TemplateDescriptor descriptor) => TemplateDescriptorMetadata.WithDigest(descriptor);
     public static string ComputeDigest(TemplateDescriptor descriptor) => TemplateDescriptorMetadata.ComputeDigest(descriptor);
     public static string AggregateDigest(IEnumerable<TemplateDescriptor> descriptors)

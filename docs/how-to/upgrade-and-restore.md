@@ -1,12 +1,12 @@
 # Upgrade and restore
 
-The tenant schema is installed only as a fresh database using `0001_initial`. No tenant databases are deployed and there is no upgrade converter. The application does not create or upgrade SQL objects at runtime. The Control Center stores persistent file state and does not migrate a database.
+Install the tenant schema on a fresh database with `0001_initial`, then apply `0002_template_catalog_registration`. The latter is a narrow metadata-trigger update and is safe to apply to a database already at `0001_initial`; it enables trusted built-in descriptors to populate `TemplateCatalog`. No tenant databases are deployed and there is no converter for schemas older than this baseline. The Web host does not create or upgrade SQL schema at runtime. The Control Center stores persistent file state and does not migrate a database.
 
 Fresh installations seed the SQL Server and HTTP built-in templates at version 1.1.0. Custom templates retain the versions installed by the deployment.
 
 ## Before an upgrade
 
-1. Read the release notes and confirm the target application version. Apply `0001_initial` only to a new, empty tenant database.
+1. Read the release notes and confirm the target application version. Apply the manifest through `0002_template_catalog_registration` to a new database, or apply `0002` to a database already at `0001_initial` before starting the release.
 2. For a tenant, use your backup process to back up the target SQL Server database and verify the backup before proceeding. For a Control Center, back up its protected state directory, configuration, keys, and application files with your chosen process.
 3. Review running executions in the dashboard. Disable new work and wait for finite executions to finish. Infinite-timeout jobs can continue indefinitely; an operator must decide whether to stop them. Stop the application processes using the process manager selected for the deployment; external side effects may have happened even if WorkerDock cannot confirm completion.
 4. Compare the deployed application files and protected configuration with the release record, and confirm the stable tenant or center instance ID.
@@ -15,11 +15,11 @@ Fresh installations seed the SQL Server and HTTP built-in templates at version 1
 
 Choose the deployment/build tooling for your environment. WorkerDock leaves build and deployment tooling to the operator. For example, a .NET service can be published with `dotnet publish`; build the frontend with the documented frontend build command and assemble reviewed binaries, configuration examples, SQL scripts, and permissions using your release process. Keep secrets outside artifacts.
 
-For a new tenant only, apply `0001_initial` using `scripts/Invoke-TenantMigration.ps1`, with the reviewed Web assembly directory, separate migration credential, and `-RuntimePrincipal` naming a database user that must already exist in the target database. Use `-InitialSetup` to generate the tenant GUID, save the successful output, and copy it into `Tenant.InstanceId`. For an initialized tenant, pass the same GUID with `-InstanceId`. Preserve command output and checksum as release evidence. The script validates and grants the existing user; it does not create database users, roles, or logins, and does not build, copy, install, or start application files.
+Apply `0002_template_catalog_registration` using `scripts/Invoke-TenantMigration.ps1`, with the reviewed Web assembly directory, separate migration credential, and `-RuntimePrincipal` naming a database user that must already exist in the target database. For a new tenant, use `-InitialSetup` to generate the tenant GUID, save the successful output, and copy it into `Tenant.InstanceId`. For an initialized tenant, pass the same GUID with `-InstanceId`. Preserve command output and checksums as release evidence. The script validates and grants the existing user; it does not create database users, roles, or logins, and does not build, copy, install, or start application files.
 
 Prepare runtime configuration from `examples/config/tenant.example.json`, `worker.example.json`, and, when used, `center.example.json`. Protect config, vault references, TLS material, Data Protection keys, and archive paths under your chosen deployment system. Tenant services use one database and the existing restricted runtime SQL user; the deployment migration identity is separate. The migration validates and grants that user directly.
 
-The migration script and `database/tenant/current-state.sql` both prepare a new, empty database. Neither updates existing tenant databases. Do not use either path for an upgrade.
+The migration script applies the `0001` baseline and `0002` catalog registration patch to a fresh database and can apply `0002` to a database already at `0001`. `database/tenant/current-state.sql` is only for a new, empty database. Do not use the snapshot on an existing tenant.
 
 After deploying a compatible application release, start the web host and one runtime service. Check `/health/ready`, the runtime heartbeat, schedules, recent executions, and logs before opening access. For the Control Center, retain its protected file state directory and stable instance ID; it has no central SQL database. Control Center configuration updates modify protected files, and the center loads persisted state on restart. Do not replace or discard its state directory during a release change.
 

@@ -7,9 +7,28 @@ using Microsoft.AspNetCore.Hosting;
 using WorkerDock.Application.Templates;
 using WorkerDock.Infrastructure.Templates;
 using WorkerDock.Templates.SqlServer;
+using WorkerDock.Templates.Http;
 namespace WorkerDock.IntegrationTests;
 public sealed partial class TemplateCatalogTests
 {
+    [Fact]
+    public async Task Removed_builtin_versions_are_absent_from_catalog_and_direct_lookup()
+    {
+        var descriptors = new WorkerDock.Contracts.Templates.TemplateDescriptor[]
+        {
+            SqlTemplateDescriptors.Get("1.1.0"), HttpTemplateDescriptors.Get("1.1.0")
+        };
+        var catalog = new TemplateCatalog(descriptors); await catalog.RegisterAsync(descriptors, default);
+        await using var baseHost = new AccessHost();
+        await using var host = baseHost.WithWebHostBuilder(builder => builder.ConfigureServices(services => services.AddSingleton<ITemplateCatalog>(catalog)));
+        using var client = host.CreateClient(new() { BaseAddress = new("https://localhost"), AllowAutoRedirect = false });
+        using var list = await client.GetAsync("/api/templates");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        var body = await list.Content.ReadAsStringAsync();
+        Assert.Contains("1.1.0", body); Assert.DoesNotContain("1.0.0", body);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/templates/workerdock.http/1.0.0")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/templates/workerdock.sql-server/1.0.0")).StatusCode);
+    }
     [Fact]
     public async Task Template_validation_uses_sql_semantic_authoring_rules()
     {

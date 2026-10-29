@@ -68,16 +68,6 @@ public sealed partial class TemplateCatalogTests
         Assert.DoesNotContain("SENTINEL",JsonSerializer.Serialize(issues));
     }
     [Fact]
-    public void Only_exact_seeded_bootstrap_id_version_and_digest_can_be_promoted_once()
-    {
-        var seeded=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.Unicode.GetBytes("workerdock.http|1.0.0")));
-        Assert.True(TemplateMetadata.IsBootstrapPlaceholder("workerdock.http","1.0.0",seeded,true));
-        Assert.False(TemplateMetadata.IsBootstrapPlaceholder("workerdock.http","1.0.0",seeded,false));
-        Assert.False(TemplateMetadata.IsBootstrapPlaceholder("workerdock.http","2.0.0",seeded,true));
-        Assert.False(TemplateMetadata.IsBootstrapPlaceholder("custom","1.0.0",seeded,true));
-        Assert.False(TemplateMetadata.IsBootstrapPlaceholder("workerdock.http","1.0.0",new string('A',64),true));
-    }
-    [Fact]
     public void Nonsecret_provider_configuration_requires_references_for_sensitive_fields()
     {
         var descriptor=Descriptor("""{"type":"object","properties":{"credential":{"type":"string","x-workerDock-sensitive":true}},"additionalProperties":false}""");

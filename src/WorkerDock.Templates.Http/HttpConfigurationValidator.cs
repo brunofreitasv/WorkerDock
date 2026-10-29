@@ -11,7 +11,7 @@ public sealed partial class HttpConfigurationValidator(string version) : ITempla
 
     public IReadOnlyList<ValidationIssue> ValidateAuthoring(TemplateAuthoringContext context)
     {
-        if (version != "1.1.0" || context.Configuration.ValueKind != System.Text.Json.JsonValueKind.Object) return [];
+        if (context.Configuration.ValueKind != System.Text.Json.JsonValueKind.Object) return [];
         var known = new HashSet<string>(StringComparer.Ordinal);
         if (context.Configuration.TryGetProperty("parameters", out var parameters) && parameters.ValueKind == System.Text.Json.JsonValueKind.Object)
             foreach (var item in parameters.EnumerateObject()) known.Add(item.Name);

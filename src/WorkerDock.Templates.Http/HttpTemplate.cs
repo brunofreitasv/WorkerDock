@@ -10,7 +10,7 @@ using WorkerDock.Contracts.Templates;
 
 namespace WorkerDock.Templates.Http;
 
-public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken, ValueTask>? approveDestination = null, string version = "1.0.0") : IWorkerTemplate
+public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken, ValueTask>? approveDestination = null, string version = "1.1.0") : IWorkerTemplate
 {
     private const int MaxUrlLength = 2048;
     private const int MaxBodyLength = 65_536;
@@ -24,7 +24,6 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
     };
     private static readonly HashSet<string> Methods = new(StringComparer.OrdinalIgnoreCase) { "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD" };
     public TemplateDescriptor Descriptor => HttpTemplateDescriptors.Get(version);
-    private bool IsDynamicVersion => version == "1.1.0";
 
     public IReadOnlyList<ValidationIssue> Validate(JsonElement configuration)
     {
@@ -81,9 +80,7 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
 
             foreach (var header in config.Headers)
             {
-                var value = IsDynamicVersion
-                    ? ParameterSubstitution.ApplyHeader(header.Value, config.Parameters, context.Execution.IdempotencyKey)
-                    : Substitute(header.Value, config, context.Execution.IdempotencyKey);
+                var value = ParameterSubstitution.ApplyHeader(header.Value, config.Parameters, context.Execution.IdempotencyKey);
                 if (value.Length > 8192 || HasControl(value) || !request.Headers.TryAddWithoutValidation(header.Key, value))
                     return Result("PermanentFailure", "HttpHeaderInvalid", false);
             }
@@ -192,17 +189,13 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
         ResponseMode = string.IsNullOrWhiteSpace(c.ResponseMode) ? "SafeSummary" : c.ResponseMode
     };
 
-    private string Substitute(string text, HttpJobConfiguration config, string key) => IsDynamicVersion
-        ? ParameterSubstitution.ApplyHeader(text, config.Parameters, key)
-        : ParameterSubstitution.Apply(text, config.Parameters, key);
-    private string ApplyUrl(string text, IReadOnlyDictionary<string, JsonElement> parameters, string key) => IsDynamicVersion
-        ? ParameterSubstitution.ApplyUrl(text, parameters, key)
-        : ParameterSubstitution.Apply(text, parameters, key);
+    private string Substitute(string text, HttpJobConfiguration config, string key) => ParameterSubstitution.ApplyText(text, config.Parameters, key);
+    private string ApplyUrl(string text, IReadOnlyDictionary<string, JsonElement> parameters, string key) => ParameterSubstitution.ApplyUrl(text, parameters, key);
     private string ApplyBody(HttpJobConfiguration config, string key)
     {
         var result = config.ContentType is null || IsJsonMediaType(config.ContentType)
             ? ParameterSubstitution.ApplyJson(config.Body!, config.Parameters, key)
-            : (IsDynamicVersion ? ParameterSubstitution.ApplyText(config.Body!, config.Parameters, key) : ParameterSubstitution.Apply(config.Body!, config.Parameters, key));
+            : ParameterSubstitution.ApplyText(config.Body!, config.Parameters, key);
         if (result.Length > MaxBodyLength || Encoding.UTF8.GetByteCount(result) > MaxBodyLength) throw new InvalidOperationException("HttpConfigurationInvalid");
         return result;
     }

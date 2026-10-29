@@ -1,19 +1,20 @@
 ## Pré-requisitos
 
-Entre no painel do tenant. Você precisa de acesso **Manage** para salvar configurações do tenant. Abra [Configurações](#/settings) e selecione **Geral**, **Provedor de segredos**, **Política de saída**, **Perfis SQL** ou **Retention**. Suas preferências de exibição **Idioma** e **Fuso horário** ficam no cabeçalho do aplicativo.
+Abra [Configurações](#/settings) para consultar seu acesso e definir suas preferências pessoais de **Idioma** e **Fuso horário**. O acesso Read permite abrir as Configurações pessoais. O acesso **Manage** é necessário para editar a configuração do tenant, o provedor de segredos, a política de saída, os perfis SQL e a retenção.
 
 ## Permissão
 
-Usuários com acesso de leitura podem abrir a Documentação e consultar este guia. As páginas de configurações exigem acesso Manage; administradores de implantação cuidam das credenciais do provedor e do armazenamento de arquivos. Um usuário Read pode ver uma mensagem de permissão se abrir diretamente uma rota de configurações.
+Usuários com acesso Read podem abrir as Configurações pessoais e consultar este guia. Somente usuários Manage podem editar a configuração do tenant, o provedor de segredos, a política de saída, os perfis SQL e a retenção. Administradores de implantação cuidam das credenciais do provedor e do armazenamento de arquivos.
 
 ## Etapas
 
-1. Em **Geral**, defina o nome de exibição do tenant e o fuso horário padrão de exibição e salve. Esse fuso é o padrão do tenant; cada pessoa pode escolher seu próprio fuso no cabeçalho.
-2. Em **Provedor de segredos**, confira o provedor instalado e as opções públicas. A página nunca mostra credenciais resolvidas. A implementação do provedor, os mapeamentos de credenciais e a identidade do serviço são configurados por administradores de implantação.
-3. Em **Política de saída**, selecione **tenant-jobs** ou **tenant-alerts**. Revise hosts permitidos, portas, CIDRs privados e se HTTP é permitido. Inclua apenas os destinos necessários ao fluxo correspondente. Endereços de loopback, metadados e link-local continuam bloqueados pelas regras fixas.
-4. Em **Perfis SQL**, consulte perfis nomeados e catálogos permitidos. Configure as credenciais do perfil com referências lógicas de segredo; use o diagnóstico para verificar a conectividade quando o adaptador instalado oferecer suporte. Consulte [perfis do SQL Server](#/help:sql-profiles).
-5. Em **Retention**, defina a retenção de registros e arquivos. O caminho de arquivamento e a identidade do serviço são configurações de implantação, não configurações do navegador. Consulte [retenção e arquivos](#/help:retention) antes de ativar o arquivamento antes da exclusão.
-6. Salve na seção alterada. Confira se a mensagem de sucesso apareceu antes de sair da página.
+1. Em **Configurações pessoais**, consulte seu modo de acesso e sua função e escolha o idioma e o fuso horário pessoais. Essas preferências são salvas neste dispositivo.
+2. Em **Configuração do tenant**, defina o nome de exibição do tenant e o fuso horário padrão de exibição e salve. O nome salvo aparece ao lado do logotipo e na aba do navegador.
+3. Em **Provedor de segredos**, confira o provedor instalado e as opções públicas. A página nunca mostra credenciais resolvidas. A implementação do provedor, os mapeamentos de credenciais e a identidade do serviço são configurados por administradores de implantação.
+4. Em **Política de saída**, selecione **tenant-jobs** ou **tenant-alerts**. Revise hosts permitidos, portas, CIDRs privados e se HTTP é permitido. Inclua apenas os destinos necessários ao fluxo correspondente. Endereços de loopback, metadados e link-local continuam bloqueados pelas regras fixas.
+5. Em **Perfis SQL**, consulte perfis nomeados e catálogos permitidos. Configure as credenciais do perfil com referências lógicas de segredo; use o diagnóstico para verificar a conectividade quando o adaptador instalado oferecer suporte. Consulte [perfis do SQL Server](#/help:sql-profiles).
+6. Em **Retention**, defina a retenção de registros e arquivos. O caminho de arquivamento e a identidade do serviço são configurações de implantação, não configurações do navegador. Consulte [retenção e arquivos](#/help:retention) antes de ativar o arquivamento antes da exclusão.
+7. Salve na seção alterada. Confira se a mensagem de sucesso apareceu antes de sair da página.
 
 ## Exemplo prático
 
@@ -21,7 +22,7 @@ Imagine que uma tarefa chame `reports.example.test` por HTTPS e envie alertas a 
 
 ## Verificação
 
-Volte a cada seção e confirme que o valor salvo aparece. A seção **Geral** mostra os valores atuais do tenant; as páginas de políticas e perfis carregam a revisão salva pelo servidor. Uma mensagem de sucesso confirma que a API aceitou a configuração, mas não comprova que um serviço externo ou provedor de segredos de produção está acessível.
+Volte a cada seção e confirme que o valor salvo aparece. O nome de exibição do tenant deve aparecer ao lado do logotipo e na aba do navegador; as páginas de políticas e perfis carregam a revisão salva pelo servidor. Uma mensagem de sucesso confirma que a API aceitou a configuração, mas não comprova que um serviço externo ou provedor de segredos de produção está acessível.
 
 ## Recuperação
 

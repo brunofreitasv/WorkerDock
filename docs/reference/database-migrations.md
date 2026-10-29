@@ -9,19 +9,23 @@ The [database object reference](database-objects.md) lists current
 tenant migration objects and test-only SQL fixtures.
 
 Tenant schema history is defined by `database/tenant/manifest.json`, which
-contains only the `0001_initial` baseline. Apply it to a new tenant database
-with `scripts/Invoke-TenantMigration.ps1`, or run
-`database/tenant/current-state.sql` against a fresh empty database. Both paths
-create the same schema; neither upgrades an existing database. In SSMS, run
+contains the `0001_initial` baseline and the `0002_template_catalog_registration`
+patch. Apply the manifest through `0002_template_catalog_registration` to a new
+tenant database with `scripts/Invoke-TenantMigration.ps1`, or run
+`database/tenant/current-state.sql` against a fresh empty database. The snapshot
+includes both migrations. Migration `0002` is also safe for a database already
+at `0001_initial`; it updates the catalog metadata trigger so the Web host can
+register trusted built-in template descriptors. Neither path upgrades schemas
+older than this baseline. In SSMS, run
 the complete rendered snapshot with SQLCMD mode enabled and preserve its
 `:ON ERROR EXIT` directive so any preflight error stops all later batches.
 No tenant
 databases are deployed, so the project provides no upgrade converter.
 
 The migration script verifies checksums, requires SQL Server 2022 or newer and
-compatibility level 160, records the baseline in `SchemaHistory`, and binds a
+compatibility level 160, records each applied migration in `SchemaHistory`, and binds a
 database to its configured stable instance ID. Supply the target
-`0001_initial`, existing `-RuntimePrincipal`, separate migration credential,
+`0002_template_catalog_registration`, existing `-RuntimePrincipal`, separate migration credential,
 database script root, and reviewed Web assembly directory. Use `-InitialSetup`
 to generate a GUID for a fresh database, then save it for `Tenant.InstanceId`;
 for reuse, supply that same GUID with `-InstanceId`. The selected runtime

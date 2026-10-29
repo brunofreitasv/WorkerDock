@@ -15,8 +15,8 @@ Read users can review this guide. Managers configure inputs, preview dynamic val
 ## Steps
 
 1. Open [Jobs](#/jobs), select a template, and inspect **Configuration** for declared fields.
-2. For SQL, use template version **1.1.0** for dynamic bindings; version **1.0.0** keeps its fixed-value behavior. Add a typed parameter and choose exactly one source: **Fixed value**, **Dynamic value**, **Secret**, or **Send SQL NULL**. In Query mode, bind each `@name` placeholder with a matching parameter row.
-3. For HTTP, use template version **1.1.0** for declared dynamic parameter values; version **1.0.0** keeps its fixed-value behavior. Define a parameter and use `{name}` in supported URL, query, or body fields. Query and URL substitutions are encoded for their component. Use logical secret references for credentials.
+2. Built-in SQL jobs use template version **1.1.0**. Add a typed parameter and choose exactly one source: **Fixed value**, **Dynamic value**, **Secret**, or **Send SQL NULL**. In Query mode, bind each `@name` placeholder with a matching parameter row.
+3. Built-in HTTP jobs use template version **1.1.0**. Define a parameter and use `{name}` in supported URL, query, or body fields. Query and URL substitutions are encoded for their component. Use logical secret references for credentials.
 4. For dynamic inputs, choose a declared source such as **Reference date**, **Scheduled timestamp**, **First execution start**, **Execution ID**, or **Idempotency key**, then select a compatible format and time zone.
 5. Use the wizard preview to inspect sample resolved values before saving. Save the draft disabled, review it, and activate when ready.
 

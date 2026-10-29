@@ -54,7 +54,7 @@ public sealed class JobSqlIntegrationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Manual_key_is_deduplicated_with_atomic_audit_and_outbox(bool snapshot)
+    public async Task Manual_key_is_deduplicated_with_atomic_audit_and_queued_execution(bool snapshot)
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
@@ -74,36 +74,12 @@ public sealed class JobSqlIntegrationTests
         Assert.Equal(runs[0], await commands.RunNowAsync(job.JobId, "same-key", actor, default));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Executions"));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Executions WHERE ManualActorScopeHash IS NOT NULL AND ManualRequestKeyHash IS NOT NULL AND ManualRequestExpiresAtUtc IS NOT NULL"));
-        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Outbox WHERE EventType=N'ExecutionDispatch'"));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AuditEvents WHERE EventType=N'ManualRunAccepted'"));
         Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AuditEvents WHERE EventType=N'ManualRunAccepted' AND JSON_VALUE(DetailsJson,'$.beforeRevision')='1' AND JSON_VALUE(DetailsJson,'$.afterRevision')='1' AND JSON_VALUE(DetailsJson,'$.outcome')='Accepted'"));
         var unsafeRollback = await Assert.ThrowsAsync<WorkerDockException>(async () =>
             await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot)
                 .RollbackAsync("tenant", "0001_initial", default));
         Assert.Equal("UnsafeRollback", unsafeRollback.Code);
-    }
-
-    [Fact]
-    public async Task Outbox_failure_rolls_back_manual_execution_and_audit()
-    {
-        await using var database = new SqlDatabaseFixture();
-        await database.CreateAsync(false);
-        await new MigrationRunner(database.ConnectionString, database.InstanceId, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0001_initial", default);
-        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
-        await JobCommandTestCatalog.RegisterSqlAsync(options);
-        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
-        var job = Job();
-        await commands.SaveAsync(job, null, Actor(), default);
-        await database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
-        await database.ExecuteAsync("CREATE TRIGGER [workerdock].TestOutboxFailure ON [workerdock].Outbox AFTER INSERT AS THROW 51000, 'Injected outbox failure', 1;");
-        var error = await Assert.ThrowsAsync<WorkerDockException>(async () =>
-            await commands.RunNowAsync(job.JobId, "request", Actor(), default));
-        Assert.Equal("PersistenceUnavailable", error.Code);
-        Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Executions"));
-        Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].ManualRequestDedup"));
-        Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].Outbox WHERE EventType=N'ExecutionDispatch'"));
-        Assert.Equal(0, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AuditEvents WHERE EventType=N'ManualRunAccepted'"));
     }
 
     [Fact]
@@ -121,7 +97,7 @@ public sealed class JobSqlIntegrationTests
     }
 
     private static ActorContext Actor() => new("issuer:subject", "Entra", Guid.NewGuid());
-    private static JobRevision Job() => new(Guid.NewGuid(), 0, "SQL job", "workerdock.http", "1.0.0",
+    private static JobRevision Job() => new(Guid.NewGuid(), 0, "SQL job", "workerdock.http", "1.1.0",
         JsonDocument.Parse("{}").RootElement.Clone(), null,
         new(null, 3, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), 0.1, ["Transient"], false, "Queue", 10, 5));
 }

@@ -50,13 +50,13 @@ public sealed class RetentionSqlTests
         await database.ExecuteAsync($$"""
             UPDATE [workerdock].TenantSettings SET LogRetentionDays=365,ExecutionRetentionDays=365,AuditRetentionDays=1,
                 ArchiveBeforeDelete=0,ArchiveRetentionDays=90,RetentionVersion=RetentionVersion+1;
-            INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc,FinalizedAtUtc)
+            INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,[RowCount],EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc,FinalizedAtUtc)
             VALUES('{{batchId}}',N'{{batchId:N}}.archive.gz',REPLICATE('A',64),0,DATEADD(day,-100,SYSUTCDATETIME()),DATEADD(day,-365,SYSUTCDATETIME()),N'Writing',DATEADD(day,-101,SYSUTCDATETIME()),NULL);
             INSERT [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson)
             VALUES('{{auditId}}',N'RetentionPurge',N'WorkerDock.Retention',N'System',NEWID(),DATEADD(day,-100,SYSUTCDATETIME()),
                 N'{"purgeKind":"AuditEvents","purgedRowCount":1,"archiveBatchId":"{{batchId}}"}');
             INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId) VALUES('{{batchId}}',N'AuditEvent','{{auditId}}');
-            UPDATE [workerdock].ArchiveBatches SET RowCount=1,State=N'Finalized',CreatedAtUtc=DATEADD(day,-101,SYSUTCDATETIME()),
+            UPDATE [workerdock].ArchiveBatches SET [RowCount]=1,State=N'Finalized',CreatedAtUtc=DATEADD(day,-101,SYSUTCDATETIME()),
                 FinalizedAtUtc=DATEADD(day,-100,SYSUTCDATETIME()),PurgedRowCount=1 WHERE BatchId='{{batchId}}';
             """);
 
@@ -132,7 +132,7 @@ public sealed class RetentionSqlTests
             VALUES('{{executionId}}','{{jobId}}',1,N'Manual',N'archive-secret',N'Succeeded',N'Known',SYSUTCDATETIME(),NEWID(),DATEADD(day,-10,SYSUTCDATETIME()),DATEADD(day,-9,SYSUTCDATETIME()));
             INSERT [workerdock].OperationalEvents(EventId,EventKind,ExecutionId,Source,Sequence,AtUtc,Code,SafeFieldsJson)
             VALUES('{{eventId}}',N'Execution','{{executionId}}',N'Handler',1,DATEADD(day,-5,SYSUTCDATETIME()),N'TemplateCompleted',N'{"password":"operational-archive-secret-sentinel","outcome":"Success"}');
-            INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc)
+            INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,[RowCount],EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc)
             VALUES('{{batchId}}',N'{{batchId:N}}.archive.gz',REPLICATE('0',64),1,SYSUTCDATETIME(),DATEADD(day,-1,SYSUTCDATETIME()),N'Writing',DATEADD(minute,-1,SYSUTCDATETIME()));
             INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId) VALUES('{{batchId}}',N'OperationalEvent','{{eventId}}');
             """);
@@ -222,10 +222,10 @@ public sealed class RetentionSqlTests
         await database.ExecuteAsync($$"""
             INSERT [workerdock].AuditEvents(EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc,DetailsJson)
             VALUES('{{eventId}}',N'test',N'test',N'System',NEWID(),SYSUTCDATETIME(),N'{}');
-            INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc)
+            INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,[RowCount],EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc)
             VALUES('{{batchId}}',N'{{batchId:N}}.archive.gz',REPLICATE('A',64),0,SYSUTCDATETIME(),SYSUTCDATETIME(),N'Writing',SYSUTCDATETIME());
             INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId) VALUES('{{batchId}}',N'AuditEvent','{{eventId}}');
-            UPDATE [workerdock].ArchiveBatches SET RowCount=1,State=N'Finalized',FinalizedAtUtc=SYSUTCDATETIME() WHERE BatchId='{{batchId}}';
+            UPDATE [workerdock].ArchiveBatches SET [RowCount]=1,State=N'Finalized',FinalizedAtUtc=SYSUTCDATETIME() WHERE BatchId='{{batchId}}';
             """);
 
         await using var connection = new SqlConnection(database.ConnectionString);
@@ -235,7 +235,7 @@ public sealed class RetentionSqlTests
             progress.CommandText = $"EXEC sys.sp_set_session_context @key=N'WDArchivePurgeBatchId',@value='{batchId}'; UPDATE [workerdock].ArchiveBatches SET PurgedRowCount=1 WHERE BatchId='{batchId}';";
             await progress.ExecuteNonQueryAsync();
         }
-        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].ArchiveBatches WHERE BatchId='{batchId}' AND PurgedRowCount=1 AND RelativePath=N'{batchId:N}.archive.gz' AND Sha256=REPLICATE('A',64) AND RowCount=1"));
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].ArchiveBatches WHERE BatchId='{batchId}' AND PurgedRowCount=1 AND RelativePath=N'{batchId:N}.archive.gz' AND Sha256=REPLICATE('A',64) AND [RowCount]=1"));
 
         await using var mutation = connection.CreateCommand();
         mutation.CommandText = $"UPDATE [workerdock].ArchiveBatches SET Sha256=REPLICATE('B',64) WHERE BatchId='{batchId}';";

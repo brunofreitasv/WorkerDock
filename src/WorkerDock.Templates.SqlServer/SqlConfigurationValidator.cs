@@ -57,7 +57,7 @@ public sealed class SqlConfigurationValidator(string version) : ITemplateAuthori
             if (sources != 1) issues.Add(new(path + ".value", sources == 0 ? "SqlValueSourceRequired" : "SqlValueSourceConflict"));
             if (row.TryGetProperty("value", out var fixedValue) && fixedValue.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) && dbType is { } fixedType)
             {
-                try { _ = SqlTemplate.ConvertAuthoringValue(fixedValue, fixedType, version); }
+                try { _ = SqlTemplate.ConvertAuthoringValue(fixedValue, fixedType); }
                 catch { issues.Add(new(path + ".value", "SqlParameterInvalid")); }
             }
             var precision = row.TryGetProperty("precision", out var precisionElement) && precisionElement.ValueKind == JsonValueKind.Number && precisionElement.TryGetByte(out var p) ? p : (byte?)null;

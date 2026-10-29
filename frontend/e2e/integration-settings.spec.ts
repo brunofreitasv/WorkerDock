@@ -22,8 +22,12 @@ test("manager edits scoped outbound settings and sees hard-denial guidance", asy
   expect(policy.hosts).toEqual(["api.example.test", "*.hooks.example.test"]);
 });
 
-test("viewer does not receive the management settings navigation", async ({ page }) => {
+test("viewer can open Personal settings without receiving management settings", async ({ page }) => {
   await page.route("**/api/session", route => route.fulfill({ json: { authenticated: true, canRead: true, canManage: false, mode: "RoleProtected", language: "en", timeZone: "UTC" } }));
+  await page.route("**/api/settings", route => route.fulfill({ json: { displayName: "Test tenant", displayTimeZone: "UTC", version: "AQAAAAAAAAA=" }, headers: { ETag: '"AQAAAAAAAAA="' } }));
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "Settings" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByRole("button", { name: "Personal settings" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Tenant configuration" })).toHaveCount(0);
 });

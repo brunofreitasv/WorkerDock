@@ -193,7 +193,6 @@ public sealed class TenantSnapshotTests
                 FROM sys.tables t JOIN sys.columns c ON c.object_id=t.object_id
                 WHERE t.schema_id=SCHEMA_ID(N'workerdock') AND c.system_type_id<>189
                 AND NOT (t.name=N'SchemaHistory' AND c.name=N'AppliedAtUtc')
-                AND NOT (t.name=N'PolicyRevisions' AND c.name=N'CreatedAtUtc')
                 AND NOT (t.name=N'IntegrationSettingsRevisions' AND c.name IN(N'RevisionId',N'CreatedAtUtc'))
                 GROUP BY t.name
                 """;

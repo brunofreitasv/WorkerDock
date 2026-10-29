@@ -23,5 +23,5 @@ internal static class JobCommandTestCatalog
     }
 
     private static WorkerDock.Contracts.Templates.TemplateDescriptor Descriptor(string id) =>
-        TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor("""{"type":"object"}""") with { Id = id });
+        TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor("""{"type":"object"}""") with { Id = id, Version = "1.1.0" });
 }

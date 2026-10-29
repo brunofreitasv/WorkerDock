@@ -36,7 +36,7 @@ public sealed class JobCommandTests
         }).ToArray();
         var plan = JsonDocument.Parse(JsonSerializer.Serialize(new { resolverVersion = 1, timeZoneId = "UTC", bindings })).RootElement;
         Assert.False(WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration("workerdock.http", "1.1.0", configuration, plan));
-        Assert.True(WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration("workerdock.http", "1.0.0", configuration));
+        Assert.True(WorkerDock.Contracts.Execution.ExecutionPayloadLimits.FitsJobConfiguration("workerdock.http", "1.1.0", configuration));
     }
 
     [Fact]
@@ -84,7 +84,7 @@ public sealed class JobCommandTests
     [Fact]
     public async Task Read_only_viewer_cannot_queue_run_now_even_with_valid_csrf_and_request_key()
     {
-        var descriptor=WorkerDock.Infrastructure.Templates.TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor("""{"type":"object"}""") with { Id="workerdock.http" });
+        var descriptor=WorkerDock.Infrastructure.Templates.TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor("""{"type":"object"}""") with { Id="workerdock.http", Version="1.1.0" });
         var catalog=new TemplateCatalog([descriptor]); await catalog.RegisterAsync([descriptor],default);
         var job=Job("viewer denied run");
         var commands=new InMemoryJobCommands(TimeProvider.System,[job],templateCatalog:catalog);
@@ -192,12 +192,10 @@ public sealed class JobCommandTests
         Assert.Equal(1, original.Revision.Revision);
         await service.SaveAsync(draft with { Name = "Editor one" }, original.Version, Actor, default);
         var auditBefore = service.AuditCount;
-        var outboxBefore = service.OutboxCount;
         var stale = await Assert.ThrowsAsync<WorkerDockException>(async () =>
             await service.SaveAsync(draft with { Name = "Editor two" }, original.Version, Actor, default));
         Assert.Equal("StaleVersion", stale.Code);
         Assert.Equal(auditBefore, service.AuditCount);
-        Assert.Equal(outboxBefore, service.OutboxCount);
         Assert.Equal(2, (await service.GetEditableAsync(draft.JobId, default)).Revision.Revision);
         Assert.Equal(created, await service.GetCommandAsync(created.CommandId, default));
     }
@@ -312,11 +310,10 @@ public sealed class JobCommandTests
 
     [Theory]
     [InlineData("Audit")]
-    [InlineData("Outbox")]
-    public async Task Failed_audit_or_outbox_prevents_job_mutation(string phase)
+    public async Task Failed_audit_prevents_job_mutation(string phase)
     {
         var job = Job("Uncommitted");
-        var service = new InMemoryJobCommands(TimeProvider.System, phase == "Outbox" ? [job] : null, beforeCommit: (part, _) =>
+        var service = new InMemoryJobCommands(TimeProvider.System, beforeCommit: (part, _) =>
             part == phase ? throw new InvalidOperationException("injected") : ValueTask.CompletedTask, templateCatalog: JobCommandTestCatalog.Create());
         var error = await Assert.ThrowsAsync<WorkerDockException>(async () =>
         {
@@ -325,7 +322,6 @@ public sealed class JobCommandTests
         });
         Assert.Equal("PersistenceUnavailable", error.Code);
         Assert.Equal(0, service.AuditCount);
-        Assert.Equal(0, service.OutboxCount);
         Assert.Equal(0, service.ExecutionCount);
         if (phase == "Audit")
         {
@@ -338,7 +334,7 @@ public sealed class JobCommandTests
     [Fact]
     public async Task Management_routes_return_safe_receipts_and_stale_edit_problem()
     {
-        var descriptor=WorkerDock.Infrastructure.Templates.TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor("""{"type":"object"}""") with { Id="workerdock.http" });
+        var descriptor=WorkerDock.Infrastructure.Templates.TemplateMetadata.WithDigest(TemplateCatalogTests.Descriptor("""{"type":"object"}""") with { Id="workerdock.http", Version="1.1.0" });
         var catalog=new TemplateCatalog([descriptor]); await catalog.RegisterAsync([descriptor],default);
         await using var baseHost = new AccessHost();
         await using var host=baseHost.WithWebHostBuilder(builder=>builder.ConfigureServices(services=>services.AddSingleton<ITemplateCatalog>(catalog)));
@@ -388,7 +384,7 @@ public sealed class JobCommandTests
         Assert.Equal(HttpStatusCode.Conflict, disabled.StatusCode);
     }
 
-    private static JobRevision Job(string name) => new(Guid.NewGuid(), 0, name, "workerdock.http", "1.0.0",
+    private static JobRevision Job(string name) => new(Guid.NewGuid(), 0, name, "workerdock.http", "1.1.0",
         JsonDocument.Parse("{}").RootElement.Clone(), null,
         new(null, 3, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), 0.1, ["Transient"], false, "Queue", 10, 5));
 

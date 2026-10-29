@@ -18,9 +18,9 @@ const session = (
   vi.stubGlobal(
     "fetch",
     vi.fn(
-      async () =>
+      async (url: string) =>
         new Response(
-          JSON.stringify({
+          JSON.stringify(url === "/api/settings" ? { displayName: "WorkerDock", displayTimeZone: "UTC", version: "v1" } : {
             authenticated,
             canRead: true,
             canManage,
@@ -41,15 +41,16 @@ const session = (
 test("viewer can navigate dashboard monitoring and audit while management is hidden", async () => {
   session();
   expect(await screen.findByRole("link", { name: "Dashboard" })).toBeVisible();
-  expect(screen.getByRole("link", { name: "Monitoring" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Job monitoring" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Documentation" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Audit" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Settings" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Jobs" })).not.toBeInTheDocument();
+  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Monitoring", "Maintenance", "Administration"]);
+  expect(screen.getByRole("heading", { name: "Monitoring", level: 2 })).toBeVisible();
+  await userEvent.click(screen.getByRole("link", { name: "Job monitoring" }));
   expect(
-    screen.queryByRole("link", { name: "Settings" }),
-  ).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("link", { name: "Monitoring" }));
-  expect(
-    await screen.findByRole("heading", { name: "Monitoring" }),
+    await screen.findByRole("heading", { name: "Job monitoring", level: 1 }),
   ).toBeVisible();
   await userEvent.click(screen.getByRole("link", { name: "Audit" }));
   expect(await screen.findByRole("heading", { name: "Audit" })).toBeVisible();
@@ -60,7 +61,13 @@ test("viewer opens a deep-linked documentation topic with Documentation selected
   session();
   expect(await screen.findByRole("heading", { name: "Understand the dashboard" })).toBeVisible();
   expect(screen.getAllByRole("link", { name: "Documentation" }).find(link => link.getAttribute("aria-current") === "page")).toBeDefined();
-  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Language" }), "pt-BR");
+  expect(window.location.hash).toBe("#/help:dashboard");
+  expect(screen.queryByRole("combobox", { name: "Language" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("link", { name: "Settings" }));
+  await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Language" }), "pt-BR");
+  window.history.replaceState(null, "", "#/help:dashboard");
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
   expect(await screen.findByRole("heading", { name: "Entenda o painel" })).toBeVisible();
   expect(window.location.hash).toBe("#/help:dashboard");
 });
@@ -82,6 +89,8 @@ test("execution contextual help opens the monitoring guide", async () => {
     return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
   }));
   render(<SessionProvider><App /></SessionProvider>);
+  expect((await screen.findByRole("link", { name: "Job monitoring" })).getAttribute("aria-current")).toBe("page");
+  expect(window.location.hash).toBe("#/execution:run-1");
   await userEvent.click(await screen.findByRole("button", { name: "Documentation for this page" }));
   expect(screen.getByRole("heading", { name: "Monitor executions", level: 1 })).toBeVisible();
   expect(window.location.hash).toBe("#/help:monitoring");
@@ -116,7 +125,10 @@ test.each(["#/help:unknown", "#/help:", "#/help:bad%ZZslug"])("recovers from mal
 test("anonymous mode shows management and a translated public-access status", async () => {
   session(true, "Anonymous", false);
   expect(await screen.findByRole("link", { name: "Settings" })).toBeVisible();
-  expect(screen.getByRole("status")).toHaveTextContent("Anonymous access");
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(screen.queryByText("Anyone who reaches this instance can view and manage its data.")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("link", { name: "Settings" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Anonymous access");
   await userEvent.selectOptions(
     screen.getByRole("combobox", { name: "Language" }),
     "pt-BR",
@@ -244,9 +256,65 @@ test("manager edits settings using server version and antiforgery then sees save
     </SessionProvider>,
   );
   await userEvent.click(await screen.findByRole("link", { name: "Settings" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Tenant configuration" }));
   const name = await screen.findByRole("textbox", { name: "Display name" });
   await userEvent.clear(name);
   await userEvent.type(name, "Equipe");
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(await screen.findByText("Settings saved")).toBeVisible();
+});
+
+test("reader settings are personal and management APIs are not requested", async () => {
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    calls.push(url);
+    const data = url === "/api/session"
+      ? { authenticated: true, canRead: true, canManage: false, mode: "RoleProtected", language: "en", timeZone: "UTC" }
+      : { displayName: "Team North", displayTimeZone: "UTC", version: "v1" };
+    return new Response(JSON.stringify(data), { status: 200, headers: { ETag: '"v1"', "Content-Type": "application/json" } });
+  }));
+  window.history.replaceState(null, "", "#/settings");
+  render(<SessionProvider><App /></SessionProvider>);
+  expect(await screen.findByRole("button", { name: "Personal settings" })).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("Role-protected management");
+  expect(screen.getByRole("combobox", { name: "Language" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Tenant configuration" })).not.toBeInTheDocument();
+  expect(screen.getByText("Team North")).toBeVisible();
+  expect(document.title).toBe("Team North");
+  expect(calls).toContain("/api/settings");
+  expect(calls.some((url) => /vault|outbound|connection-profiles|retention/.test(url))).toBe(false);
+});
+
+test("settings load failures keep the WorkerDock name and navigation usable", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/settings"
+    ? new Response("{}", { status: 503 })
+    : new Response(JSON.stringify({ authenticated: true, canRead: true, canManage: false, mode: "RoleProtected", language: "en", timeZone: "UTC" }), { status: 200 })));
+  render(<SessionProvider><App /></SessionProvider>);
+  expect(await screen.findByRole("link", { name: "Settings" })).toBeVisible();
+  expect(await screen.findByText("WorkerDock")).toBeVisible();
+  expect(document.title).toBe("WorkerDock");
+});
+
+test("save success updates the app branding; stale save preserves the persisted name", async () => {
+  let failPut = false;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/session") return new Response(JSON.stringify({ authenticated: true, canRead: true, canManage: true, mode: "RoleProtected", language: "en", timeZone: "UTC" }));
+    if (url === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "csrf" }));
+    if (url === "/api/settings" && init?.method === "PUT") return failPut ? new Response("{}", { status: 412 }) : new Response(JSON.stringify({ displayName: "New Name", displayTimeZone: "UTC", version: "v2" }));
+    return new Response(JSON.stringify({ displayName: "Team", displayTimeZone: "UTC", version: "v1" }), { headers: { ETag: '"v1"' } });
+  }));
+  window.history.replaceState(null, "", "#/settings");
+  render(<SessionProvider><App /></SessionProvider>);
+  await userEvent.click(await screen.findByRole("button", { name: "Tenant configuration" }));
+  const name = await screen.findByRole("textbox", { name: "Display name" });
+  await userEvent.clear(name); await userEvent.type(name, "New Name");
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByText("New Name")).toBeVisible();
+  await waitFor(() => expect(document.title).toBe("New Name"));
+  failPut = true;
+  await userEvent.clear(name); await userEvent.type(name, "Discarded");
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByText("Settings changed. Reload before saving again.")).toBeVisible();
+  expect(screen.getAllByText("New Name").length).toBeGreaterThan(0);
+  expect(document.title).toBe("New Name");
 });

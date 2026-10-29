@@ -15,8 +15,8 @@ Usuários com acesso de leitura podem consultar este guia. Gerentes configuram e
 ## Etapas
 
 1. Abra [Tarefas](#/jobs), selecione um modelo e confira os campos declarados em **Configuração**.
-2. Para usar associações dinâmicas em SQL, selecione a versão **1.1.0**; a versão **1.0.0** mantém o comportamento de valores fixos. Adicione um parâmetro tipado e escolha exatamente uma origem: **Valor fixo**, **Valor dinâmico**, **Segredo** ou **Enviar SQL NULL**. No modo Consulta, associe cada marcador `@nome` a uma linha de parâmetro correspondente.
-3. Para valores dinâmicos HTTP, selecione a versão **1.1.0**; a versão **1.0.0** mantém o comportamento de valores fixos. Declare um parâmetro e use `{nome}` nos campos compatíveis de URL, consulta ou corpo. Substituições na URL e na consulta são codificadas para cada parte. Use referências lógicas para credenciais.
+2. Tarefas SQL integradas usam a versão **1.1.0** do modelo. Adicione um parâmetro tipado e escolha exatamente uma origem: **Valor fixo**, **Valor dinâmico**, **Segredo** ou **Enviar SQL NULL**. No modo Consulta, associe cada marcador `@nome` a uma linha de parâmetro correspondente.
+3. Tarefas HTTP integradas usam a versão **1.1.0** do modelo. Declare um parâmetro e use `{nome}` nos campos compatíveis de URL, consulta ou corpo. Substituições na URL e na consulta são codificadas para cada parte. Use referências lógicas para credenciais.
 4. Para entradas dinâmicas, escolha uma origem declarada, como **Data de referência**, **Data e hora agendadas**, **Início da primeira execução**, **ID da execução** ou **Chave de idempotência**; depois escolha um formato e fuso compatíveis.
 5. Use a pré-visualização do editor para inspecionar valores de exemplo. Salve o rascunho desativado, revise-o e ative quando estiver pronto.
 

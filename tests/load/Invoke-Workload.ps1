@@ -146,8 +146,8 @@ foreach ($tenant in $selected) {
         if ($skipTls) { $workersParams['SkipCertificateCheck'] = $true }
         $workers = @(Invoke-RestMethod @workersParams)
         $tenant.WorkerCount = $workers.Count
-        $tenant.HttpWorkerCount = @($workers | Where-Object { $_.State -eq 'Ready' -and @($_.Capabilities) -contains 'workerdock.http@1.0.0' }).Count
-        if ($tenant.HttpWorkerCount -lt 1) { Stop-Workload "tenant '$($tenant.Name)' has no ready worker advertising workerdock.http@1.0.0." }
+        $tenant.HttpWorkerCount = @($workers | Where-Object { $_.State -eq 'Ready' -and @($_.Capabilities) -contains 'workerdock.http@1.1.0' }).Count
+        if ($tenant.HttpWorkerCount -lt 1) { Stop-Workload "tenant '$($tenant.Name)' has no ready worker advertising workerdock.http@1.1.0." }
         $handler = [Net.Http.HttpClientHandler]::new()
         $handler.AllowAutoRedirect = $false
         $client = [Net.Http.HttpClient]::new($handler)
@@ -224,7 +224,7 @@ $fixtureResults = @($selected | ForEach-Object -Parallel {
             $name = "WDLoad-$runId-$index"
             $configuration = [ordered]@{ method='GET'; url=[string]$tenant.FixtureUrl; query=@{}; headers=@{}; secretHeaders=@{}; parameters=@{}; contentType=$null; body=$null; timeoutSeconds=15; successStatuses=@(200); idempotencyHeader=$null; maxResponseBytes=65536; responseMode='SafeSummary' }
             $policy = [ordered]@{ timeout='00:01:00'; maxAttempts=1; retryBaseDelay='00:00:00'; retryMaxDelay='00:00:00'; jitterRatio=0; retryableCodes=@(); retryUncertain=$false; overlap='Allow'; backlogLimit=1; priority=5 }
-            $revision = [ordered]@{ jobId='00000000-0000-0000-0000-000000000000'; revision=0; name=$name; templateId='workerdock.http'; templateVersion='1.0.0'; configuration=$configuration; profileId=$null; policy=$policy }
+            $revision = [ordered]@{ jobId='00000000-0000-0000-0000-000000000000'; revision=0; name=$name; templateId='workerdock.http'; templateVersion='1.1.0'; configuration=$configuration; profileId=$null; policy=$policy }
             $jobId = $null
             try {
                 $saved = Call-Api $access 'Post' '/api/jobs' $revision
@@ -445,7 +445,7 @@ $result = [ordered]@{
     warmupRuns = $Tenants
     measuredRuns = $flatRuns.Count
     concurrencyPerTenant = $ConcurrencyPerTenant
-    jobMix = 'Uniform workerdock.http 1.0.0 GET to configured FixtureUrl; one run per uniquely created job.'
+    jobMix = 'Uniform workerdock.http 1.1.0 GET to configured FixtureUrl; one run per uniquely created job.'
     fixtureDurationMix = 'Uniform per tenant; no mixed-duration profile is configured.'
     measurementSeconds = [Math]::Round($measurementSeconds, 3)
     throughputSucceededPerSecond = $throughput

@@ -39,4 +39,19 @@ describe("administration guides", () => {
     expect(retention).toMatch(/preserves the corresponding source records/i);
     expect(retention).toMatch(/archive.*path|browser.*path/i);
   });
+
+  it("documents Personal settings and the tenant management boundary in both languages", () => {
+    const enSettings = getHelpArticle("en", "settings") ?? "";
+    const ptSettings = getHelpArticle("pt-BR", "settings") ?? "";
+    const enStart = getHelpArticle("en", "getting-started") ?? "";
+    const ptStart = getHelpArticle("pt-BR", "getting-started") ?? "";
+    expect(enSettings).toMatch(/Read access is enough for Personal settings/i);
+    expect(enSettings).toMatch(/Only Manage users can edit tenant configuration/i);
+    expect(enSettings).toMatch(/beside the logo and in the browser tab/i);
+    expect(ptSettings).toMatch(/acesso Read permite abrir as Configurações pessoais/i);
+    expect(ptSettings).toMatch(/Somente usuários Manage podem editar a configuração do tenant/i);
+    expect(ptSettings).toMatch(/ao lado do logotipo e na aba do navegador/i);
+    expect(enStart).toMatch(/Personal settings/);
+    expect(ptStart).toMatch(/Configurações pessoais/);
+  });
 });

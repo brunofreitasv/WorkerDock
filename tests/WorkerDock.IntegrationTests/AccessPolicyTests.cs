@@ -66,7 +66,7 @@ public sealed class AccessPolicyTests
         Assert.Equal(requiredRole is null ? "Authenticated" : "RoleProtected", session.Mode);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/api/audit")).StatusCode);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/api/monitoring")).StatusCode);
-        Assert.Equal(canManage ? HttpStatusCode.OK : HttpStatusCode.Forbidden, (await client.GetAsync("/api/settings")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/settings")).StatusCode);
         var text = await client.GetStringAsync("/api/session");
         Assert.DoesNotContain("token", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("secret", text, StringComparison.OrdinalIgnoreCase);
@@ -79,9 +79,33 @@ public sealed class AccessPolicyTests
         await using var host = new AccessHost(issuer, "Manager"); using var client = host.Client();
         await issuer.SignIn(client);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/api/dashboard")).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/settings")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/settings")).StatusCode);
         var csrf = await client.GetFromJsonAsync<CsrfView>("/api/antiforgery");
         using var update = Mutation(csrf!.RequestToken, "https://localhost");
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(update)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Reader_can_get_display_settings_but_cannot_update()
+    {
+        using var issuer = new LocalOidcIssuer("Viewer");
+        await using var host = new AccessHost(issuer, "Manager");
+        using var client = host.Client();
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/settings")).StatusCode);
+        await issuer.SignIn(client);
+
+        using var response = await client.GetAsync("/api/settings");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.Contains("ETag"));
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("displayName", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("displayTimeZone", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("version", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secret", body, StringComparison.OrdinalIgnoreCase);
+        var csrf = await client.GetFromJsonAsync<CsrfView>("/api/antiforgery");
+        using var update = Mutation(csrf!.RequestToken, "https://localhost");
+        update.Headers.IfMatch.Add(response.Headers.ETag!);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(update)).StatusCode);
     }
 

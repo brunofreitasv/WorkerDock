@@ -37,7 +37,7 @@ test("dashboard supports keyboard navigation and shows health without color cues
   await expect(page.getByText("Degraded", { exact: true })).toBeVisible();
   await expect(page.getByText("Failed 24h", { exact: true })).toBeVisible();
 
-  const monitoring = page.getByRole("link", { name: "Monitoring" });
+  const monitoring = page.getByRole("link", { name: "Job monitoring" });
   await monitoring.focus();
   await expect(monitoring).toBeFocused();
   await page.keyboard.press("Enter");
@@ -49,10 +49,13 @@ test("dashboard remains usable on mobile and switches accessible labels to Brazi
   await page.goto("/#/dashboard");
   await expect(page.getByRole("main")).toBeVisible();
 
+  await expect(page.getByRole("combobox", { name: "Language" })).toHaveCount(0);
+  await page.getByRole("link", { name: "Settings" }).click();
   const language = page.getByRole("combobox", { name: "Language" });
   await language.selectOption("pt-BR");
 
   await expect(page.locator("html")).toHaveAttribute("lang", "pt-BR");
+  await page.getByRole("link", { name: "Painel" }).click();
   await expect(page.getByText("Estado:", { exact: false })).toBeVisible();
   await expect(page.getByText("Nenhuma execução recente.")).toBeVisible();
   const dimensions = await page.evaluate(() => ({
@@ -73,15 +76,10 @@ test("job creation is keyboard operable with visible focus and localized validat
   }] } }));
 
   for (const locale of ["en", "pt-BR"] as const) {
+    await page.goto("/#/settings");
+    await page.getByRole("combobox", { name: locale === "en" ? "Language" : "Idioma" }).selectOption(locale);
     await page.goto("/#/jobs");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    const language = page.getByRole("combobox", { name: "Wizard language" });
-    if (locale === "pt-BR") {
-      await language.focus();
-      await page.keyboard.press("Enter");
-      await page.keyboard.press("ArrowDown");
-      await page.keyboard.press("Enter");
-    }
 
     const jobName = page.getByRole("textbox", { name: locale === "en" ? "Job name" : "Nome da tarefa" });
     await jobName.focus();

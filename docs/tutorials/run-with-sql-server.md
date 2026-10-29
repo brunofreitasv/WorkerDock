@@ -8,7 +8,7 @@ hosts bound to localhost.
 
 ## Prerequisites
 
-- Windows, .NET SDK 10.0.402, Node.js 24.15.0 or a compatible maintained Node
+- Windows, .NET SDK 10.0.402 or a newer patch in the same feature band, Node.js 24.15.0 or a compatible maintained Node
   release, and SQL Server 2022 or later.
 - A dedicated empty tenant database, a migration credential with temporary DDL
   rights, and a restricted runtime database user that already exists in it.
@@ -20,10 +20,10 @@ This tutorial uses placeholders and does not create or grant a database.
 
 ## Migrate and build
 
-At the repository root, prepare a fresh empty database with the `0001_initial`
-baseline or the `database/tenant/current-state.sql` snapshot. Neither is an
-upgrade path. No tenant databases are deployed and no upgrade converter is
-provided. Use a separate operator-supplied SQL migration login. Supply its `PSCredential`
+At the repository root, prepare a fresh empty database through
+`0002_template_catalog_registration` or with the
+`database/tenant/current-state.sql` snapshot. Use a separate operator-supplied
+SQL migration login. Supply its `PSCredential`
 from your approved vault process or retrieve it through the protected PowerShell
 credential prompt; never place its password in shell history.
 The runtime SQL login must remain separate and restricted.
@@ -33,10 +33,10 @@ $env:DOTNET_ENVIRONMENT='Development'
 $credential = Get-Credential '<OPERATOR_SQL_LOGIN>'
 dotnet publish src/WorkerDock.Web -c Release -o artifacts/web
 & scripts/Invoke-TenantMigration.ps1 `
-  -Action Apply -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 `
+  -Action Apply -SqlHost '127.0.0.1' -Port 1433 `
   -Database '<TENANT_DATABASE>' -Credential $credential `
   -RuntimePrincipal '<TENANT_DATABASE_USER>' -InitialSetup `
-  -TargetMigration '0001_initial' `
+  -TargetMigration '0002_template_catalog_registration' `
   -ScriptsRoot (Resolve-Path 'database').Path `
   -AssemblyDirectory (Resolve-Path 'artifacts/web').Path
 
@@ -47,7 +47,7 @@ dotnet publish src/WorkerDock.Executor -c Release -r win-x64 --self-contained fa
 dotnet dev-certs https --trust
 ```
 
-The manifest contains only `0001_initial`. The sample publishes the Web assembly first because the migration script loads the reviewed migration implementation from that output directory. The script validates and grants the existing runtime database user; it does not create users, roles, or logins. Save the GUID printed after success and use that same value in both runtime configurations. For an initialized tenant, pass the saved GUID with `-InstanceId` instead of `-InitialSetup`.
+The manifest contains the `0001_initial` baseline and `0002_template_catalog_registration`. The second migration allows the Web host to store its trusted built-in descriptors, so the template picker works before the Worker service starts. The sample publishes the Web assembly first because the migration script loads the reviewed migration implementation from that output directory. The script validates and grants the existing runtime database user; it does not create users, roles, or logins. Save the GUID printed after success and use that same value in both runtime configurations. For an initialized tenant, pass the saved GUID with `-InstanceId` instead of `-InitialSetup`.
 
 Run the migration script with the PowerShell call operator in the same session
 that created `$credential`. A `PSCredential` object cannot be passed through a
@@ -58,11 +58,16 @@ service window. Replace the placeholders, and trust the SQL Server issuing CA
 certificate in the local machine certificate store. SQL connections verify
 the server certificate; do not bypass validation.
 
+For SQL Server on this same machine, set `Tenant__Sql__Host` and the migration
+`-SqlHost` to `127.0.0.1`. In this local setup, `localhost` resolved to `::1`
+and timed out, while the IPv4 loopback connection succeeded. For a remote SQL
+Server, use its DNS name and ensure that name appears in the server certificate.
+
 ```powershell
 $env:DOTNET_ENVIRONMENT='Development'
 $env:Tenant__InstanceId='<stable-tenant-guid>'
 $env:Tenant__Adapter='Sql'
-$env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
+$env:Tenant__Sql__Host='127.0.0.1'
 $env:Tenant__Sql__Port='1433'
 $env:Tenant__Sql__Database='<TENANT_DATABASE>'
 $env:Tenant__Sql__User='<TENANT_RUNTIME_LOGIN>'
@@ -83,7 +88,7 @@ $env:ASPNETCORE_ENVIRONMENT='Development'
 $env:DOTNET_ENVIRONMENT='Development'
 $env:Tenant__Adapter='Sql'
 $env:Tenant__InstanceId='<stable-tenant-guid>'
-$env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
+$env:Tenant__Sql__Host='127.0.0.1'
 $env:Tenant__Sql__Port='1433'
 $env:Tenant__Sql__Database='<TENANT_DATABASE>'
 $env:Tenant__Sql__User='<TENANT_RUNTIME_LOGIN>'
@@ -102,7 +107,7 @@ service is single instance per tenant and runs at most ten execution children.
 ```powershell
 $env:DOTNET_ENVIRONMENT='Development'
 $env:Tenant__InstanceId='<stable-tenant-guid>'
-$env:Tenant__Sql__Host='<SQL_SERVER_FQDN>'
+$env:Tenant__Sql__Host='127.0.0.1'
 $env:Tenant__Sql__Port='1433'
 $env:Tenant__Sql__Database='<TENANT_DATABASE>'
 $env:Tenant__Sql__User='<TENANT_RUNTIME_LOGIN>'

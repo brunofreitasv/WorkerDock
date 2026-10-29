@@ -13,7 +13,7 @@ public sealed partial class SqlTemplateTests
     private static SqlJobConfiguration Configuration(SqlTemplateTargetFixture f,string kind="Query",bool transaction=true)=>
         new(f.Profile.ProfileId,f.Profile.AllowedCatalogs[0],kind,kind=="Query"?"INSERT [workerdock].SqlTemplateTarget(ExecutionKey,Amount,TextValue,OptionalValue) VALUES(@key,@amount,@text,@optional)":"[workerdock].InsertSqlTemplateTarget",
         [new("@key",SqlDbType.NVarChar,null,null,true,false,100,null,null),new("@amount",SqlDbType.Decimal,SqlTemplateTests.Json(12.34m),null,false,false,null,10,2),new("@text",SqlDbType.NVarChar,SqlTemplateTests.Json(Literal),null,false,false,400,null,null),new("@optional",SqlDbType.Int,null,null,false,true,null,null,null)],null,transaction);
-    private static TemplateExecutionContext Context(SqlTemplateTargetFixture f,SqlJobConfiguration configuration,string key,DateTimeOffset? until=null,bool diagnostic=false,string templateVersion="1.0.0")=>
+    private static TemplateExecutionContext Context(SqlTemplateTargetFixture f,SqlJobConfiguration configuration,string key,DateTimeOffset? until=null,bool diagnostic=false,string templateVersion="1.1.0")=>
         new(new ExecutionDescriptor(Guid.NewGuid(),1,"workerdock.sql-server",templateVersion,key,SqlTemplateTests.Json(configuration),f.Profile.ProfileRevisionId,SqlTemplateTests.Json(f.Profile),JsonSerializer.SerializeToElement(new { sqlProfileDiagnostic=diagnostic }),until),f.Vault,new SafeExecutionLog(_=>{}));
     [Trait("Store","Sql")]
     [Theory]

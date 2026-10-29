@@ -1,13 +1,10 @@
 import { useRef, type ReactNode } from "react";
 import {
-  Alert,
   AppBar,
   Box,
   Button,
-  Chip,
   Divider,
   Link,
-  Paper,
   Stack,
   Toolbar,
   Typography,
@@ -17,22 +14,27 @@ import { BrandMark } from "./BrandMark";
 interface Props {
   children: ReactNode;
   t: Labels;
-  navigation: { id: string; label: string }[];
+  displayName: string;
+  navigation: NavigationGroup[];
   active: string;
   onNavigate: (id: string) => void;
   mode: string;
-  canManage: boolean;
   authenticated: boolean;
   onSignOut: () => void;
+}
+export interface NavigationGroup {
+  id: string;
+  label: string;
+  items: { id: string; label: string }[];
 }
 export function AppShell({
   children,
   t,
+  displayName,
   navigation,
   active,
   onNavigate,
   mode,
-  canManage,
   authenticated,
   onSignOut,
 }: Props) {
@@ -63,14 +65,10 @@ export function AppShell({
         elevation={0}
         sx={{ borderBottom: "1px solid", borderColor: "divider" }}
       >
-        <Toolbar sx={{ gap: 2 }}>
+        <Toolbar sx={{ gap: 2, flexWrap: "wrap", py: 1 }}>
           <BrandMark size={36} />
-          <Typography
-            component="span"
-            variant="h6"
-            sx={{ fontWeight: 800, letterSpacing: "-.04em" }}
-          >
-            WorkerDock
+          <Typography component="span" variant="h6" sx={{ fontWeight: 800, letterSpacing: "-.04em", flex: 1, minWidth: 0, overflowWrap: "anywhere", lineHeight: 1.15 }}>
+            {displayName || "WorkerDock"}
           </Typography>
           <Typography
             variant="body2"
@@ -119,33 +117,60 @@ export function AppShell({
           <Typography variant="overline" color="text.secondary">
             {t.overview}
           </Typography>
-          <Stack
-            component="nav"
-            aria-label={t.tenant}
-            direction={{ xs: "row", md: "column" }}
-            sx={{ gap: 0.5, mt: 1, flexWrap: "wrap" }}
-          >
-            {navigation.map((item) => (
-              <Button
-                key={item.id}
-                component="a"
-                href={"#/" + item.id}
-                aria-current={active === item.id ? "page" : undefined}
-                onClick={(e) => {
-                  e.preventDefault();
-                  onNavigate(item.id);
-                }}
-                sx={{
-                  justifyContent: "flex-start",
-                  px: 2,
-                  py: 1.2,
-                  color: active === item.id ? "primary.dark" : "text.secondary",
-                  bgcolor: active === item.id ? "primary.light" : "transparent",
-                  fontWeight: active === item.id ? 700 : 500,
-                }}
+          <Stack component="nav" aria-label={t.tenant} direction="column" sx={{ gap: 2, mt: 1.5 }}>
+            {navigation.map((group) => (
+              <Box
+                component="section"
+                key={group.id}
+                aria-labelledby={`navigation-${group.id}`}
+                sx={{ minWidth: 0 }}
               >
-                {item.label}
-              </Button>
+                <Typography
+                  id={`navigation-${group.id}`}
+                  component="h2"
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: "block", px: 0.25, mb: 0.75, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}
+                >
+                  {group.label}
+                </Typography>
+                <Stack
+                  spacing={0.25}
+                  sx={{ ml: 0.5, pl: 1, borderLeft: "2px solid", borderColor: "divider" }}
+                >
+                  {group.items.map((item) => {
+                    const selected = active === item.id;
+                    return (
+                      <Button
+                        key={item.id}
+                        component="a"
+                        href={"#/" + item.id}
+                        aria-current={selected ? "page" : undefined}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          onNavigate(item.id);
+                        }}
+                        sx={{
+                          width: "100%",
+                          minHeight: 38,
+                          justifyContent: "flex-start",
+                          textAlign: "left",
+                          whiteSpace: "normal",
+                          borderRadius: 1.25,
+                          px: 1.25,
+                          py: 0.75,
+                          color: selected ? "primary.dark" : "text.secondary",
+                          bgcolor: selected ? "primary.light" : "transparent",
+                          fontWeight: selected ? 700 : 500,
+                          "&:hover": { bgcolor: selected ? "primary.light" : "action.hover" },
+                        }}
+                      >
+                        {item.label}
+                      </Button>
+                    );
+                  })}
+                </Stack>
+              </Box>
             ))}
           </Stack>
           <Divider sx={{ my: 3, display: { xs: "none", md: "block" } }} />
@@ -164,44 +189,6 @@ export function AppShell({
           tabIndex={-1}
           sx={{ minWidth: 0, p: { xs: 2, sm: 3, lg: 5 }, outlineOffset: -4 }}
         >
-          <Paper variant="outlined" sx={{ p: 2, mb: 4, borderRadius: 2 }}>
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={1.5}
-              sx={{
-                alignItems: { sm: "center" },
-                justifyContent: "space-between",
-              }}
-            >
-              <Box>
-                <Typography variant="overline" color="text.secondary">
-                  {t.access}
-                </Typography>
-                <Typography
-                  role="status"
-                  variant="body2"
-                  sx={{ fontWeight: 700 }}
-                >
-                  {mode === "Anonymous"
-                    ? t.anonymous
-                    : mode === "RoleProtected"
-                      ? t.roleProtected
-                      : t.authenticated}
-                </Typography>
-              </Box>
-              <Chip
-                label={canManage ? t.manage : t.readOnly}
-                size="small"
-                color={canManage ? "primary" : "default"}
-                variant="outlined"
-              />
-            </Stack>
-            {mode === "Anonymous" && (
-              <Alert severity="warning" icon={false} sx={{ mt: 2 }}>
-                {t.publicWarning}
-              </Alert>
-            )}
-          </Paper>
           {children}
         </Box>
       </Box>

@@ -108,10 +108,10 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
     private async ValueTask<ArchiveBatch?> GetPendingBatchAsync(CancellationToken ct) => await RunAsync(async (connection, transaction, token) =>
     {
         await using var command = Command(connection, transaction, """
-            SELECT TOP(1) b.BatchId,b.RelativePath,b.Sha256,b.RowCount,b.EligibleThroughUtc,b.LogCutoffUtc,b.State,b.FinalizedAtUtc,
+            SELECT TOP(1) b.BatchId,b.RelativePath,b.Sha256,b.[RowCount],b.EligibleThroughUtc,b.LogCutoffUtc,b.State,b.FinalizedAtUtc,
                 b.PurgedRowCount
             FROM [workerdock].ArchiveBatches b
-            WHERE b.State IN(N'Writing',N'Failed') OR (b.State=N'Finalized' AND b.RowCount>b.PurgedRowCount)
+            WHERE b.State IN(N'Writing',N'Failed') OR (b.State=N'Finalized' AND b.[RowCount]>b.PurgedRowCount)
             ORDER BY CASE WHEN b.State IN(N'Writing',N'Failed') THEN 0 ELSE 1 END,b.CreatedAtUtc,b.BatchId;
             """);
         await using var reader = await command.ExecuteReaderAsync(token);
@@ -130,7 +130,7 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
             var id = Guid.NewGuid();
             var path = id.ToString("N") + ".archive.gz";
             var through = nowUtc.UtcDateTime;
-            await using (var insert = Command(connection, transaction, "INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc) VALUES(@id,@path,@sha,0,@through,@logCutoff,N'Writing',SYSUTCDATETIME())"))
+            await using (var insert = Command(connection, transaction, "INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,[RowCount],EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc) VALUES(@id,@path,@sha,0,@through,@logCutoff,N'Writing',SYSUTCDATETIME())"))
             {
                 Add(insert, "@id", SqlDbType.UniqueIdentifier, id); Add(insert, "@path", SqlDbType.NVarChar, path, 500);
                 Add(insert, "@sha", SqlDbType.Char, new string('0', 64), 64); Add(insert, "@through", SqlDbType.DateTime2, through);
@@ -174,7 +174,7 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                 INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId)
                 SELECT @id,N'OperationalEvent',v.EventId FROM [workerdock].OperationalEvents v
                 WHERE v.EventKind=N'ScheduleRecovery' AND v.AtUtc<=@logCutoff;
-                UPDATE [workerdock].ArchiveBatches SET RowCount=(SELECT COUNT_BIG(*) FROM [workerdock].ArchiveBatchItems WHERE BatchId=@id) WHERE BatchId=@id;
+                UPDATE [workerdock].ArchiveBatches SET [RowCount]=(SELECT COUNT_BIG(*) FROM [workerdock].ArchiveBatchItems WHERE BatchId=@id) WHERE BatchId=@id;
                 """))
             {
                 Add(stage, "@id", SqlDbType.UniqueIdentifier, id); Add(stage, "@max", SqlDbType.Int, maxRows);
@@ -182,7 +182,7 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                 Add(stage, "@auditCutoff", SqlDbType.DateTime2, auditCutoff);
                 await stage.ExecuteNonQueryAsync(token);
             }
-            await using var count = Command(connection, transaction, "SELECT RowCount,RelativePath,Sha256,EligibleThroughUtc,LogCutoffUtc,State FROM [workerdock].ArchiveBatches WHERE BatchId=@id");
+            await using var count = Command(connection, transaction, "SELECT [RowCount],RelativePath,Sha256,EligibleThroughUtc,LogCutoffUtc,State FROM [workerdock].ArchiveBatches WHERE BatchId=@id");
             Add(count, "@id", SqlDbType.UniqueIdentifier, id);
             await using var reader = await count.ExecuteReaderAsync(token);
             if (!await reader.ReadAsync(token)) throw new WorkerDockException("RetentionUnavailable");
@@ -206,7 +206,7 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                 throw new WorkerDockException("ArchiveVerificationFailed");
             await RunAsync(async (connection, transaction, token) =>
             {
-                await using var finalize = Command(connection, transaction, "UPDATE [workerdock].ArchiveBatches SET Sha256=@sha,RowCount=@rows,State=N'Finalized',FinalizedAtUtc=@finalized WHERE BatchId=@id AND State IN(N'Writing',N'Failed') AND RowCount=@rows");
+                await using var finalize = Command(connection, transaction, "UPDATE [workerdock].ArchiveBatches SET Sha256=@sha,[RowCount]=@rows,State=N'Finalized',FinalizedAtUtc=@finalized WHERE BatchId=@id AND State IN(N'Writing',N'Failed') AND [RowCount]=@rows");
                 Add(finalize, "@sha", SqlDbType.Char, manifest.Sha256, 64); Add(finalize, "@rows", SqlDbType.BigInt, manifest.RowCount);
                 Add(finalize, "@finalized", SqlDbType.DateTime2, manifest.FinalizedUtc.UtcDateTime);
                 Add(finalize, "@id", SqlDbType.UniqueIdentifier, batch.BatchId);
@@ -347,7 +347,7 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
                 SELECT TOP(100) b.BatchId
                 FROM [workerdock].ArchiveBatches b
                 WHERE b.State=N'Finalized' AND b.FinalizedAtUtc<@finalizedBefore
-                  AND b.RowCount<=b.PurgedRowCount
+                  AND b.[RowCount]<=b.PurgedRowCount
                   AND (b.ArchiveRemovedAtUtc IS NULL
                     OR EXISTS(SELECT 1 FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=b.BatchId)
                     OR b.PurgedRowCount>0)
@@ -383,7 +383,7 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
             SELECT b.RelativePath,CONVERT(bit,CASE WHEN b.ArchiveRemovedAtUtc IS NULL THEN 0 ELSE 1 END)
             FROM [workerdock].ArchiveBatches b WITH(UPDLOCK,HOLDLOCK)
             WHERE b.BatchId=@id AND b.State=N'Finalized' AND b.FinalizedAtUtc<@finalizedBefore
-              AND b.RowCount<=b.PurgedRowCount
+              AND b.[RowCount]<=b.PurgedRowCount
               AND (b.ArchiveRemovedAtUtc IS NULL
                 OR EXISTS(SELECT 1 FROM [workerdock].ArchiveBatchItems i WHERE i.BatchId=b.BatchId)
                 OR b.PurgedRowCount>0);
@@ -457,7 +457,7 @@ public sealed class SqlRetentionService(TenantDatabaseOptions options, string? a
         await using var command = Command(connection, transaction, """
             EXEC sys.sp_set_session_context @key=N'WDArchivePurgeBatchId',@value=@batch;
             BEGIN TRY
-                UPDATE [workerdock].ArchiveBatches SET PurgedRowCount=PurgedRowCount+@purged WHERE BatchId=@batch AND State=N'Finalized' AND PurgedRowCount+@purged<=RowCount;
+                UPDATE [workerdock].ArchiveBatches SET PurgedRowCount=PurgedRowCount+@purged WHERE BatchId=@batch AND State=N'Finalized' AND PurgedRowCount+@purged<=[RowCount];
                 DECLARE @updated int=@@ROWCOUNT;
                 EXEC sys.sp_set_session_context @key=N'WDArchivePurgeBatchId',@value=NULL;
                 SELECT @updated;

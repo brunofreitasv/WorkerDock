@@ -51,7 +51,7 @@ public sealed partial class SqlTemplateTests
     public void Installed_descriptor_is_valid_and_immutable()
     {
         var descriptor=new SqlTemplate().Descriptor;
-        Assert.Equal("workerdock.sql-server",descriptor.Id); Assert.Equal("1.0.0",descriptor.Version);
+        Assert.Equal("workerdock.sql-server",descriptor.Id); Assert.Equal("1.1.0",descriptor.Version);
         Assert.Empty(TemplateSchemaValidator.ValidateDescriptor(descriptor)); Assert.Equal(TemplateMetadata.ComputeDigest(descriptor),descriptor.MetadataDigest);
         Assert.NotEmpty(new SqlTemplate().Validate(Json(Config(Guid.NewGuid()) with { CommandKind="Procedure",CommandText="[workerdock].proc; SELECT 1" })));
         Assert.NotEmpty(new SqlTemplate().Validate(Json(Config(Guid.NewGuid(),new SqlParameterConfiguration("@value",SqlDbType.Int,Json(1),new("secret"),false,false,null,null,null)))));
@@ -102,7 +102,7 @@ public sealed partial class SqlTemplateTests
     public async Task Missing_or_mismatched_profile_and_provider_failure_are_safe_before_effects()
     {
         var profile=Profile() with { Authentication="VaultPassword",UserName="worker",PasswordReference=new("password") };
-        var descriptor=new WorkerDock.Contracts.Execution.ExecutionDescriptor(Guid.NewGuid(),1,"workerdock.sql-server","1.0.0","key",Json(Config(profile.ProfileId)),Guid.NewGuid(),Json(profile),Json(new {}),null);
+        var descriptor=new WorkerDock.Contracts.Execution.ExecutionDescriptor(Guid.NewGuid(),1,"workerdock.sql-server","1.1.0","key",Json(Config(profile.ProfileId)),Guid.NewGuid(),Json(profile),Json(new {}),null);
         var context=new WorkerDock.Contracts.Templates.TemplateExecutionContext(descriptor,new SentinelVault(),new WorkerDock.Infrastructure.Logging.SafeExecutionLog(_=>{}));
         var mismatch=await new SqlTemplate().ExecuteAsync(context,default);Assert.Equal("ProfileRevisionMismatch",mismatch.SafeCode);Assert.False(mismatch.EffectsMayHaveOccurred);
         var unavailable=await new SqlTemplate().ExecuteAsync(context with { Execution=descriptor with { ProfileRevisionId=profile.ProfileRevisionId } },default);

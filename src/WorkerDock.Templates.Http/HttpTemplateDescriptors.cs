@@ -5,12 +5,10 @@ namespace WorkerDock.Templates.Http;
 
 public static class HttpTemplateDescriptors
 {
-    private static readonly TemplateDescriptor Legacy = Create("1.0.0", dynamicValues: false);
     private static readonly TemplateDescriptor Dynamic = Create("1.1.0", dynamicValues: true);
 
     public static TemplateDescriptor Get(string version) => version switch
     {
-        "1.0.0" => Legacy,
         "1.1.0" => Dynamic,
         _ => throw new ArgumentOutOfRangeException(nameof(version), "Unsupported HTTP template version.")
     };

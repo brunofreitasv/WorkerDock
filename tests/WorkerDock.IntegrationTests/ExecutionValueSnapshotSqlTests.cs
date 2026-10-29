@@ -40,18 +40,15 @@ public sealed class ExecutionValueSnapshotSqlTests
         await fixture.Database.ExecuteAsync($"UPDATE [workerdock].Jobs SET Enabled=1 WHERE JobId='{job.JobId}'");
         await SqlCapacityTestSetup.ReadyAsync(options, "boot-a");
         var run = await commands.RunNowAsync(job.JobId, "snapshot-restart", actor, default);
-        var projections = new SqlProjectionStore(options);
-        var envelope = Assert.Single(await projections.ReadPendingAsync(10, default));
-        var intent = (await projections.ReadAsync(envelope, 1, default)).Intent;
         var first = new SqlAttemptStore(options);
-        var lease = (await first.BeginAsync(intent, "boot-a", default)).Lease!;
-        var priorEvents = await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].AttemptStatusEvents WHERE ExecutionId='{run.TargetId}'");
+        var lease = (await first.BeginAsync(run.TargetId, "boot-a", default)).Lease!;
+        var priorEvents = await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].OperationalEvents WHERE ExecutionId='{run.TargetId}' AND Source=N'Lifecycle'");
         var firstDescriptor = await first.GetDescriptorAsync(lease, default);
         Assert.NotNull(firstDescriptor.ValueSnapshot);
         Assert.Equal(DateOnly.FromDateTime(firstDescriptor.ValueContext!.RequestedAtUtc!.Value.UtcDateTime).ToString("yyyy-MM-dd"),
             firstDescriptor.Configuration.GetProperty("parameters").GetProperty("when").GetString());
         Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{run.TargetId}' AND ValueSnapshotJson IS NOT NULL AND FirstStartedAtUtc IS NOT NULL"));
-        Assert.Equal(priorEvents, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].AttemptStatusEvents WHERE ExecutionId='{run.TargetId}'"));
+        Assert.Equal(priorEvents, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].OperationalEvents WHERE ExecutionId='{run.TargetId}' AND Source=N'Lifecycle'"));
         var restarted = new SqlAttemptStore(options);
         var secondDescriptor = await restarted.GetDescriptorAsync(lease, default);
         Assert.True(JsonElement.DeepEquals(JsonSerializer.SerializeToElement(firstDescriptor.ValueSnapshot),

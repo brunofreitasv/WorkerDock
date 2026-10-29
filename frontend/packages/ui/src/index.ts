@@ -1,4 +1,5 @@
 export { AppShell } from "./AppShell";
+export type { NavigationGroup } from "./AppShell";
 export { BrandMark } from "./BrandMark";
 export { translations, usePreferences, timeZones } from "./preferences";
 export type { Language, Labels } from "./preferences";

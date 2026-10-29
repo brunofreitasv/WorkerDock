@@ -244,8 +244,10 @@ public sealed class MigrationRunner(string connectionString, Guid instanceId, st
             command.Transaction = transaction;
             command.CommandText = batch;
             command.CommandTimeout = 60;
-            command.Parameters.Add(new SqlParameter("@InstanceId", SqlDbType.UniqueIdentifier) { Value = instanceId });
-            command.Parameters.Add(new SqlParameter("@RuntimePrincipal", SqlDbType.NVarChar, 128) { Value = runtimePrincipal });
+            if (batch.Contains("@InstanceId", StringComparison.Ordinal))
+                command.Parameters.Add(new SqlParameter("@InstanceId", SqlDbType.UniqueIdentifier) { Value = instanceId });
+            if (batch.Contains("@RuntimePrincipal", StringComparison.Ordinal))
+                command.Parameters.Add(new SqlParameter("@RuntimePrincipal", SqlDbType.NVarChar, 128) { Value = runtimePrincipal });
             await command.ExecuteNonQueryAsync(ct);
         }
     }

@@ -34,11 +34,10 @@ public sealed class DynamicValuePersistenceTests
             UPDATE [workerdock].Jobs SET CurrentRevision=1 WHERE JobId='{{jobId}}';
             INSERT [workerdock].Executions(ExecutionId,JobId,JobRevision,TriggerKind,IdempotencyKey,State,Certainty,AvailableAtUtc,CorrelationId,CreatedAtUtc,AggregatedAtUtc,ValueContextJson,ValueSnapshotJson)
             VALUES('{{executionId}}','{{jobId}}',1,N'Manual',N'archive-key',N'Succeeded',N'Known',SYSUTCDATETIME(),NEWID(),DATEADD(day,-30,SYSUTCDATETIME()),DATEADD(day,-29,SYSUTCDATETIME()),N'{{contextJson}}',N'{{snapshotJson}}');
-            INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc)
+            INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,[RowCount],EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc)
             VALUES('{{batchId}}',N'{{batchId:N}}.archive.gz',REPLICATE('0',64),1,SYSUTCDATETIME(),DATEADD(day,-365,SYSUTCDATETIME()),N'Writing',DATEADD(minute,-1,SYSUTCDATETIME()));
             INSERT [workerdock].ArchiveBatchItems(BatchId,RecordKind,RecordId) VALUES('{{batchId}}',N'Execution','{{executionId}}');
             UPDATE [workerdock].TenantSettings SET ArchiveBeforeDelete=1,ArchiveRetentionDays=90,ExecutionRetentionDays=1,RetentionVersion=RetentionVersion+1;
-            UPDATE [workerdock].RetentionPolicy SET ArchiveBeforeDelete=1,ArchiveDays=90,ExecutionDays=1 WHERE PolicyId=1;
             """);
         var archiveRoot = Path.Combine(Path.GetTempPath(), "workerdock-task6-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(archiveRoot);
@@ -166,12 +165,13 @@ public sealed class DynamicValuePersistenceTests
         var runner = new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot);
         await runner.ApplyAsync("tenant", "0001_initial", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        await JobCommandTestCatalog.RegisterSqlAsync(options);
         var catalog = JobCommandTestCatalog.Create();
         var commands = new SqlJobCommands(options, catalog);
         var actor = new ActorContext("issuer:subject", "Entra", Guid.NewGuid());
         var sidecar = JsonDocument.Parse("""{"resolverVersion":1,"timeZoneId":"America/Sao_Paulo","bindings":[]}""");
         using var expectedPlan = JsonDocument.Parse("""{"resolverVersion":1,"timeZoneId":"America/Sao_Paulo","bindings":[]}""");
-        var job = new JobRevision(Guid.NewGuid(), 0, "Dynamic", "workerdock.http", "1.0.0",
+        var job = new JobRevision(Guid.NewGuid(), 0, "Dynamic", "workerdock.http", "1.1.0",
             JsonDocument.Parse("{}").RootElement.Clone(), null,
             new(null, 1, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), 0.1, Array.Empty<string>(), false, "Queue", 10, 5),
             sidecar.RootElement);

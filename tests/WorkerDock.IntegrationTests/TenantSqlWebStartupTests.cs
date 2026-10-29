@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Jobs;
 using WorkerDock.Application.Monitoring;
 using WorkerDock.Contracts.Secrets;
@@ -47,10 +48,48 @@ public sealed class TenantSqlWebStartupTests : IDisposable
             ["Tenant:Sql:Database"] = "Tenant",
             ["Tenant:Sql:User"] = "TenantUser",
             ["Tenant:Sql:PasswordReference"] = "tenant.database.password"
-        }).WithWebHostBuilder(builder => builder.ConfigureServices(services => services.AddSingleton<ISecretVault>(new TenantTestVault())));
+        }).WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+        {
+            services.AddSingleton<ISecretVault>(new TenantTestVault());
+            WorkerDock.Contracts.Templates.TemplateDescriptor[] templates =
+            [
+                new WorkerDock.Templates.SqlServer.SqlTemplate("1.1.0").Descriptor,
+                WorkerDock.Templates.Http.HttpTemplateDescriptors.Get("1.1.0")
+            ];
+            services.AddSingleton<WorkerDock.Application.Templates.ITemplateCatalog>(new WorkerDock.Infrastructure.Templates.TemplateCatalog(templates));
+        }));
         using var client = factory.CreateClient();
         Assert.IsType<SqlJobCommands>(factory.Services.GetRequiredService<IJobCommands>());
         Assert.IsType<SqlMonitoringQueries>(factory.Services.GetRequiredService<IMonitoringQueries>());
+    }
+
+    [Fact]
+    [Trait("Store", "Sql")]
+    public async Task Sql_web_startup_registers_trusted_templates_for_the_catalog_page()
+    {
+        await using var fixture = new TenantSqlFixture();
+        await fixture.CreateAsync(false);
+        await fixture.Runner.ApplyAsync("tenant", "0002_template_catalog_registration", default);
+        var runtime = new SqlConnectionStringBuilder(fixture.RuntimeConnectionString);
+        var address = runtime.DataSource.StartsWith("tcp:", StringComparison.OrdinalIgnoreCase)
+            ? runtime.DataSource[4..]
+            : runtime.DataSource;
+        var comma = address.LastIndexOf(',');
+        var settings = new Dictionary<string, string?>
+        {
+            ["Tenant:Adapter"] = "Sql",
+            ["Tenant:InstanceId"] = fixture.Database.InstanceId.ToString(),
+            ["Tenant:Sql:Host"] = comma < 0 ? address : address[..comma],
+            ["Tenant:Sql:Port"] = comma < 0 ? "1433" : address[(comma + 1)..],
+            ["Tenant:Sql:Database"] = runtime.InitialCatalog,
+            ["Tenant:Sql:User"] = runtime.UserID,
+            ["Tenant:Sql:PasswordReference"] = "tenant.database.password"
+        };
+        await using var factory = Host("Development", settings).WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.AddSingleton<ISecretVault>(new TenantTestVault(runtime.Password))));
+
+        using var client = factory.CreateClient();
+        Assert.Equal(2, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].TemplateCatalog WHERE DescriptorJson IS NOT NULL"));
     }
 
     [Theory]
@@ -82,20 +121,30 @@ public sealed class TenantSqlWebStartupTests : IDisposable
         Assert.Equal("LegacyConnectionStringUnsupported", error.Message);
     }
 
-    private static WebApplicationFactory<WorkerDock.Web.WebAssemblyMarker> Host(string environment, Dictionary<string, string?> settings)
+    private WebApplicationFactory<WorkerDock.Web.WebAssemblyMarker> Host(string environment, Dictionary<string, string?> settings)
     {
-        settings["DataProtection:KeyDirectory"] = Path.Combine(Path.GetTempPath(), "WorkerDockSqlKeys_" + Guid.NewGuid().ToString("N"));
+        var keyDirectory = Path.Combine(Path.GetTempPath(), "WorkerDockSqlKeys_" + Guid.NewGuid().ToString("N"));
+        _keyDirectories.Add(keyDirectory);
+        settings["DataProtection:KeyDirectory"] = keyDirectory;
         return new WebApplicationFactory<WorkerDock.Web.WebAssemblyMarker>().WithWebHostBuilder(builder =>
             builder.UseEnvironment(environment).ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(settings)));
     }
 
-    private sealed class TenantTestVault : ISecretVault
+    public void Dispose()
+    {
+        foreach (var directory in _keyDirectories)
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private sealed class TenantTestVault(string password = "synthetic-tenant-password") : ISecretVault
     {
         public ValueTask<SecretValue> ResolveAsync(SecretReference reference, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
             if (reference.Name != "tenant.database.password") throw new SecretUnavailableException();
-            return ValueTask.FromResult(new SecretValue("synthetic-tenant-password"));
+            return ValueTask.FromResult(new SecretValue(password.AsSpan()));
         }
     }
 }

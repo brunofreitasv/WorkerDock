@@ -124,14 +124,13 @@ public sealed class HttpTemplateTests
     }
 
     [Fact]
-    public void Http_template_versions_keep_legacy_metadata_and_publish_dynamic_v1_1()
+    public void Http_template_exposes_only_v1_1_metadata()
     {
         var legacy = new HttpTemplate(new HttpClient());
         var dynamic = new HttpTemplate(new HttpClient(), version: "1.1.0");
-        Assert.Equal("1.0.0", legacy.Descriptor.Version);
+        Assert.Equal("1.1.0", legacy.Descriptor.Version);
         Assert.Equal("1.1.0", dynamic.Descriptor.Version);
-        Assert.Equal("D2D2BF6AC72E90F986BC3347E7B96D831CA9D63789FF600C5072B50F37855956", legacy.Descriptor.MetadataDigest);
-        Assert.Equal(JsonValueKind.Object, legacy.Descriptor.ConfigurationSchema.GetProperty("properties").GetProperty("parameters").GetProperty("additionalProperties").ValueKind);
+        Assert.Throws<ArgumentOutOfRangeException>(() => HttpTemplateDescriptors.Get("1.0.0"));
         Assert.True(dynamic.Descriptor.ConfigurationSchema.GetProperty("properties").GetProperty("parameters").GetProperty("additionalProperties").GetProperty("x-workerDock-dynamicValue").GetBoolean());
     }
 
@@ -260,7 +259,7 @@ public sealed class HttpTemplateTests
     {
         var template = new HttpTemplate(new HttpClient(new HttpClientHandler()));
         Assert.Equal("workerdock.http", template.Descriptor.Id);
-        Assert.Equal("1.0.0", template.Descriptor.Version);
+        Assert.Equal("1.1.0", template.Descriptor.Version);
         Assert.Contains("SafeSummary", template.Descriptor.ConfigurationSchema.GetRawText());
     }
 
@@ -454,7 +453,7 @@ public sealed class HttpTemplateTests
     }
 
     private static JsonElement Config(string url, int? timeoutSeconds = null, string method = "GET") => JsonSerializer.SerializeToElement(new { method, url, query = new { }, headers = new { }, secretHeaders = new { }, parameters = new { }, timeoutSeconds, successStatuses = Array.Empty<int>(), maxResponseBytes = 1024, responseMode = "SafeSummary" });
-    private static TemplateExecutionContext Context(JsonElement configuration, DateTimeOffset? deadline, ISecretVault? secrets = null, string version = "1.0.0") => new(new(Guid.NewGuid(), 1, "workerdock.http", version, "stable-key", configuration, null, null, JsonDocument.Parse("{}").RootElement, deadline), secrets ?? new NoSecrets(), new NoLog());
+    private static TemplateExecutionContext Context(JsonElement configuration, DateTimeOffset? deadline, ISecretVault? secrets = null, string version = "1.1.0") => new(new(Guid.NewGuid(), 1, "workerdock.http", version, "stable-key", configuration, null, null, JsonDocument.Parse("{}").RootElement, deadline), secrets ?? new NoSecrets(), new NoLog());
     private sealed class NoSecrets : ISecretVault { public ValueTask<SecretValue> ResolveAsync(SecretReference reference, CancellationToken ct) => throw new SecretUnavailableException(); }
     private sealed class FixedPolicy(ApprovedDestination destination) : IOutboundPolicy { public ValueTask<ApprovedDestination> ResolveAsync(OutboundTarget target, CancellationToken ct) => ValueTask.FromResult(destination); }
     private sealed class HttpsOnlyTestPolicy(ApprovedDestination destination) : IOutboundPolicy

@@ -10,13 +10,11 @@ namespace WorkerDock.IntegrationTests;
 public sealed class SqlTemplateAuthoringTests
 {
     [Fact]
-    public void Sql_template_versions_retain_legacy_digest_and_annotate_only_v11_values()
+    public void Sql_template_exposes_only_v11_and_annotates_dynamic_values()
     {
-        var old = SqlTemplateDescriptors.Get("1.0.0");
-        Assert.Equal("B9E119AAD34E89E0A5A4332F97A757017C2F1D1C208CF5D0FAE4E65B0902717F", old.MetadataDigest);
-        Assert.Equal("1.0.0", new SqlTemplate().Descriptor.Version);
+        Assert.Throws<ArgumentOutOfRangeException>(() => SqlTemplateDescriptors.Get("1.0.0"));
+        Assert.Equal("1.1.0", new SqlTemplate().Descriptor.Version);
         Assert.Equal("1.1.0", new SqlTemplate("1.1.0").Descriptor.Version);
-        Assert.False(old.ConfigurationSchema.GetProperty("properties").GetProperty("parameters").GetProperty("items").GetProperty("properties").GetProperty("value").TryGetProperty("x-workerDock-dynamicValue", out _));
         Assert.True(SqlTemplateDescriptors.Get("1.1.0").ConfigurationSchema.GetProperty("properties").GetProperty("parameters").GetProperty("items").GetProperty("properties").GetProperty("value").GetProperty("x-workerDock-dynamicValue").GetBoolean());
     }
 
@@ -101,18 +99,16 @@ public sealed class SqlTemplateAuthoringTests
     }
 
     [Fact]
-    public async Task Versioned_date_conversion_is_wall_clock_deterministic_and_legacy_overload_remains()
+    public async Task Date_conversion_is_wall_clock_deterministic()
     {
         var config = Base("SELECT @value") with { CommandKind = "Query", Parameters = [new("@value", SqlDbType.Date, JsonSerializer.SerializeToElement("2026-10-20"), null, false, false, null, null, null)] };
         using var connection = new Microsoft.Data.SqlClient.SqlConnection();
-        using var command = await SqlTemplate.BuildCommandAsync(config, connection, new SqlTemplateTests.NoVault(), "key", null, default, "1.1.0");
+        using var command = await SqlTemplate.BuildCommandAsync(config, connection, new SqlTemplateTests.NoVault(), "key", null, default);
         var value = Assert.IsType<DateTime>(command.Parameters["@value"].Value);
         Assert.Equal(DateTimeKind.Unspecified, value.Kind);
         Assert.Equal(new DateTime(2026, 10, 20), value);
         using var noDeadline = await SqlTemplate.BuildCommandAsync(config, connection, new SqlTemplateTests.NoVault(), "key", null, default);
         Assert.Equal(0, noDeadline.CommandTimeout);
-        using var legacy = await SqlTemplate.BuildCommandAsync(config, connection, new SqlTemplateTests.NoVault(), "key", null, default);
-        Assert.Equal(command.CommandText, legacy.CommandText);
     }
 
     [Fact]
@@ -120,7 +116,7 @@ public sealed class SqlTemplateAuthoringTests
     {
         var config = Base("SELECT @value") with { CommandKind = "Query", Parameters = [new("@value", SqlDbType.DateTime2, JsonSerializer.SerializeToElement("2026-10-20T09:30:00+02:00"), null, false, false, null, null, null)] };
         using var connection = new Microsoft.Data.SqlClient.SqlConnection();
-        using var command = await SqlTemplate.BuildCommandAsync(config, connection, new SqlTemplateTests.NoVault(), "key", null, default, "1.1.0");
+        using var command = await SqlTemplate.BuildCommandAsync(config, connection, new SqlTemplateTests.NoVault(), "key", null, default);
         var value = Assert.IsType<DateTime>(command.Parameters["@value"].Value);
         Assert.Equal(DateTimeKind.Unspecified, value.Kind);
         Assert.Equal(new DateTime(2026, 10, 20, 9, 30, 0), value);

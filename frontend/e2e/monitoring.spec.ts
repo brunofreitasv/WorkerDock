@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
 test("viewer can inspect safe dashboard and paged job history", async ({ page }) => {
   await page.goto("/#/dashboard");
   await expect(page.getByText("Nightly report", { exact: false }).first()).toBeVisible();
-  await page.getByRole("link", { name: "Monitoring" }).click();
+  await page.getByRole("link", { name: "Job monitoring" }).click();
   await expect(page.getByRole("table", { name: "Jobs" })).toBeVisible();
   await expect(page.getByText("report · 1")).toBeVisible();
   await expect(page.getByRole("button", { name: "Next" })).toBeDisabled();

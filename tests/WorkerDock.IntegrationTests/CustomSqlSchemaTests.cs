@@ -66,6 +66,39 @@ public sealed class CustomSqlSchemaTests
     }
 
     [Fact]
+    public void Fresh_baseline_quotes_sql_server_reserved_row_count_identifier()
+    {
+        var directory = Path.Combine(Root, "database", "tenant");
+        foreach (var file in new[] { "0001_initial.up.sql", "current-state.sql" })
+        {
+            var sql = File.ReadAllText(Path.Combine(directory, file));
+            Assert.DoesNotMatch(@"(?<![\w\[@])RowCount(?![\w\]])", sql);
+            Assert.Contains("[RowCount]", sql);
+        }
+    }
+
+    [Fact]
+    public void Fresh_baseline_adds_retention_settings_before_compiling_retention_procedures()
+    {
+        var directory = Path.Combine(Root, "database", "tenant");
+        foreach (var file in new[] { "0001_initial.up.sql", "current-state.sql" })
+        {
+            var sql = File.ReadAllText(Path.Combine(directory, file));
+            Assert.True(sql.IndexOf("ALTER TABLE [workerdock].TenantSettings ADD", StringComparison.Ordinal) <
+                        sql.IndexOf("CREATE PROCEDURE [workerdock].PurgeAuditEvents", StringComparison.Ordinal));
+            Assert.Matches(@"(?s)ALTER TABLE \[workerdock\]\.TenantSettings ADD\s+.*?RetentionVersion bigint NOT NULL CONSTRAINT DF_TenantSettings_RetentionVersion DEFAULT\(1\);\s*GO\s*ALTER TABLE \[workerdock\]\.TenantSettings ADD CONSTRAINT CK_TenantSettings_Retention", sql);
+            var manualRequestExpiry = sql.IndexOf("ManualRequestExpiresAtUtc datetime2(7) NULL", StringComparison.Ordinal);
+            Assert.True(manualRequestExpiry >= 0 && manualRequestExpiry <
+                        sql.IndexOf("CREATE PROCEDURE [workerdock].PurgeRetentionItems", StringComparison.Ordinal));
+            Assert.True(sql.LastIndexOf("ALTER TABLE [workerdock].", StringComparison.Ordinal) <
+                        sql.IndexOf("CREATE PROCEDURE [workerdock].", StringComparison.Ordinal));
+            Assert.Matches(@"(?s)ALTER TABLE \[workerdock\]\.JobRevisions ADD DynamicValuesJson nvarchar\(max\) NULL;\s*GO\s*ALTER TABLE \[workerdock\]\.JobRevisions ADD CONSTRAINT CK_JobRevisions_DynamicValuesJson", sql);
+            Assert.Matches(@"(?s)ValueResolutionError nvarchar\(80\) NULL;\s*GO\s*ALTER TABLE \[workerdock\]\.Executions ADD CONSTRAINT CK_Executions_ValueContextJson", sql);
+            Assert.Matches(@"ALTER TABLE \[workerdock\]\.IntegrationSettings ADD EgressPoliciesJson nvarchar\(max\) NOT NULL CONSTRAINT DF_IntegrationSettings_EgressPolicies DEFAULT\(N'\[\]'\);\s*GO\s*UPDATE settings SET EgressPoliciesJson", sql);
+        }
+    }
+
+    [Fact]
     [Trait("Store", "Sql")]
     public async Task FreshInstall_HasNoQuartzObjects()
     {
@@ -98,7 +131,7 @@ public sealed class CustomSqlSchemaTests
 
     [Theory]
     [InlineData("INSERT [workerdock].AlertSinks(SinkId,Name,CurrentRevision,Enabled) VALUES(NEWID(),N'custom',1,1)", "SELECT COUNT(*) FROM [workerdock].AlertSinks")]
-    [InlineData("INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,RowCount,EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc) VALUES(NEWID(),N'archives/custom.ndjson',REPLICATE('A',64),1,SYSUTCDATETIME(),SYSUTCDATETIME(),N'Writing',SYSUTCDATETIME())", "SELECT COUNT(*) FROM [workerdock].ArchiveBatches")]
+    [InlineData("INSERT [workerdock].ArchiveBatches(BatchId,RelativePath,Sha256,[RowCount],EligibleThroughUtc,LogCutoffUtc,State,CreatedAtUtc) VALUES(NEWID(),N'archives/custom.ndjson',REPLICATE('A',64),1,SYSUTCDATETIME(),SYSUTCDATETIME(),N'Writing',SYSUTCDATETIME())", "SELECT COUNT(*) FROM [workerdock].ArchiveBatches")]
     [InlineData("UPDATE [workerdock].TenantSettings SET DisplayName=N'Custom tenant'", "SELECT COUNT(*) FROM [workerdock].TenantSettings WHERE DisplayName=N'Custom tenant'")]
     [InlineData("INSERT [workerdock].ConnectionProfiles(ProfileId,Name,CurrentRevisionId,Retired) VALUES(NEWID(),N'custom',NULL,0)", "SELECT COUNT(*) FROM [workerdock].ConnectionProfiles")]
     [InlineData("UPDATE [workerdock].IntegrationSettings SET ProviderId=N'custom.provider'", "SELECT COUNT(*) FROM [workerdock].IntegrationSettings WHERE ProviderId=N'custom.provider'")]
@@ -162,6 +195,7 @@ public sealed class CustomSqlSchemaTests
         var down = File.ReadAllText(Path.Combine(root, "database", "tenant", "0001_initial.down.sql"));
         var queue = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Executions", "SqlExecutionQueue.cs"));
         var attempts = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Executions", "SqlAttemptStore.cs"));
+        var retention = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Retention", "SqlRetentionService.cs"));
         var alerts = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Alerts", "IncidentEvaluator.cs"));
         var monitoring = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Monitoring", "SqlMonitoringQueries.cs"));
 
@@ -178,7 +212,10 @@ public sealed class CustomSqlSchemaTests
         Assert.Matches(@"(?m)^GO\r?\nCREATE PROCEDURE \[workerdock\]\.PurgeOperationalEvents", up);
         Assert.Contains("i.RecordKind=N'OperationalEvent'", up);
         Assert.Contains("r.AtUtc>b.LogCutoffUtc", up);
-        Assert.Contains("i.PurgedRowCount<=i.RowCount", up);
+        Assert.Contains("i.PurgedRowCount<=i.[RowCount]", up);
+        Assert.Contains("b.[RowCount]", retention);
+        Assert.Contains("PurgedRowCount+@purged<=[RowCount]", retention);
+        Assert.DoesNotContain("b.RowCount", retention);
         Assert.DoesNotMatch(@"(?m)^INSERT \[workerdock\]\.OperationalEvents\(EventId,EventKind,ExecutionId,AttemptId,Source,Sequence,AtUtc,Code,SafeFieldsJson\)\s*$", up);
         Assert.DoesNotContain("RetentionPurgeAudit", up, StringComparison.Ordinal);
         Assert.Contains("(i.ArchiveRemovedAtUtc IS NULL AND d.ArchiveRemovedAtUtc IS NULL OR i.ArchiveRemovedAtUtc=d.ArchiveRemovedAtUtc)", up, StringComparison.Ordinal);

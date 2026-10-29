@@ -49,4 +49,14 @@ describe("integration and alert guides", () => {
       expect(delivery).toMatch(language === "en" ? /retry|retried/ : /tentar novamente|repeti/);
     }
   });
+
+  it("documents only built-in template version 1.1.0", () => {
+    for (const language of ["en", "pt-BR"] as const) {
+      for (const slug of ["templates", "job-inputs"] as const) {
+        const article = getHelpArticle(language, slug)!;
+        expect(article).toContain("1.1.0");
+        expect(article).not.toContain("1.0.0");
+      }
+    }
+  });
 });
