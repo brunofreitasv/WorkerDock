@@ -333,7 +333,8 @@ internal sealed class UnavailableMonitoringQueries(Guid instanceId, TimeProvider
     public ValueTask<Page<JobSummaryDto>> JobsAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<JobSummaryDto>>();
     public ValueTask<Page<ExecutionHistoryItemDto>> ExecutionsAsync(ExecutionHistoryFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<ExecutionHistoryItemDto>>();
     public ValueTask<ExecutionDetailsDto> ExecutionAsync(Guid executionId, CancellationToken ct) => Unavailable<ExecutionDetailsDto>();
-    public ValueTask<Page<AuditSummaryDto>> AuditAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<AuditSummaryDto>>();
+      public ValueTask<Page<AuditSummaryDto>> AuditAsync(AuditHistoryFilter filter, PageRequest page, CancellationToken ct) => Unavailable<Page<AuditSummaryDto>>();
+      public ValueTask<IReadOnlyList<string>> AuditEventTypesAsync(CancellationToken ct) => Unavailable<IReadOnlyList<string>>();
     public ValueTask<RuntimeStatusDto> WorkersAsync(CancellationToken ct) => Unavailable<RuntimeStatusDto>();
     public ValueTask<TenantHealthDto> HealthAsync(CancellationToken ct) => ValueTask.FromResult(new TenantHealthDto(instanceId, "Unavailable", new Dictionary<string,string> { ["web"] = "Healthy", ["database"] = "Unavailable" }, clock.GetUtcNow()));
 }

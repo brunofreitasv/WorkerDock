@@ -4,6 +4,7 @@ public sealed record PageRequest(string? Cursor, int Limit);
 public sealed record Page<T>(IReadOnlyList<T> Items, string? NextCursor);
 public sealed record MonitoringFilter(DateTimeOffset FromUtc, DateTimeOffset ToUtc, string? Search, string? State, string? TemplateId);
 public sealed record ExecutionHistoryFilter(DateTimeOffset FromUtc, DateTimeOffset ToUtc, string? Search, string? State, string? TemplateId, Guid? JobId = null);
+public sealed record AuditHistoryFilter(DateTimeOffset FromUtc, DateTimeOffset ToUtc, string? Search, string? EventType);
 
 public sealed record DashboardDto(
     Guid InstanceId,

@@ -14,7 +14,12 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/monitoring/jobs**", route => route.fulfill({ json: { items: [{ jobId: "33333333-3333-4333-8333-333333333333", revision: 2, name: "Nightly report", templateId: "report", templateVersion: "1", enabled: true, archived: false, hasSchedule: true, schedulePaused: false, activeExecutions: 0, failed24h: 1, createdAtUtc: "2026-10-01T00:00:00Z" }], nextCursor: null } }));
   await page.route("**/api/monitoring/workers", route => route.fulfill({ json: [] }));
   await page.route("**/api/monitoring/executions**", route => route.fulfill({ json: { items: [{ executionId: "22222222-2222-4222-8222-222222222222", jobId: "33333333-3333-4333-8333-333333333333", jobName: "Nightly report", templateId: "report", state: "Succeeded", triggerKind: "Schedule", createdAtUtc: "2026-10-18T11:00:00Z", startedAtUtc: "2026-10-18T11:00:01Z", duration: "00:00:42" }], nextCursor: null } }));
-  await page.route("**/api/audit**", route => route.fulfill({ json: { items: [], nextCursor: null } }));
+  await page.route("**/api/audit**", route => {
+    const pathname = new URL(route.request().url()).pathname;
+    return pathname.endsWith("/event-types")
+      ? route.fulfill({ json: ["JobRevisionSaved", "ManualRunAccepted"] })
+      : route.fulfill({ json: { items: [], nextCursor: null } });
+  });
 });
 
 test("viewer can inspect safe dashboard and paged job history", async ({ page }) => {
@@ -36,10 +41,13 @@ test("viewer can open full execution history from the Dashboard", async ({ page 
   await expect(page.getByRole("button", { name: /enable|retry|manage/i })).toHaveCount(0);
 });
 
-test("worker and audit routes expose read-only operational views", async ({ page }) => {
-  await page.goto("/#/workers");
-  await expect(page.getByRole("table", { name: "Workers" })).toBeVisible();
-  await expect(page.getByText("No workers registered.")).toBeVisible();
-  await page.getByRole("link", { name: "Audit" }).click();
-  await expect(page.getByRole("table", { name: "Audit" })).toBeVisible();
+test("viewer can filter read-only audit history", async ({ page }) => {
+  await page.goto("/#/audit");
+  const table = page.getByRole("table", { name: "Audit" });
+  await expect(table).toBeVisible();
+  await expect(page.getByRole("button", { name: "Last 7 days" })).toBeVisible();
+  await page.getByRole("combobox", { name: "Event type" }).click();
+  await page.getByRole("option", { name: "JobRevisionSaved" }).click();
+  await expect(table).toBeVisible();
+  await expect(page.getByRole("button", { name: /manage|edit|delete/i })).toHaveCount(0);
 });

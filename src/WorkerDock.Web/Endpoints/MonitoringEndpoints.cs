@@ -60,9 +60,15 @@ public static class MonitoringEndpoints
 
         endpoints.MapGet("/api/audit", async (HttpRequest request, IMonitoringQueries queries, TimeProvider clock, CancellationToken ct) =>
         {
-            if (!TryPage(request, out var page) || !TryFilter(request, clock, out var filter)) return ValidationProblem();
+            if (!TryPage(request, out var page) || !TryAuditHistoryFilter(request, clock, out var filter)) return ValidationProblem();
             try { return Results.Ok(await queries.AuditAsync(filter!, page!, ct)); }
             catch (WorkerDockException error) when (error.Code == "ValidationFailed") { return ValidationProblem(); }
+            catch { return Results.Problem(statusCode: 503, extensions: new Dictionary<string, object?> { ["code"] = "MonitoringUnavailable" }); }
+        }).RequireAuthorization(AccessPolicies.Read);
+
+        endpoints.MapGet("/api/audit/event-types", async (IMonitoringQueries queries, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await queries.AuditEventTypesAsync(ct)); }
             catch { return Results.Problem(statusCode: 503, extensions: new Dictionary<string, object?> { ["code"] = "MonitoringUnavailable" }); }
         }).RequireAuthorization(AccessPolicies.Read);
     }
@@ -114,6 +120,27 @@ public static class MonitoringEndpoints
             search is { Length: > 100 } || template is { Length: > 100 } || state is not null && !states.Contains(state, StringComparer.Ordinal)) return false;
         filter = new(normalizedFrom, normalizedTo, string.IsNullOrEmpty(search) ? null : search, state,
             string.IsNullOrEmpty(template) ? null : template);
+        return true;
+    }
+
+    private static bool TryAuditHistoryFilter(HttpRequest request, TimeProvider clock, out AuditHistoryFilter? filter)
+    {
+        filter = null;
+        var now = clock.GetUtcNow().ToUniversalTime();
+        var rawFrom = request.Query["fromUtc"].FirstOrDefault();
+        var rawTo = request.Query["toUtc"].FirstOrDefault();
+        var from = ParseDate(rawFrom);
+        var to = ParseDate(rawTo);
+        if ((rawFrom is not null && from is null) || (rawTo is not null && to is null)) return false;
+        var normalizedFrom = from ?? now.AddDays(-7);
+        var normalizedTo = to ?? now;
+        var search = request.Query["search"].FirstOrDefault()?.Trim();
+        var eventType = request.Query["eventType"].FirstOrDefault()?.Trim();
+        if (normalizedFrom >= normalizedTo || normalizedTo - normalizedFrom > TimeSpan.FromDays(365) ||
+            search is { Length: > 100 } || eventType is { Length: > 100 }) return false;
+        filter = new(normalizedFrom, normalizedTo,
+            string.IsNullOrEmpty(search) ? null : search,
+            string.IsNullOrEmpty(eventType) ? null : eventType);
         return true;
     }
 

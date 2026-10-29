@@ -25,6 +25,10 @@ public sealed class MonitoringAccessTests
         Assert.Equal(HttpStatusCode.BadRequest, badJobsPage.StatusCode);
         using var badAuditRange = await client.GetAsync("/api/audit?limit=0");
         Assert.Equal(HttpStatusCode.BadRequest, badAuditRange.StatusCode);
+        using var eventTypes = await client.GetAsync("/api/audit/event-types");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, eventTypes.StatusCode);
+        using var tooWideAuditRange = await client.GetAsync("/api/audit?fromUtc=2024-01-01T00:00:00Z&toUtc=2025-01-01T00:00:00Z");
+        Assert.Equal(HttpStatusCode.BadRequest, tooWideAuditRange.StatusCode);
         using var invalidDate = await client.GetAsync("/api/monitoring/jobs?fromUtc=not-a-date");
         Assert.Equal(HttpStatusCode.BadRequest, invalidDate.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/monitoring/jobs/{Guid.NewGuid()}/executions")).StatusCode);

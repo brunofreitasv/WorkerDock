@@ -10,10 +10,11 @@ Read access is sufficient. Audit is a read-only view. The table contains summary
 
 ## Steps
 
-1. Open [Audit](#/audit). Use **Search audit** to filter the available summaries. Use **Next** and **Previous** to move through pages.
-2. Review **Time UTC**, **Action**, **Actor**, **Mode**, and **Correlation**. Use the correlation ID to connect records from the same operation; use UTC when comparing with other systems.
-3. Check **Updated** and any warning after refreshing. Treat the last successful response as stale if the view says the refresh failed.
-4. For execution state transitions and attempts, open the [execution events](#/help:execution-events) guide.
+1. Open [Audit](#/audit). Search by actor, correlation ID, or action summary, and select an exact **Event type**. Use **Next** and **Previous** to move through pages.
+2. Choose a preset period or enter a custom range. The page starts with the last seven days; custom searches can span up to 365 days. Dates are interpreted in your selected time zone, with the end date included.
+3. Review **Time**, **Action**, **Actor**, **Mode**, and **Correlation**. Use the correlation ID to connect records from the same operation; displayed times follow your selected time zone.
+4. Check **Updated** and any warning after refreshing. Treat the last successful response as stale if the view says the refresh failed.
+5. For execution state transitions and attempts, open the [execution events](#/help:execution-events) guide.
 
 ## Example
 

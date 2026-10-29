@@ -10,10 +10,11 @@ O acesso de Leitura é suficiente. Auditoria é uma tela somente para consulta. 
 
 ## Etapas
 
-1. Abra [Auditoria](#/audit). Use **Buscar auditoria** para filtrar os resumos disponíveis. Use **Próxima** e **Anterior** para percorrer as páginas.
-2. Consulte **Horário UTC**, **Ação**, **Ator**, **Modo** e **Correlação**. Use o identificador de correlação para relacionar registros da mesma operação e UTC ao comparar horários com outros sistemas.
-3. Confira **Atualizado** e qualquer aviso após atualizar. Trate a última resposta bem-sucedida como desatualizada se a tela informar que a atualização falhou.
-4. Para mudanças de estado e tentativas de uma execução, abra o guia de [eventos de execução](#/help:execution-events).
+1. Abra [Auditoria](#/audit). Pesquise por ator, identificador de correlação ou resumo da ação e selecione um **Tipo de evento** exato. Use **Próxima** e **Anterior** para percorrer as páginas.
+2. Escolha um período predefinido ou informe um intervalo personalizado. A tela começa com os últimos sete dias; buscas personalizadas podem abranger até 365 dias. As datas usam o fuso horário selecionado, incluindo o dia final.
+3. Consulte **Horário**, **Ação**, **Ator**, **Modo** e **Correlação**. Use o identificador de correlação para relacionar registros da mesma operação; os horários seguem o fuso selecionado.
+4. Confira **Atualizado** e qualquer aviso após atualizar. Trate a última resposta bem-sucedida como desatualizada se a tela informar que a atualização falhou.
+5. Para mudanças de estado e tentativas de uma execução, abra o guia de [eventos de execução](#/help:execution-events).
 
 ## Exemplo
 

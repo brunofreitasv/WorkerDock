@@ -15,6 +15,7 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
 {
     private static readonly string[] ActiveStates = ["Queued", "Running", "RetryWaiting", "NeedsReview"];
     private static readonly TimeSpan MaxRange = TimeSpan.FromDays(90);
+    private static readonly TimeSpan MaxAuditRange = TimeSpan.FromDays(365);
 
     public async ValueTask<DashboardDto> DashboardAsync(CancellationToken ct)
     {
@@ -190,25 +191,41 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         return new(detail.ExecutionId, detail.JobId, detail.JobName, detail.TemplateId, detail.State, detail.Certainty, detail.TriggerKind, detail.CreatedAtUtc, detail.AvailableAtUtc, detail.ScheduledForUtc, detail.CorrelationId, detail.StopRequested, detail.ForceStop, attempts, timeline);
     }
 
-    public async ValueTask<Page<AuditSummaryDto>> AuditAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct)
+    public async ValueTask<Page<AuditSummaryDto>> AuditAsync(AuditHistoryFilter filter, PageRequest page, CancellationToken ct)
     {
-        Validate(filter, page); var cursor = ParseCursor(page.Cursor);
+        ValidateAuditHistory(filter, page);
+        var filterKey = AuditHistoryFilterKey(filter);
+        var cursor = HistoryCursorCodec.Decode(page.Cursor, options.InstanceId, "audit-history", filterKey);
         await using var connection = await OpenAsync(ct); await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT TOP(@take) EventId,EventType,ActorSubject,AuthenticationMode,CorrelationId,OccurredAtUtc
               FROM [workerdock].AuditEvents
-             WHERE OccurredAtUtc>=@from AND OccurredAtUtc<=@to
-               AND (@search IS NULL OR EventType LIKE @search OR ActorSubject LIKE @search OR CONVERT(nvarchar(36),CorrelationId)=@plainSearch)
+             WHERE OccurredAtUtc>=@from AND OccurredAtUtc<@to
+               AND (@eventType IS NULL OR EventType=@eventType)
+               AND (@search IS NULL OR EventType LIKE @search ESCAPE N'\' OR ActorSubject LIKE @search ESCAPE N'\' OR CONVERT(nvarchar(36),CorrelationId)=@plainSearch)
                AND (@cursorTime IS NULL OR OccurredAtUtc<@cursorTime OR (OccurredAtUtc=@cursorTime AND EventId<@cursorId))
              ORDER BY OccurredAtUtc DESC,EventId DESC;
             """;
+        var escapedSearch = filter.Search?.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal).Replace("[", "\\[", StringComparison.Ordinal);
         Add(command, "@take", SqlDbType.Int, page.Limit + 1); Add(command, "@from", SqlDbType.DateTime2, filter.FromUtc.UtcDateTime); Add(command, "@to", SqlDbType.DateTime2, filter.ToUtc.UtcDateTime);
-        Add(command, "@search", SqlDbType.NVarChar, filter.Search is null ? DBNull.Value : "%" + filter.Search + "%", 204); Add(command, "@plainSearch", SqlDbType.NVarChar, (object?)filter.Search ?? DBNull.Value, 100);
-        Add(command, "@cursorTime", SqlDbType.DateTime2, cursor is null ? DBNull.Value : cursor.Value.Time.UtcDateTime); Add(command, "@cursorId", SqlDbType.UniqueIdentifier, cursor is null ? DBNull.Value : cursor.Value.Id);
+        Add(command, "@eventType", SqlDbType.NVarChar, (object?)filter.EventType ?? DBNull.Value, 100);
+        Add(command, "@search", SqlDbType.NVarChar, escapedSearch is null ? DBNull.Value : "%" + escapedSearch + "%", 204); Add(command, "@plainSearch", SqlDbType.NVarChar, (object?)filter.Search ?? DBNull.Value, 100);
+        Add(command, "@cursorTime", SqlDbType.DateTime2, cursor is null ? DBNull.Value : cursor.Time.UtcDateTime); Add(command, "@cursorId", SqlDbType.UniqueIdentifier, cursor?.Id ?? (object)DBNull.Value);
         var items = new List<AuditSummaryDto>();
         await using (var reader = await command.ExecuteReaderAsync(ct)) while (await reader.ReadAsync(ct)) items.Add(AuditEventProjection.Project(new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetGuid(4), Utc(reader.GetDateTime(5)))));
         var hasMore = items.Count > page.Limit; if (hasMore) items.RemoveAt(items.Count - 1);
-        return new(items, hasMore ? EncodeCursor(items[^1].OccurredAtUtc, items[^1].EventId) : null);
+        var last = items.LastOrDefault();
+        return new(items, hasMore && last is not null ? HistoryCursorCodec.Encode(options.InstanceId, "audit-history", filterKey, last.OccurredAtUtc, last.EventId) : null);
+    }
+
+    public async ValueTask<IReadOnlyList<string>> AuditEventTypesAsync(CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct); await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DISTINCT EventType FROM [workerdock].AuditEvents ORDER BY EventType;";
+        var eventTypes = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) eventTypes.Add(reader.GetString(0));
+        return eventTypes;
     }
 
     public async ValueTask<RuntimeStatusDto> WorkersAsync(CancellationToken ct)
@@ -274,6 +291,21 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
             filter.State is not null && !ExecutionStates.Contains(filter.State, StringComparer.Ordinal))
             throw new WorkerDockException("ValidationFailed");
     }
+
+    private static void ValidateAuditHistory(AuditHistoryFilter filter, PageRequest page)
+    {
+        if (page.Limit is < 1 or > 100 || filter.ToUtc <= filter.FromUtc || filter.ToUtc - filter.FromUtc > MaxAuditRange ||
+            filter.Search is { Length: > 100 } || filter.EventType is { Length: > 100 })
+            throw new WorkerDockException("ValidationFailed");
+    }
+
+    private static string AuditHistoryFilterKey(AuditHistoryFilter filter) => JsonSerializer.Serialize(new
+    {
+        fromUtc = filter.FromUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+        toUtc = filter.ToUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+        search = filter.Search,
+        eventType = filter.EventType
+    });
 
     private static string ExecutionHistoryFilterKey(ExecutionHistoryFilter filter) => JsonSerializer.Serialize(new
     {

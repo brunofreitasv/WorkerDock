@@ -200,7 +200,7 @@ export default function App() {
                 ) : active === "workers" ? (
                   <WorkersPage language={preferences.language} />
                 ) : active === "audit" ? (
-                  <AuditPage language={preferences.language} />
+                  <AuditPage language={preferences.language} timeZone={preferences.timeZone} />
                 ) : active === "alerts" ? (
                   <AlertRulesPage t={t} canManage={session.canManage} language={preferences.language} timeZone={preferences.timeZone} />
                 ) : active === "dashboard" ? (
