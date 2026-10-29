@@ -7,7 +7,7 @@ const taskHeadings = {
   en: ["What you will do", "Before you start", "Steps", "Example", "Check the result", "If it does not work", "Related guides"],
   "pt-BR": ["O que você vai fazer", "Antes de começar", "Etapas", "Exemplo", "Verifique o resultado", "Se não funcionar", "Guias relacionados"],
 } as const;
-const knownRoutes = new Set(["#/dashboard", "#/monitoring", "#/jobs", "#/workers", "#/audit", "#/templates", "#/settings", "#/alerts", "#/help"]);
+const knownRoutes = new Set(["#/dashboard", "#/monitoring", "#/executions", "#/jobs", "#/workers", "#/audit", "#/templates", "#/settings", "#/alerts", "#/help"]);
 
 describe("start and monitoring guide content", () => {
   for (const slug of slugs) {

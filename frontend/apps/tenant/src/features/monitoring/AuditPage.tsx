@@ -29,11 +29,12 @@ export function AuditPage({ language, timeZone }: { language: string; timeZone: 
   const { data, loading, error, stale, updatedAt } = useVisiblePolling(
     () => read<MonitoringPage<AuditSummaryDto>>(url).then(result => result.data), `${url}:${refreshSequence}`,
   );
+  const auditItems = Array.isArray(data?.items) ? data.items : [];
 
   useEffect(() => {
     let active = true;
     void read<string[]>("/api/audit/event-types").then(result => {
-      if (active) setEventTypes(result.data);
+      if (active) setEventTypes(Array.isArray(result.data) ? result.data.filter((value): value is string => typeof value === "string") : []);
     }).catch(() => {
       if (active) setEventTypesUnavailable(true);
     });
@@ -72,14 +73,14 @@ export function AuditPage({ language, timeZone }: { language: string; timeZone: 
       <Table size="small" aria-label={label("Audit", "Auditoria")}>
         <TableHead><TableRow>{[label("Time", "Horário"), label("Action", "Ação"), label("Actor", "Ator"), label("Mode", "Modo"), label("Correlation", "Correlação")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead>
         <TableBody>
-          {data.items.map(item => <TableRow key={item.eventId}>
+          {auditItems.map(item => <TableRow key={item.eventId}>
             <TableCell>{new Date(item.occurredAtUtc).toLocaleString(locale, { timeZone })}</TableCell>
             <TableCell>{item.eventType}</TableCell>
             <TableCell>{item.actorSubject}</TableCell>
             <TableCell>{item.authenticationMode}</TableCell>
             <TableCell>{item.correlationId}</TableCell>
           </TableRow>)}
-          {data.items.length === 0 && <TableRow><TableCell colSpan={5}>{label("No audit events match this filter.", "Nenhum evento de auditoria corresponde a este filtro.")}</TableCell></TableRow>}
+          {auditItems.length === 0 && <TableRow><TableCell colSpan={5}>{label("No audit events match this filter.", "Nenhum evento de auditoria corresponde a este filtro.")}</TableCell></TableRow>}
         </TableBody>
       </Table>
     </TableContainer>}

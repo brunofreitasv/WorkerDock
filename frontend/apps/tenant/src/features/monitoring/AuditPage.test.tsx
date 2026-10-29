@@ -72,3 +72,14 @@ test("uses Portuguese labels and the selected timezone", async () => {
   expect(within(table).getByText("08/03/2026, 09:30:00")).toBeVisible();
   expect(screen.queryByRole("button", { name: /manage|editar|excluir/i })).not.toBeInTheDocument();
 });
+
+test("does not crash when the event-type endpoint returns an unexpected object", async () => {
+  vi.mocked(read).mockImplementation(async (path: string) => path === "/api/audit/event-types"
+    ? { data: { session: "active" } } as never
+    : { data: { session: "active" } } as never);
+  render(<AuditPage language="en" timeZone="UTC" />);
+  expect(await screen.findByRole("table", { name: "Audit" })).toBeVisible();
+  expect(screen.getByRole("combobox", { name: "Event type" })).toBeVisible();
+  expect(screen.queryByRole("option", { name: "active" })).not.toBeInTheDocument();
+  expect(screen.getByText("No audit events match this filter.")).toBeVisible();
+});

@@ -3,16 +3,11 @@ import { Alert, Button, MenuItem, Stack, Table, TableBody, TableCell, TableConta
 import { read } from "../../api/client";
 import { CursorPager } from "./CursorPager";
 import { PeriodControl } from "./PeriodControl";
-import { toUtcRange, type HistoryPeriod } from "./historyTime";
+import { formatDuration, toUtcRange, type HistoryPeriod } from "./historyTime";
 import { useVisiblePolling } from "./useVisiblePolling";
 import type { ExecutionHistoryItemDto, MonitoringPage } from "./monitoringTypes";
 
 const states = ["Queued", "Running", "RetryWaiting", "NeedsReview", "Succeeded", "Failed", "TimedOut", "Stopped", "Skipped"] as const;
-
-function formatDuration(value: string | null) {
-  if (!value) return "—";
-  return value.split(".")[0];
-}
 
 export function ExecutionHistoryPage({ language, timeZone, onExecution }: { language: string; timeZone: string; onExecution(id: string): void }) {
   const pt = language === "pt-BR";

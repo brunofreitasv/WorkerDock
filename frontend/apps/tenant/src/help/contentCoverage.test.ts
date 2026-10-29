@@ -4,7 +4,7 @@ import { getHelpMedia } from "./media";
 import { helpTopics, resolveHelpTopic } from "./topics";
 
 const routes = new Set([
-  "#/dashboard", "#/monitoring", "#/jobs", "#/workers", "#/audit",
+  "#/dashboard", "#/monitoring", "#/executions", "#/jobs", "#/workers", "#/audit",
   "#/templates", "#/settings", "#/alerts", "#/help",
 ]);
 

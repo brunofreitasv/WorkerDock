@@ -77,3 +77,10 @@ test("shows job identity when the history has no results", async () => {
   expect(await screen.findByRole("heading", { level: 2, name: "Job history · job-empty" })).toBeVisible();
   expect(await screen.findByText("No executions match this filter.")).toBeVisible();
 });
+
+test("keeps days and time in durations over 24 hours", async () => {
+  vi.mocked(read).mockResolvedValue(response([{ ...execution("long", "Succeeded"), duration: "1.02:03:04" }], null));
+  render(<JobHistoryTable jobId="job-long" language="en" timeZone="UTC" />);
+  const table = await screen.findByRole("table", { name: "Job execution history" });
+  expect(within(table).getByText("1d 02:03:04")).toBeVisible();
+});

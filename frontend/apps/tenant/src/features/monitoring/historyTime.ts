@@ -2,6 +2,14 @@ import { Temporal } from "@js-temporal/polyfill";
 
 export type HistoryPeriod = { kind: "24h" | "7d" | "30d" } | { kind: "custom"; startDate: string; endDate: string };
 
+export function formatDuration(value: string | null | undefined): string {
+  if (!value) return "—";
+  const match = /^(?:(\d+)\.)?(\d{2}):(\d{2}):(\d{2})(\.\d+)?$/.exec(value);
+  if (!match) return value;
+  const [, days, hours, minutes, seconds, fraction] = match;
+  return `${days ? `${days}d ` : ""}${hours}:${minutes}:${seconds}${fraction ?? ""}`;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function localMidnight(dateText: string, timeZone: string): string {

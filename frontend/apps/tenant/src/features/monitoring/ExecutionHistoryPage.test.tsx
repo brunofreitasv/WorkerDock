@@ -148,3 +148,10 @@ test("uses Portuguese labels and the selected timezone", async () => {
   expect(screen.getByRole("button", { name: "Próxima" })).toBeDisabled();
   expect(within(table).getByText("20/10/2026, 09:00:00")).toBeVisible();
 });
+
+test("keeps days and time in durations over 24 hours", async () => {
+  vi.mocked(read).mockResolvedValue({ data: { items: [{ ...execution, duration: "1.02:03:04" }], nextCursor: null } } as never);
+  render(<ExecutionHistoryPage language="en" timeZone="UTC" onExecution={vi.fn()} />);
+  const table = await screen.findByRole("table", { name: "Execution history" });
+  expect(within(table).getByText("1d 02:03:04")).toBeVisible();
+});

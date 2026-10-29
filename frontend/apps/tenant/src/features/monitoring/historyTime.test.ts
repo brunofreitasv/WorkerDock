@@ -1,5 +1,10 @@
 import { expect, test } from "vitest";
-import { toUtcRange, type HistoryPeriod } from "./historyTime";
+import { formatDuration, toUtcRange, type HistoryPeriod } from "./historyTime";
+
+test("formats TimeSpan durations with days and fractional seconds", () => {
+  expect(formatDuration("1.02:03:04.5000000")).toBe("1d 02:03:04.5000000");
+  expect(formatDuration("00:03:04")).toBe("00:03:04");
+});
 
 const custom = (startDate: string, endDate: string): HistoryPeriod => ({ kind: "custom", startDate, endDate });
 const now = new Date("2026-03-10T16:30:00.000Z");

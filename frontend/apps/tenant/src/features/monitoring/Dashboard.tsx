@@ -2,10 +2,7 @@ import { Alert, Button, Card, CardContent, Grid, Link, Stack, Table, TableBody, 
 import { read } from "../../api/client";
 import { useVisiblePolling } from "./useVisiblePolling";
 import type { DashboardDto } from "./monitoringTypes";
-
-function formatDuration(value: string | null | undefined) {
-  return value ? value.split(".")[0] : "—";
-}
+import { formatDuration } from "./historyTime";
 
 export function Dashboard({ language, timeZone, onHistory, onExecution }: { language: string; timeZone: string; onHistory(): void; onExecution(id: string): void }) {
   const pt = language === "pt-BR";

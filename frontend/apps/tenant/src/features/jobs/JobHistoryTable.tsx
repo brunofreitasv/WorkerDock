@@ -3,7 +3,7 @@ import { Alert, Button, MenuItem, Stack, Table, TableBody, TableCell, TableConta
 import { read } from "../../api/client";
 import { CursorPager } from "../monitoring/CursorPager";
 import { PeriodControl } from "../monitoring/PeriodControl";
-import { toUtcRange, type HistoryPeriod } from "../monitoring/historyTime";
+import { formatDuration, toUtcRange, type HistoryPeriod } from "../monitoring/historyTime";
 
 type Item = { executionId: string; jobName: string; templateId: string; triggerKind: string; state: string; createdAtUtc: string; startedAtUtc: string | null; duration: string | null };
 type Page = { items: Item[]; nextCursor: string | null };
@@ -54,7 +54,7 @@ export function JobHistoryTable({ jobId, language, timeZone }: { jobId: string; 
     const translated = localized[value];
     return translated ? translated[pt ? 1 : 0] : value;
   };
-  const duration = (value: string | number | null) => typeof value === "string" ? value.split(".")[0] : value == null ? "—" : String(value);
+  const duration = (value: string | number | null) => typeof value === "string" ? formatDuration(value) : value == null ? "—" : String(value);
 
   return <Stack spacing={2}>
     <Typography component="h2" variant="h6">{label("Job history", "Histórico da tarefa")} · {jobId}</Typography>
