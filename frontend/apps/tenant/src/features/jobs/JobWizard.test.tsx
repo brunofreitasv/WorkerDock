@@ -517,3 +517,45 @@ test("editing a duplicated saved SQL job preserves unavailable profile and catal
   expect(screen.getByRole("combobox", { name: "Connection profile" })).toHaveTextContent("Unavailable profile (retired-id)");
   expect(screen.getByRole("combobox", { name: "Catalog" })).toHaveTextContent("Unavailable catalog (RemovedCatalog)");
 });
+
+test.each(["failure", "empty", "ready"] as const)("refreshes SQL profiles after %s without discarding the SQL draft", async initialState => {
+  const descriptor = { id: "workerdock.sql-server", version: "1.1.0", displayName: "SQL Server", description: "SQL Server", configurationSchema: { type: "object", properties: {} } };
+  const profile = { current: { profileId: "p1", name: "Warehouse", server: "db-one", allowedCatalogs: ["Ops"] }, retired: false };
+  const addedProfile = { current: { profileId: "p2", name: "Reports", server: "db-two", allowedCatalogs: ["Audit"] }, retired: false };
+  let profileRequests = 0;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    let status = 200;
+    let body: unknown = {};
+    if (url.pathname === "/api/templates") body = { items: [{ selectable: true, descriptor }] };
+    else if (url.pathname === "/api/connection-profiles/") {
+      profileRequests++;
+      if (profileRequests === 1 && initialState === "failure") status = 503;
+      body = { items: profileRequests === 1 ? initialState === "ready" ? [profile] : [] : [profile, addedProfile] };
+    }
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "SQL recovery");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  if (initialState === "failure") await screen.findByText(translations.en.sqlProfilesError);
+  if (initialState === "empty") await screen.findByText(translations.en.sqlProfilesEmpty);
+  if (initialState === "ready") {
+    await user.click(screen.getByRole("combobox", { name: "Connection profile" }));
+    await user.click(await screen.findByRole("option", { name: "Warehouse (db-one)" }));
+    await user.click(screen.getByRole("combobox", { name: "Catalog" }));
+    await user.click(screen.getByRole("option", { name: "Ops" }));
+  }
+  await user.type(screen.getByRole("textbox", { name: "SQL statement" }), "select 'keep this draft'");
+  await user.click(screen.getByRole("button", { name: "Refresh connection profiles" }));
+  await waitFor(() => expect(screen.queryByText(translations.en.sqlProfilesLoading)).not.toBeInTheDocument());
+  expect(screen.queryByText(translations.en.sqlProfilesError)).not.toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "SQL statement" })).toHaveValue("select 'keep this draft'");
+  if (initialState === "ready") {
+    expect(screen.getByRole("combobox", { name: "Connection profile" })).toHaveTextContent("Warehouse (db-one)");
+    expect(screen.getByRole("combobox", { name: "Catalog" })).toHaveTextContent("Ops");
+  }
+  await user.click(screen.getByRole("combobox", { name: "Connection profile" }));
+  expect(await screen.findByRole("option", { name: "Reports (db-two)" })).toBeVisible();
+});

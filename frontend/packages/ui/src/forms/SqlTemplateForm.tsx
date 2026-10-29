@@ -20,6 +20,7 @@ export function SqlTemplateForm(props: TemplateFormProps) {
   const savedProfileExists = Boolean(selectedProfile);
   const catalog = String(value.catalog ?? "");
   const allowedCatalogs = selectedProfile?.current.allowedCatalogs ?? [];
+  const catalogAvailable = allowedCatalogs.some(item => item.toLowerCase() === catalog.toLowerCase());
   const updatePlan = (next: DynamicValuePlan | null) => props.onDynamicValuesChange?.(next);
   const updateRow = (index: number, row: Record<string, unknown>, plan: DynamicValuePlan | null) => {
     onChange({ ...value, parameters: parameters.map((item, i) => i === index ? row : item) });
@@ -38,10 +39,11 @@ export function SqlTemplateForm(props: TemplateFormProps) {
       {props.sqlProfiles.status === "loading" && <Typography color="text.secondary">{t.sqlProfilesLoading}</Typography>}
       {props.sqlProfiles.status === "error" && <Typography color="error" role="status">{t.sqlProfilesError}</Typography>}
       {props.sqlProfiles.status === "ready" && profiles.every(item => item.retired) && <Typography color="text.secondary">{t.sqlProfilesEmpty}</Typography>}
+      {selectedProfile && allowedCatalogs.length === 0 && <Typography color="text.secondary">{t.sqlCatalogsEmpty}</Typography>}
       <TextField select label={t.sqlCatalog} value={catalog} onChange={event => set("catalog", event.target.value)} error={Boolean(errors["configuration.catalog"])} helperText={errors["configuration.catalog"]}>
         <MenuItem value="">{t.sqlSelectCatalog}</MenuItem>
-        {allowedCatalogs.map(item => <MenuItem key={item} value={item}>{item}</MenuItem>)}
-        {catalog && !allowedCatalogs.includes(catalog) && <MenuItem value={catalog}>{t.sqlUnavailableCatalog.replace("{catalog}", catalog)}</MenuItem>}
+        {allowedCatalogs.map(item => <MenuItem key={item} value={catalog && item.toLowerCase() === catalog.toLowerCase() ? catalog : item}>{catalog && item.toLowerCase() === catalog.toLowerCase() ? catalog : item}</MenuItem>)}
+        {catalog && !catalogAvailable && <MenuItem value={catalog}>{t.sqlUnavailableCatalog.replace("{catalog}", catalog)}</MenuItem>}
       </TextField>
     </> : <>
       <TextField label={t.sqlProfileId} value={profileId} onChange={event => set("profileId", event.target.value)} error={Boolean(errors["configuration.profileId"])} helperText={errors["configuration.profileId"]} />

@@ -276,6 +276,8 @@
   "sqlSelectProfile": "Select a connection profile",
   "sqlProfilesLoading": "Loading connection profiles…",
   "sqlProfilesError": "Unable to load connection profiles.",
+  "sqlProfilesRefresh": "Refresh connection profiles",
+  "sqlCatalogsEmpty": "This profile has no allowed catalogs. Update the connection profile or select another profile.",
   "sqlProfilesEmpty": "No active connection profiles are available.",
   "sqlUnavailableProfile": "Unavailable profile ({profileId})",
   "sqlSelectCatalog": "Select a catalog",

@@ -276,6 +276,8 @@
   "sqlSelectProfile": "Selecione um perfil de conexão",
   "sqlProfilesLoading": "Carregando perfis de conexão…",
   "sqlProfilesError": "Não foi possível carregar os perfis de conexão.",
+  "sqlProfilesRefresh": "Atualizar perfis de conexão",
+  "sqlCatalogsEmpty": "Este perfil não tem catálogos permitidos. Atualize o perfil de conexão ou selecione outro perfil.",
   "sqlProfilesEmpty": "Não há perfis de conexão ativos disponíveis.",
   "sqlUnavailableProfile": "Perfil indisponível ({profileId})",
   "sqlSelectCatalog": "Selecione um catálogo",
