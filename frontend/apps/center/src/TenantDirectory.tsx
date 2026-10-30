@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Alert, Box, Button, Chip, IconButton, InputAdornment, Link, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material';
+import { Alert, Box, Button, InputAdornment, Link, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material';
+import { EmptyState, FilterPanel, ResultsPanel, StatusBadge } from '@workerdock/ui';
 import { formatDistanceToNow } from './time';
 
 export type TenantHealth = 'Healthy' | 'Unhealthy' | 'Stale' | 'Unknown' | 'IdentityMismatch';
@@ -45,20 +46,17 @@ export default function TenantDirectory({ tenants, canManage, loading, refreshin
   return (
     <Stack spacing={3}>
       {error && <Alert severity="error" role="alert">{error}</Alert>}
-      <Paper variant="outlined" sx={{ overflow: 'hidden', borderColor: '#e2e8f0' }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ p: 2.5, alignItems: { sm: "center" }, justifyContent: "space-between" }}>
-          <Box>
-            <Typography variant="h6" component="h2" sx={{ fontWeight: 700 }}>Tenant directory</Typography>
-            <Typography variant="body2" color="text.secondary">Registered links and advisory health observations</Typography>
-          </Box>
-          <Stack direction="row" spacing={1.25}>
-            <TextField size="small" placeholder="Search tenants" value={search} onChange={event => { setSearch(event.target.value); onSearch(event.target.value); }}
-              slotProps={{ htmlInput: { 'aria-label': 'Search tenants' }, input: { startAdornment: <InputAdornment position="start"><Box component="span" aria-hidden="true">⌕</Box></InputAdornment> } }} />
-            {canManage && <Button variant="contained" startIcon={<Box component="span" aria-hidden="true" sx={{ fontSize: 18 }}>＋</Box>} onClick={onAdd}>Add tenant</Button>}
-          </Stack>
-        </Stack>
-        <TableContainer>
-          <Table aria-label="Registered tenants">
+      <FilterPanel title="Find tenants">
+        <TextField size="small" fullWidth placeholder="Search tenants" value={search} onChange={event => { setSearch(event.target.value); onSearch(event.target.value); }}
+          sx={{ maxWidth: { sm: 420 } }}
+          slotProps={{ htmlInput: { 'aria-label': 'Search tenants' }, input: { startAdornment: <InputAdornment position="start"><Box component="span" aria-hidden="true">⌕</Box></InputAdornment> } }} />
+      </FilterPanel>
+      <ResultsPanel title="Tenant directory" meta="Registered links and advisory health observations"
+        actions={canManage ? <Button variant="contained" onClick={onAdd}>Add tenant</Button> : undefined}
+        footer={nextCursor ? <Button onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more tenants"}</Button> : undefined}>
+        <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'block', md: 'none' }, mb: 1 }}>Scroll horizontally to view all columns.</Typography>
+        <TableContainer sx={{ overflowX: 'auto' }}>
+          <Table aria-label="Registered tenants" sx={{ minWidth: 800 }}>
             <TableHead><TableRow sx={{ bgcolor: '#f8fafc' }}>
               <TableCell>Tenant</TableCell><TableCell>Health</TableCell><TableCell>Last attempt</TableCell><TableCell>Last success</TableCell><TableCell align="right">Actions</TableCell>
             </TableRow></TableHead>
@@ -75,29 +73,25 @@ export default function TenantDirectory({ tenants, canManage, loading, refreshin
                       <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>{tenant.expectedInstanceId}</Typography>
                     </Stack>
                   </TableCell>
-                  <TableCell><Tooltip title="Health is advisory and may be stale while the Control Center is offline."><Chip size="small" label={state.label} color={state.color} variant={tenant.health === 'Unknown' ? 'outlined' : 'filled'} /></Tooltip></TableCell>
+                  <TableCell><Tooltip title="Health is advisory and may be stale while the Control Center is offline."><span><StatusBadge label={state.label} tone={state.color} /></span></Tooltip></TableCell>
                   <TableCell>{formatDistanceToNow(tenant.lastAttemptUtc)}</TableCell>
                   <TableCell>{formatDistanceToNow(tenant.lastSuccessUtc)}</TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
-                      <Tooltip title="Refresh advisory health"><span><IconButton aria-label={`Refresh health for ${tenant.displayName}`} onClick={() => onRefresh(tenant)} disabled={!!refreshingId} size="small"><Box component="span" aria-hidden="true" sx={{ fontSize: 20 }}>↻</Box></IconButton></span></Tooltip>
+                      <Tooltip title="Refresh advisory health"><span><Button aria-label={`Refresh health for ${tenant.displayName}`} onClick={() => onRefresh(tenant)} disabled={!!refreshingId} size="small">Refresh</Button></span></Tooltip>
                       {canManage && <>
-                        <Tooltip title="Edit registration"><IconButton aria-label={`Edit ${tenant.displayName}`} onClick={() => onEdit(tenant)} size="small"><Box component="span" aria-hidden="true" sx={{ fontSize: 17 }}>✎</Box></IconButton></Tooltip>
+                        <Tooltip title="Edit registration"><Button aria-label={`Edit ${tenant.displayName}`} onClick={() => onEdit(tenant)} size="small">Edit</Button></Tooltip>
                         <Button color="error" size="small" onClick={() => onRemove(tenant)}>Remove</Button>
                       </>}
                     </Stack>
                   </TableCell>
                 </TableRow>;
               })}
-              {!loading && visible.length === 0 && <TableRow><TableCell colSpan={5}><Box sx={{ textAlign: 'center', py: 6 }}>
-                <Typography sx={{ fontWeight: 650 }}>{search ? 'No matching tenants' : 'No tenants registered yet'}</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{search ? 'Try another search.' : canManage ? 'Add a tenant link to see its advisory health here.' : 'A manager can add tenant links to this directory.'}</Typography>
-              </Box></TableCell></TableRow>}
             </TableBody>
           </Table>
         </TableContainer>
-        {nextCursor && <Box sx={{ p: 2, textAlign: "center" }}><Button onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more tenants"}</Button></Box>}
-      </Paper>
+        {!loading && visible.length === 0 && <EmptyState title={search ? 'No matching tenants' : 'No tenants registered yet'} description={search ? 'Try another search.' : canManage ? 'Add a tenant link to see its advisory health here.' : 'A manager can add tenant links to this directory.'} />}
+      </ResultsPanel>
       <Alert severity="info">Health checks are advisory. A tenant can keep running if this Control Center is offline; a stale or unknown result does not prove that the tenant is stopped.</Alert>
     </Stack>
   );

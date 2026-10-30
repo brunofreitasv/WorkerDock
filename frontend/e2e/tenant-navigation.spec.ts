@@ -35,3 +35,15 @@ test("grouped navigation and long tenant name remain usable on a narrow viewport
   }));
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
 });
+
+test("mobile navigation releases scroll lock after resizing to desktop", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.route("**/api/session", route => route.fulfill({ json: { authenticated: true, canRead: true, canManage: false, mode: "RoleProtected", language: "en", timeZone: "UTC" } }));
+  await page.route("**/api/settings", route => route.fulfill({ json: { displayName: "Test tenant", displayTimeZone: "UTC", version: "AQAAAAAAAAA=" } }));
+  await page.route("**/api/dashboard", route => route.fulfill({ json: { instanceId: "11111111-1111-4111-8111-111111111111", observedUtc: "2026-10-18T12:00:00Z", overall: "Healthy", queued: 0, running: 0, needsReview: 0, succeeded24h: 0, failed24h: 0, longRunning: 0, upcoming: 0, readyWorkers: 0, totalWorkers: 0, desiredCapacityRevision: 0, effectiveCapacityRevision: 0, capacityState: "Applied", upcomingItems: [], recentItems: [] } }));
+  await page.goto("/#/dashboard");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(page.getByRole("button", { name: "Close navigation" })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+});

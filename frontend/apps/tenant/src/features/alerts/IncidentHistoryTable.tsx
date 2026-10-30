@@ -69,15 +69,15 @@ export function IncidentHistoryTable({ language, timeZone }: { language: string;
       {error && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={restart}>{label("Retry", "Tentar novamente")}</Button>}>
         {label("Incident history could not be refreshed.", "Não foi possível atualizar o histórico de incidentes.")} {stale && label("Showing stale results.", "Exibindo resultados desatualizados.")}
       </Alert>}
-      {loading && !data ? <Typography role="status">{label("Loading incidents…", "Carregando incidentes…")}</Typography> : !data ? <Alert severity="error">{label("Incident history is unavailable.", "Histórico de incidentes indisponível.")}</Alert> : <TableContainer sx={{ width: "100%", overflowX: "auto" }}>
+      {loading && !data ? <Typography role="status">{label("Loading incidents…", "Carregando incidentes…")}</Typography> : !data ? <Alert severity="error">{label("Incident history is unavailable.", "Histórico de incidentes indisponível.")}</Alert> : <><TableContainer sx={{ width: "100%", overflowX: "auto" }}>
         <Table size="small" aria-label={label("Incidents", "Incidentes")} sx={{ minWidth: 850 }}>
           <TableHead><TableRow>{[label("Opened", "Aberto em"), label("Incident rule", "Regra do incidente"), label("Subject", "Assunto"), label("State", "Estado"), label("Last observed", "Última observação"), label("Resolved", "Resolvido em"), label("Safe code", "Código seguro")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead>
           <TableBody>{data.items.map(item => <TableRow key={item.incidentId} hover>
             <TableCell>{displayDate(item.openedAtUtc, locale, timeZone)}</TableCell><TableCell>{item.ruleName}</TableCell><TableCell>{item.subjectKey}</TableCell><TableCell><StatusBadge label={displayState(item.state)} tone={item.state === "Open" ? "warning" : item.state === "Unknown" ? "info" : "success"} /></TableCell>
             <TableCell>{displayDate(item.lastObservedAtUtc, locale, timeZone)}</TableCell><TableCell>{displayDate(item.resolvedAtUtc, locale, timeZone)}</TableCell><TableCell>{item.safeCode ?? "—"}</TableCell>
-          </TableRow>)}{data.items.length === 0 && <TableRow><TableCell colSpan={7}><EmptyState title={label("No incidents found.", "Nenhum incidente encontrado.")} /></TableCell></TableRow>}</TableBody>
+          </TableRow>)}</TableBody>
         </Table>
-      </TableContainer>}
+      </TableContainer>{data.items.length === 0 && <EmptyState title={label("No incidents found.", "Nenhum incidente encontrado.")} />}</>}
     </HistoryResults>
   </Stack>;
 }

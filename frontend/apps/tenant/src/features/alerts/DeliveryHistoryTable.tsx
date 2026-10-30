@@ -60,16 +60,16 @@ export function DeliveryHistoryTable({ language, timeZone }: { language: string;
       {error && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={restart}>{label("Retry", "Tentar novamente")}</Button>}>
         {label("Delivery history could not be refreshed.", "Não foi possível atualizar o histórico de entregas.")} {stale && label("Showing stale results.", "Exibindo resultados desatualizados.")}
       </Alert>}
-      {loading && !data ? <Typography role="status">{label("Loading deliveries…", "Carregando entregas…")}</Typography> : !data ? <Alert severity="error">{label("Delivery history is unavailable.", "Histórico de entregas indisponível.")}</Alert> : <TableContainer sx={{ width: "100%", overflowX: "auto" }}>
+      {loading && !data ? <Typography role="status">{label("Loading deliveries…", "Carregando entregas…")}</Typography> : !data ? <Alert severity="error">{label("Delivery history is unavailable.", "Histórico de entregas indisponível.")}</Alert> : <><TableContainer sx={{ width: "100%", overflowX: "auto" }}>
         <Table size="small" aria-label={label("Deliveries", "Entregas")} sx={{ minWidth: 850 }}>
           <TableHead><TableRow>{[label("Incident context", "Contexto do incidente"), label("Kind", "Tipo"), label("Status", "Estado"), label("Attempts", "Tentativas"), label("Next attempt", "Próxima tentativa"), label("Completed", "Concluída"), label("Safe code", "Código seguro")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead>
           <TableBody>{data.items.map(item => <TableRow key={item.deliveryId} hover>
             <TableCell><Typography>{item.ruleName} · {item.subjectKey}</Typography><Typography variant="caption">{label("Incident", "Incidente")}: {item.incidentId}</Typography></TableCell>
             <TableCell>{kindLabel(item.kind)}</TableCell><TableCell><StatusBadge label={statusLabel(item.status)} tone={item.status === "Failed" ? "error" : item.status === "Delivered" ? "success" : item.status === "Pending" ? "warning" : "info"} /></TableCell><TableCell>{item.attemptCount}</TableCell>
             <TableCell>{displayDate(item.nextAvailableAtUtc, locale, timeZone)}</TableCell><TableCell>{displayDate(item.completedAtUtc, locale, timeZone)}</TableCell><TableCell>{item.safeCode ?? "—"}</TableCell>
-          </TableRow>)}{data.items.length === 0 && <TableRow><TableCell colSpan={7}><EmptyState title={label("No deliveries found.", "Nenhuma entrega encontrada.")} /></TableCell></TableRow>}</TableBody>
+          </TableRow>)}</TableBody>
         </Table>
-      </TableContainer>}
+      </TableContainer>{data.items.length === 0 && <EmptyState title={label("No deliveries found.", "Nenhuma entrega encontrada.")} />}</>}
     </HistoryResults>
   </Stack>;
 }

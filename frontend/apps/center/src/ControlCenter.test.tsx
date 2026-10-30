@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
 import RegistrationEditor, { type TenantRegistrationInput } from "./RegistrationEditor";
@@ -66,4 +66,30 @@ test("viewer can follow tenant links and refresh health without management contr
   expect(screen.getByRole("button", { name: "Refresh health for Billing" })).toBeEnabled();
   expect(screen.queryByRole("button", { name: "Add tenant" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+});
+
+test("manager searches separately from directory actions and sees labeled health", async () => {
+  const user = userEvent.setup();
+  const onSearch = vi.fn();
+  const onAdd = vi.fn();
+  render(<TenantDirectory tenants={[tenant]} canManage loading={false} onRefresh={() => {}} onSearch={onSearch} onLoadMore={() => {}} onAdd={onAdd} onEdit={() => {}} onRemove={() => {}} />);
+  const filters = screen.getByRole("region", { name: "Find tenants" });
+  const results = screen.getByRole("region", { name: "Tenant directory" });
+  await user.type(within(filters).getByRole("textbox", { name: "Search tenants" }), "Bill");
+  expect(onSearch).toHaveBeenLastCalledWith("Bill");
+  expect(within(results).getByRole("link", { name: /Billing/ })).toBeVisible();
+  expect(within(results).getByText("Healthy")).toBeVisible();
+  expect(within(results).getByText("Scroll horizontally to view all columns.")).toBeVisible();
+  expect(within(results).getByRole("button", { name: "Edit Billing" })).toBeVisible();
+  expect(within(results).getByText("Edit")).toBeVisible();
+  expect(within(results).getByRole("button", { name: "Remove" })).toBeVisible();
+  await user.click(within(results).getByRole("button", { name: "Add tenant" }));
+  expect(onAdd).toHaveBeenCalledOnce();
+});
+
+test("empty directory guidance is outside the horizontally scrolling table", () => {
+  render(<TenantDirectory tenants={[]} canManage={false} loading={false} onRefresh={() => {}} onSearch={() => {}} onLoadMore={() => {}} onAdd={() => {}} onEdit={() => {}} onRemove={() => {}} />);
+  const table = screen.getByRole("table", { name: "Registered tenants" });
+  const guidance = screen.getByRole("heading", { name: "No tenants registered yet" });
+  expect(table).not.toContainElement(guidance);
 });

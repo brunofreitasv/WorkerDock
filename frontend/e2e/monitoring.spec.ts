@@ -41,6 +41,28 @@ test("viewer can open full execution history from the Dashboard", async ({ page 
   await expect(page.getByRole("button", { name: /enable|retry|manage/i })).toHaveCount(0);
 });
 
+test("execution history status filter remains readable beside search fields", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/#/executions");
+  const status = page.getByRole("combobox", { name: "Status" });
+  await expect(status).toBeVisible();
+  const bounds = await status.boundingBox();
+  expect(bounds?.width).toBeGreaterThanOrEqual(160);
+});
+
+test("empty history guidance stays within a narrow viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.route("**/api/monitoring/executions**", route => route.fulfill({ json: { items: [], nextCursor: null } }));
+  for (const [route, heading] of [["executions", "No executions match this filter."], ["audit", "No audit events match this filter."]]) {
+    await page.goto(`/#/${route}`);
+    const empty = page.getByRole("heading", { name: heading });
+    await expect(empty).toBeVisible();
+    const bounds = await empty.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(360);
+  }
+});
+
 test("viewer can filter read-only audit history", async ({ page }) => {
   await page.goto("/#/audit");
   const table = page.getByRole("table", { name: "Audit" });

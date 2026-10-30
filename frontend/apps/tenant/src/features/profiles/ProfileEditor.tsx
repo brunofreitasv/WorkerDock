@@ -32,6 +32,7 @@ export function ProfileEditor({ language = "en" }: { language?: Language }) {
     <Paper component="section" aria-label="SQL Server profiles" variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
       <Stack spacing={2}>
         <Typography component="h2" variant="h6">SQL Server profiles</Typography>
+        {items.length === 0 && <Box sx={{ py: 2 }}><Typography sx={{ fontWeight: 600 }}>{language === "pt-BR" ? "Nenhum perfil do SQL Server ainda." : "No SQL Server profiles yet."}</Typography><Typography color="text.secondary">{language === "pt-BR" ? "Crie um perfil para reutilizar uma conexão nas tarefas." : "Create a profile to reuse a connection in jobs."}</Typography></Box>}
         {items.map((item) => <Stack key={item.current.profileId} direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { sm: "center" }, py: 1, borderBottom: 1, borderColor: "divider" }}><Button onClick={() => void edit(item)} sx={{ justifyContent: "flex-start" }}>{item.current.name}</Button><Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>{item.current.server} · {item.current.profileId} {item.retired ? "· retired" : ""}</Typography></Stack>)}
         <Button onClick={() => { setSelected(undefined); setProfile(empty()); setCatalog(""); setEtag(undefined); }} sx={{ alignSelf: { xs: "stretch", sm: "flex-start" } }}>New profile</Button>
       </Stack>

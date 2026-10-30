@@ -57,7 +57,7 @@ export function ExecutionHistoryPage({ language, timeZone, onExecution }: { lang
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2, flexWrap: "wrap" }}>
         <TextField label={label("Search executions", "Buscar execuções")} value={search} onChange={event => { setSearch(event.target.value); filterChanged(); }} slotProps={{ htmlInput: { maxLength: 100 } }} />
         <TextField label={label("Template", "Modelo")} value={templateId} onChange={event => { setTemplateId(event.target.value); filterChanged(); }} slotProps={{ htmlInput: { maxLength: 100 } }} />
-        <TextField select label={label("Status", "Estado")} value={state} onChange={event => { setState(event.target.value); filterChanged(); }}>
+        <TextField select label={label("Status", "Estado")} value={state} onChange={event => { setState(event.target.value); filterChanged(); }} sx={{ minWidth: 180 }}>
           <MenuItem value="">{label("All statuses", "Todos os estados")}</MenuItem>
           {states.map(value => <MenuItem key={value} value={value}>{statusText(value)}</MenuItem>)}
         </TextField>
@@ -70,7 +70,7 @@ export function ExecutionHistoryPage({ language, timeZone, onExecution }: { lang
     {error && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={restartBrowse}>{label("Retry", "Tentar novamente")}</Button>}>
       {label("Execution history could not be refreshed.", "Não foi possível atualizar o histórico de execuções.")} {stale && label("Showing stale results.", "Exibindo resultados desatualizados.")}
     </Alert>}
-    {loading && !data ? <Typography>{label("Loading execution history…", "Carregando histórico de execuções…")}</Typography> : !data ? <Alert severity="error">{label("Execution history is unavailable.", "Histórico de execuções indisponível.")}</Alert> : <TableContainer sx={{ width: "100%", overflowX: "auto" }}>
+    {loading && !data ? <Typography>{label("Loading execution history…", "Carregando histórico de execuções…")}</Typography> : !data ? <Alert severity="error">{label("Execution history is unavailable.", "Histórico de execuções indisponível.")}</Alert> : <><TableContainer sx={{ width: "100%", overflowX: "auto" }}>
       <Table size="small" aria-label={label("Execution history", "Histórico de execuções")} sx={{ minWidth: 950, "& td": { py: 1.5 } }}>
         <TableHead><TableRow>{[label("Job", "Tarefa"), label("Template", "Modelo"), label("Status", "Estado"), label("Trigger", "Origem"), label("Created", "Criada"), label("Started", "Iniciada"), label("Duration", "Duração"), label("Details", "Detalhes")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead>
         <TableBody>
@@ -81,10 +81,9 @@ export function ExecutionHistoryPage({ language, timeZone, onExecution }: { lang
             <TableCell>{duration(item.duration)}</TableCell>
             <TableCell><Button size="small" onClick={() => onExecution(item.executionId)} aria-label={`${label("Open", "Abrir")} ${item.jobName}`}>{label("Open", "Abrir")}</Button></TableCell>
           </TableRow>)}
-          {data.items.length === 0 && <TableRow><TableCell colSpan={8}><EmptyState title={label("No executions match this filter.", "Nenhuma execução corresponde a este filtro.")} /></TableCell></TableRow>}
         </TableBody>
       </Table>
-    </TableContainer>}
+    </TableContainer>{data.items.length === 0 && <EmptyState title={label("No executions match this filter.", "Nenhuma execução corresponde a este filtro.")} />}</>}
     </HistoryResults>
   </Stack>;
 }

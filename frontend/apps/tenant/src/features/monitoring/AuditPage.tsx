@@ -62,7 +62,7 @@ export function AuditPage({ language, timeZone }: { language: string; timeZone: 
     <PeriodControl value={period} timeZone={timeZone} maxDays={365} language={pt ? "pt-BR" : "en"} onChange={changePeriod} />
     <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2, flexWrap: "wrap" }}>
       <TextField label={label("Search audit", "Buscar auditoria")} value={search} onChange={event => { setSearch(event.target.value); filterChanged(); }} slotProps={{ htmlInput: { maxLength: 100 } }} />
-      <TextField select label={label("Event type", "Tipo de evento")} value={eventType} onChange={event => { setEventType(event.target.value); filterChanged(); }}>
+      <TextField select label={label("Event type", "Tipo de evento")} value={eventType} onChange={event => { setEventType(event.target.value); filterChanged(); }} sx={{ minWidth: 180 }}>
         <MenuItem value="">{label("All event types", "Todos os tipos")}</MenuItem>
         {eventTypes.map(value => <MenuItem key={value} value={value}>{value}</MenuItem>)}
       </TextField>
@@ -76,7 +76,7 @@ export function AuditPage({ language, timeZone }: { language: string; timeZone: 
     {error && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={restartBrowse}>{label("Retry", "Tentar novamente")}</Button>}>
       {label("Audit data could not be refreshed.", "Não foi possível atualizar a auditoria.")} {stale && label("Showing stale data.", "Exibindo dados desatualizados.")}
     </Alert>}
-    {loading && !data ? <Typography>{label("Loading audit history…", "Carregando histórico de auditoria…")}</Typography> : !data ? <Alert severity="error">{label("Audit history is unavailable.", "Histórico de auditoria indisponível.")}</Alert> : <TableContainer sx={{ width: "100%", overflowX: "auto" }}>
+    {loading && !data ? <Typography>{label("Loading audit history…", "Carregando histórico de auditoria…")}</Typography> : !data ? <Alert severity="error">{label("Audit history is unavailable.", "Histórico de auditoria indisponível.")}</Alert> : <><TableContainer sx={{ width: "100%", overflowX: "auto" }}>
       <Table size="small" aria-label={label("Audit", "Auditoria")} sx={{ minWidth: 800, "& td": { py: 1.5 } }}>
         <TableHead><TableRow>{[label("Time", "Horário"), label("Action", "Ação"), label("Actor", "Ator"), label("Mode", "Modo"), label("Correlation", "Correlação")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead>
         <TableBody>
@@ -87,10 +87,9 @@ export function AuditPage({ language, timeZone }: { language: string; timeZone: 
             <TableCell>{item.authenticationMode}</TableCell>
             <TableCell>{item.correlationId}</TableCell>
           </TableRow>)}
-          {auditItems.length === 0 && <TableRow><TableCell colSpan={5}><EmptyState title={label("No audit events match this filter.", "Nenhum evento de auditoria corresponde a este filtro.")} /></TableCell></TableRow>}
         </TableBody>
       </Table>
-    </TableContainer>}
+    </TableContainer>{auditItems.length === 0 && <EmptyState title={label("No audit events match this filter.", "Nenhum evento de auditoria corresponde a este filtro.")} />}</>}
     </HistoryResults>
   </Stack>;
 }

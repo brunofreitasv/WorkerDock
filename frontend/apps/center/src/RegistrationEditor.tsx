@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Stack, TextField } from "@mui/material";
+import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Stack, TextField, Typography } from "@mui/material";
 
 export type TenantRegistrationInput = {
   displayName: string;
@@ -60,11 +60,14 @@ export default function RegistrationEditor({ open, initialValue, busy = false, o
         <DialogContent>
           <Stack spacing={2.25} sx={{ pt: 1 }}>
             {error && <Alert severity="error" role="alert">{error}</Alert>}
+            <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>Tenant identity</Typography>
             <TextField autoFocus required fullWidth label="Tenant name" value={value.displayName}
               onChange={event => setValue(current => ({ ...current, displayName: event.target.value }))} />
             <TextField required fullWidth label="Expected instance ID" value={value.expectedInstanceId}
               helperText="Used to verify the health response belongs to this tenant."
               onChange={event => setValue(current => ({ ...current, expectedInstanceId: event.target.value }))} />
+            <Divider />
+            <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>Connection</Typography>
             <TextField required fullWidth label="Dashboard URL" type="url" value={value.dashboardUrl}
               helperText="HTTPS links only. This creates a link; it does not deploy or reconfigure the tenant."
               onChange={event => setValue(current => ({ ...current, dashboardUrl: event.target.value }))} />

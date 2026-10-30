@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AppBar,
   Box,
@@ -10,6 +10,8 @@ import {
   Stack,
   Toolbar,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import type { Labels } from "./preferences";
 import { BrandMark } from "./BrandMark";
@@ -42,6 +44,9 @@ export function AppShell({
 }: Props) {
   const main = useRef<HTMLElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const theme = useTheme();
+  const desktop = useMediaQuery(theme.breakpoints.up("md"));
+  useEffect(() => { if (desktop) setMenuOpen(false); }, [desktop]);
   const navigationContent = (prefix: string) => (
     <>
           <Typography variant="overline" color="text.secondary">

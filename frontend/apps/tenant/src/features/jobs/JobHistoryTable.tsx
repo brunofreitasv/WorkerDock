@@ -66,7 +66,7 @@ export function JobHistoryTable({ jobId, language, timeZone }: { jobId: string; 
     <HistoryFilters title={label("Filters", "Filtros")} language={pt ? "pt-BR" : "en"} onClear={clearFilters}>
     <PeriodControl value={period} timeZone={timeZone} maxDays={90} language={pt ? "pt-BR" : "en"} onChange={changePeriod} />
     <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2 }}>
-      <TextField select label={label("Status", "Estado")} value={state} onChange={event => { setState(event.target.value); reset(); }}>
+      <TextField select label={label("Status", "Estado")} value={state} onChange={event => { setState(event.target.value); reset(); }} sx={{ minWidth: 180 }}>
         <MenuItem value="">{label("All statuses", "Todos os estados")}</MenuItem>
         {states.map(value => <MenuItem key={value} value={value}>{statusText(value)}</MenuItem>)}
       </TextField>
@@ -79,7 +79,7 @@ export function JobHistoryTable({ jobId, language, timeZone }: { jobId: string; 
     {error && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={refresh}>{label("Retry", "Tentar novamente")}</Button>}>
       {label("Job history could not be refreshed.", "Não foi possível atualizar o histórico da tarefa.")} {page && label("Showing previous results.", "Exibindo resultados anteriores.")}
     </Alert>}
-    {loading && !page ? <Typography role="status">{label("Loading job history…", "Carregando histórico da tarefa…")}</Typography> : !page ? <Alert severity="error">{label("Job history is unavailable.", "Histórico da tarefa indisponível.")}</Alert> : <TableContainer sx={{ width: "100%", overflowX: "auto" }}>
+    {loading && !page ? <Typography role="status">{label("Loading job history…", "Carregando histórico da tarefa…")}</Typography> : !page ? <Alert severity="error">{label("Job history is unavailable.", "Histórico da tarefa indisponível.")}</Alert> : <><TableContainer sx={{ width: "100%", overflowX: "auto" }}>
       <Table size="small" aria-label={label("Job execution history", "Histórico de execuções da tarefa")} sx={{ minWidth: 900, "& td": { py: 1.5 } }}>
         <TableHead><TableRow>{[label("Execution", "Execução"), label("Template", "Modelo"), label("Status", "Estado"), label("Trigger", "Origem"), label("Created", "Criada"), label("Started", "Iniciada"), label("Duration", "Duração")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead>
         <TableBody>
@@ -89,10 +89,9 @@ export function JobHistoryTable({ jobId, language, timeZone }: { jobId: string; 
             <TableCell>{new Date(item.createdAtUtc).toLocaleString(locale, { timeZone })}</TableCell>
             <TableCell>{item.startedAtUtc ? new Date(item.startedAtUtc).toLocaleString(locale, { timeZone }) : "—"}</TableCell><TableCell>{duration(item.duration)}</TableCell>
           </TableRow>)}
-          {!page.items.length && <TableRow><TableCell colSpan={7}><EmptyState title={label("No executions match this filter.", "Nenhuma execução corresponde a este filtro.")} /></TableCell></TableRow>}
         </TableBody>
       </Table>
-    </TableContainer>}
+    </TableContainer>{!page.items.length && <EmptyState title={label("No executions match this filter.", "Nenhuma execução corresponde a este filtro.")} />}</>}
     </HistoryResults>
   </Stack>;
 }

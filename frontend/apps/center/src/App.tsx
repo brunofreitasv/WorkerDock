@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Box, Button, Container, FormControl, MenuItem, Select, Stack, Typography } from '@mui/material';
 import TenantDirectory, { type TenantEntry } from './TenantDirectory';
 import RegistrationEditor, { type TenantRegistrationInput } from './RegistrationEditor';
-import { BrandMark } from '@workerdock/ui';
+import { BrandMark, PageHeader } from '@workerdock/ui';
 
 type Locale = 'en' | 'pt-BR';
 type SessionDto = {
@@ -199,17 +199,17 @@ export default function App() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      <Box component="header" sx={{ borderBottom: '1px solid #e7ebf2', bgcolor: 'background.paper' }}>
+      <Box component="a" href="#main-content" sx={{ position: 'absolute', left: 8, top: -64, zIndex: 2000, bgcolor: 'background.paper', p: 1, '&:focus': { top: 8 } }}>Skip to content</Box>
+      <Box component="header" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
         <Container maxWidth="xl" sx={{ py: 2.25 }}>
-          <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }} spacing={2}>
+          <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: 'wrap' }}>
             <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
               <BrandMark size={36} />
               <Typography variant="subtitle1" sx={{ fontWeight: 750 }}>WorkerDock</Typography>
               <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>Control Center</Typography>
             </Stack>
-            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: 'wrap' }}>
               {canManage && <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', md: 'block' } }}>{t.manager}</Typography>}
-              <Box component="span" aria-hidden="true" sx={{ color: 'text.secondary', fontSize: 18 }}>◎</Box>
               <FormControl size="small" variant="standard">
                 <Select value={locale} onChange={event => setLocale(event.target.value as Locale)} inputProps={{ 'aria-label': 'Language' }} disableUnderline>
                   <MenuItem value="en">English</MenuItem>
@@ -221,17 +221,9 @@ export default function App() {
           </Stack>
         </Container>
       </Box>
-      <Container component="main" maxWidth="xl" sx={{ py: { xs: 3, md: 5 } }}>
+      <Container component="main" id="main-content" tabIndex={-1} maxWidth="xl" sx={{ py: { xs: 3, md: 5 } }}>
         <Stack spacing={3.5}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { sm: "end" }, justifyContent: "space-between" }}>
-            <Box>
-              <Typography variant="h4" component="h1">{t.title}</Typography>
-              <Typography color="text.secondary" sx={{ mt: 1 }}>{t.subtitle}</Typography>
-            </Box>
-            <Stack direction="row" spacing={1}>
-              <Button variant="outlined" onClick={() => void load(search)} disabled={loading}>Refresh directory</Button>
-            </Stack>
-          </Stack>
+          <PageHeader title={t.title} description={t.subtitle} actions={<Button variant="outlined" onClick={() => void load(search)} disabled={loading}>Refresh directory</Button>} />
           {error && <Alert severity="error" role="alert">{error}</Alert>}
           <TenantDirectory
             tenants={tenants}

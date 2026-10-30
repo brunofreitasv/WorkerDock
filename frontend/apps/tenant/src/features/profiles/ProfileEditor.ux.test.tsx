@@ -24,3 +24,11 @@ test("profile form groups follow pt-BR", async () => {
   expect(screen.getByRole("group", { name: "Autenticação" })).toBeInTheDocument();
   expect(screen.getByRole("group", { name: "Ações do perfil" })).toBeInTheDocument();
 });
+
+test("empty profile inventory explains the next step in both languages", async () => {
+  const { unmount } = render(<ProfileEditor />);
+  expect(await screen.findByText("No SQL Server profiles yet.")).toBeVisible();
+  unmount();
+  render(<ProfileEditor language="pt-BR" />);
+  expect(await screen.findByText("Nenhum perfil do SQL Server ainda.")).toBeVisible();
+});
