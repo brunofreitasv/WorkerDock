@@ -9,10 +9,11 @@ import {
   Stack,
   ThemeProvider,
   Typography,
-  createTheme,
 } from "@mui/material";
 import {
   AppShell,
+  PageHeader,
+  workerdockTheme,
   usePreferences,
   type NavigationGroup,
 } from "@workerdock/ui";
@@ -37,19 +38,6 @@ import { helpTopics } from "./help/topics";
 import { useTenantSettings } from "./features/settings/useTenantSettings";
 import { TenantSettingsForm } from "./features/settings/TenantSettingsForm";
 import { PersonalSettings } from "./features/settings/PersonalSettings";
-const theme = createTheme({
-  palette: {
-    primary: { main: "#0b6c61", dark: "#064f47", light: "#dff2ed" },
-    background: { default: "#f5f7f8", paper: "#fff" },
-    text: { primary: "#182d39", secondary: "#536772" },
-  },
-  typography: {
-    fontFamily: "Roboto, sans-serif",
-    h4: { fontWeight: 700, letterSpacing: "-.035em" },
-    button: { textTransform: "none", fontWeight: 600 },
-  },
-  shape: { borderRadius: 10 },
-});
 function routeFromHash(hash: string): string {
   if (!hash.startsWith("#/")) return "dashboard";
   return hash.slice(2) || "dashboard";
@@ -115,7 +103,7 @@ export default function App() {
   const contextualTopic = helpTopics.find(topic => topic.slug === contextualHelp);
   useEffect(() => { document.title = displayName; }, [displayName]);
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeProvider theme={workerdockTheme}>
       <CssBaseline />
       {loading ? (
         <Box sx={{ p: 5 }}>
@@ -152,10 +140,7 @@ export default function App() {
               {t.requestError}
             </Alert>
           )}
-          {activePage !== "help" && <Typography component="h1" variant="h4" sx={{ mb: 1 }}>
-            {title}
-          </Typography>}
-          {activePage !== "help" && contextualTopic && <Button onClick={() => navigate(`help:${contextualTopic.slug}`)} sx={{ mb: 2 }}>{t.helpContextual}</Button>}
+          {activePage !== "help" && <PageHeader title={title} actions={contextualTopic && <Button onClick={() => navigate(`help:${contextualTopic.slug}`)}>{t.helpContextual}</Button>} />}
           {session.canRead ? (
             <>
               {activePage === "help" ? <HelpPage language={preferences.language} slug={helpSlug} canManage={session.canManage} onNavigate={navigate} /> : active === "settings" ? (

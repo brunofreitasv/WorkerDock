@@ -1,9 +1,11 @@
-import { useRef, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   AppBar,
   Box,
   Button,
   Divider,
+  Drawer,
+  IconButton,
   Link,
   Stack,
   Toolbar,
@@ -39,6 +41,71 @@ export function AppShell({
   onSignOut,
 }: Props) {
   const main = useRef<HTMLElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const navigationContent = (prefix: string) => (
+    <>
+          <Typography variant="overline" color="text.secondary">
+            {t.overview}
+          </Typography>
+          <Stack component="nav" aria-label={t.tenant} direction="column" sx={{ gap: 2, mt: 1.5 }}>
+            {navigation.map((group) => (
+              <Box
+                component="section"
+                key={group.id}
+                aria-labelledby={`navigation-${prefix}-${group.id}`}
+                sx={{ minWidth: 0 }}
+              >
+                <Typography
+                  id={`navigation-${prefix}-${group.id}`}
+                  component="h2"
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: "block", px: 0.25, mb: 0.75, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}
+                >
+                  {group.label}
+                </Typography>
+                <Stack
+                  spacing={0.25}
+                  sx={{ ml: 0.5, pl: 1, borderLeft: "2px solid", borderColor: "divider" }}
+                >
+                  {group.items.map((item) => {
+                    const selected = active === item.id;
+                    return (
+                      <Button
+                        key={item.id}
+                        component="a"
+                        href={"#/" + item.id}
+                        aria-current={selected ? "page" : undefined}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          onNavigate(item.id);
+                          setMenuOpen(false);
+                        }}
+                        sx={{
+                          width: "100%",
+                          minHeight: 38,
+                          justifyContent: "flex-start",
+                          textAlign: "left",
+                          whiteSpace: "normal",
+                          borderRadius: 1.25,
+                          px: 1.25,
+                          py: 0.75,
+                          color: selected ? "primary.dark" : "text.secondary",
+                          bgcolor: selected ? "primary.light" : "transparent",
+                          fontWeight: selected ? 700 : 500,
+                          "&:hover": { bgcolor: selected ? "primary.light" : "action.hover" },
+                        }}
+                      >
+                        {item.label}
+                      </Button>
+                    );
+                  })}
+                </Stack>
+              </Box>
+            ))}
+          </Stack>
+    </>
+  );
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <Link
@@ -59,6 +126,10 @@ export function AppShell({
       >
         {t.skip}
       </Link>
+      <Drawer open={menuOpen} onClose={() => setMenuOpen(false)} sx={{ display: { xs: "block", md: "none" } }} slotProps={{ paper: { sx: { width: "min(85vw, 300px)", p: 2 } } }}>
+        <Box sx={{ display: "flex", justifyContent: "flex-end" }}><IconButton aria-label={t.closeNavigation} onClick={() => setMenuOpen(false)}>×</IconButton></Box>
+        {navigationContent("mobile")}
+      </Drawer>
       <AppBar
         position="static"
         color="inherit"
@@ -66,6 +137,7 @@ export function AppShell({
         sx={{ borderBottom: "1px solid", borderColor: "divider" }}
       >
         <Toolbar sx={{ gap: 2, flexWrap: "wrap", py: 1 }}>
+          <IconButton aria-label={t.openNavigation} onClick={() => setMenuOpen(true)} sx={{ display: { xs: "inline-flex", md: "none" } }}>☰</IconButton>
           <BrandMark size={36} />
           <Typography component="span" variant="h6" sx={{ fontWeight: 800, letterSpacing: "-.04em", flex: 1, minWidth: 0, overflowWrap: "anywhere", lineHeight: 1.15 }}>
             {displayName || "WorkerDock"}
@@ -109,70 +181,13 @@ export function AppShell({
           component="aside"
           sx={{
             p: { xs: 2, md: 3 },
+            display: { xs: "none", md: "block" },
             borderRight: { md: "1px solid" },
             borderColor: "divider",
             minHeight: { md: "calc(100vh - 65px)" },
           }}
         >
-          <Typography variant="overline" color="text.secondary">
-            {t.overview}
-          </Typography>
-          <Stack component="nav" aria-label={t.tenant} direction="column" sx={{ gap: 2, mt: 1.5 }}>
-            {navigation.map((group) => (
-              <Box
-                component="section"
-                key={group.id}
-                aria-labelledby={`navigation-${group.id}`}
-                sx={{ minWidth: 0 }}
-              >
-                <Typography
-                  id={`navigation-${group.id}`}
-                  component="h2"
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ display: "block", px: 0.25, mb: 0.75, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}
-                >
-                  {group.label}
-                </Typography>
-                <Stack
-                  spacing={0.25}
-                  sx={{ ml: 0.5, pl: 1, borderLeft: "2px solid", borderColor: "divider" }}
-                >
-                  {group.items.map((item) => {
-                    const selected = active === item.id;
-                    return (
-                      <Button
-                        key={item.id}
-                        component="a"
-                        href={"#/" + item.id}
-                        aria-current={selected ? "page" : undefined}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          onNavigate(item.id);
-                        }}
-                        sx={{
-                          width: "100%",
-                          minHeight: 38,
-                          justifyContent: "flex-start",
-                          textAlign: "left",
-                          whiteSpace: "normal",
-                          borderRadius: 1.25,
-                          px: 1.25,
-                          py: 0.75,
-                          color: selected ? "primary.dark" : "text.secondary",
-                          bgcolor: selected ? "primary.light" : "transparent",
-                          fontWeight: selected ? 700 : 500,
-                          "&:hover": { bgcolor: selected ? "primary.light" : "action.hover" },
-                        }}
-                      >
-                        {item.label}
-                      </Button>
-                    );
-                  })}
-                </Stack>
-              </Box>
-            ))}
-          </Stack>
+          {navigationContent("desktop")}
           <Divider sx={{ my: 3, display: { xs: "none", md: "block" } }} />
           <Typography
             variant="caption"

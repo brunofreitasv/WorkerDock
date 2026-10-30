@@ -14,3 +14,5 @@ export { SqlTemplateForm } from "./forms/SqlTemplateForm";
 export { bindingAt, decodePointer, encodePointer, encodePointerSegment, removeArrayItem, removeMapEntry, renameMapEntry, setBinding } from "./forms/dynamicBindings";
 export type { DynamicValueBinding, DynamicValueBoundary, DynamicValueFormat, DynamicValuePlan, DynamicValueSource } from "./forms/dynamicValueTypes";
 export type { TemplateFormProps } from "./forms/TemplateForm";
+export { workerdockTheme } from "./theme";
+export { PageHeader, SectionSurface, FilterPanel, ResultsPanel, StatusBadge, EmptyState } from "./PageLayout";

@@ -1,4 +1,6 @@
 {
+  "openNavigation": "Open navigation",
+  "closeNavigation": "Close navigation",
   "dashboard": "Dashboard",
   "executionHistory": "Execution history",
   "help": "Documentation",

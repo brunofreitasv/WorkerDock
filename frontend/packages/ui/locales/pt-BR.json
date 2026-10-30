@@ -1,4 +1,6 @@
 {
+  "openNavigation": "Abrir navegação",
+  "closeNavigation": "Fechar navegação",
   "dashboard": "Painel",
   "executionHistory": "Histórico de execuções",
   "help": "Documentação",
