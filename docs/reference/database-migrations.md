@@ -9,11 +9,12 @@ The [database object reference](database-objects.md) lists current
 tenant migration objects and test-only SQL fixtures.
 
 Tenant schema history is defined by `database/tenant/manifest.json`, which
-contains the `0001_initial` baseline and the `0002_template_catalog_registration`
-patch. Apply the manifest through `0002_template_catalog_registration` to a new
+contains the `0001_initial` baseline, `0002_template_catalog_registration`,
+`0003_job_failure_policy`, and `0004_attempt_failure_diagnostics`.
+Apply the manifest through `0004_attempt_failure_diagnostics` to a new
 tenant database with `scripts/Invoke-TenantMigration.ps1`, or run
 `database/tenant/current-state.sql` against a fresh empty database. The snapshot
-includes both migrations. Migration `0002` is also safe for a database already
+includes all four migrations. Migration `0002` is also safe for a database already
 at `0001_initial`; it updates the catalog metadata trigger so the Web host can
 register trusted built-in template descriptors. Neither path upgrades schemas
 older than this baseline. In SSMS, run
@@ -25,7 +26,7 @@ databases are deployed, so the project provides no upgrade converter.
 The migration script verifies checksums, requires SQL Server 2022 or newer and
 compatibility level 160, records each applied migration in `SchemaHistory`, and binds a
 database to its configured stable instance ID. Supply the target
-`0002_template_catalog_registration`, existing `-RuntimePrincipal`, separate migration credential,
+`0004_attempt_failure_diagnostics`, existing `-RuntimePrincipal`, separate migration credential,
 database script root, and reviewed Web assembly directory. Use `-InitialSetup`
 to generate a GUID for a fresh database, then save it for `Tenant.InstanceId`;
 for reuse, supply that same GUID with `-InstanceId`. The selected runtime
@@ -53,3 +54,5 @@ execution, runtime grants, or cluster behavior.
 The runtime service, direct SQL work model, and operator boundaries are
 described in [architecture](architecture.md) and
 [execution guarantees](execution-guarantees.md).
+
+Migration `0004_attempt_failure_diagnostics` adds bounded, policy-filtered failure diagnostics per attempt. They are archived with the attempt and cascade-delete when execution retention purges that attempt. Existing attempts have no diagnostics. Apply all manifest migrations through `0004_attempt_failure_diagnostics` before starting the updated runtime.

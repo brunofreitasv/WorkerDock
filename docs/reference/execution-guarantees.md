@@ -56,7 +56,7 @@ claim immediate termination. A committed stop wins against later handler success
 and suppresses every automatic retry. If completion committed first, a later stop
 preserves that outcome. Force stop requires explicit request confirmation and a
 reason. A confirmed local exit is Stopped; unconfirmed exit remains NeedsReview
-with the stop marker and job permit retained. Local containment never promises
+with the stop marker retained. Local containment never promises
 that a remote transaction rolled back.
 
 Retry classification is transactional and bounded by MaxAttempts. Only permitted
@@ -65,9 +65,15 @@ hint alone do not grant permission. Exponential jitter is bounded by RetryMaxDel
 Negative RetryAfter hints are ignored; nonnegative hints are capped, combined with
 the jittered delay using the greater value, and capped again. Approved retries
 set a future SQL `AvailableAtUtc` with the original execution idempotency key.
-The runtime poll observes the bounded backoff without occupying an execution slot.
-The logical job permit is retained during backoff and NeedsReview and released on
-finalization.
+The runtime poll observes the bounded backoff without occupying numeric capacity.
+Only `Running` attempts count against the host and per-job numeric limits. Queued,
+retry-waiting, and `NeedsReview` executions consume neither limit. Job capacity
+defaults to one; zero pauses new starts. `Allow` may overlap up to both numeric
+limits, `Queue` stays serial, and `Skip` discards overlapping occurrences. For
+Queue and Skip, the per-job “Wait for review before starting new runs” setting
+controls whether an unresolved `NeedsReview` execution also holds that job's
+admission. With the setting off, later runs may proceed while the earlier
+execution remains in review. Templates do not impose a numeric capacity limit.
 
 Expiry marks an attempt Abandoned. A crash before
 launch and a crash after effects are both uncertain unless no handler entry can
@@ -75,7 +81,7 @@ be proved. Uncertain effects become NeedsReview unless the pinned job policy
 explicitly permits bounded replay. Managers can ReconcileSucceeded, Cancel, or
 AuthorizeRetry (within the pinned total-attempt budget). Every decision requires
 a reason and audit. Authorizing retry clears a prior stop only through this explicit
-decision. Cancel/reconciliation can release an unresolved permit, so the operator
+decision. Cancel/reconciliation resolves review, so the operator
 must acknowledge possible external overlap. Targets must honor the stable key or
 provide their own transaction/lock when strict external deduplication is required.
 
@@ -86,3 +92,10 @@ effects or a lost outcome acknowledgement never become a fabricated success.
 Status events feed the current [execution monitoring](monitoring.md) timeline.
 Real SQL fences, restart, and migration proofs remain pending as described in
 [database verification](database-migrations.md); memory and real-process tests establish separate facts.
+## Per-attempt failure diagnostics
+
+Execution details expose optional diagnostics beneath the matching attempt to existing Read-authorized users. The execution includes its pinned template version and job revision. Older attempts have no retroactive diagnostic. Diagnostics do not change retry, certainty, or effects semantics and do not appear in broad lists, audit summaries, alerts, or generic logs.
+
+Expand **Failure diagnostics** for bounded exception messages, client stacks, SQL number/state/procedure/line and command kind, or HTTP method/status and response content. Missing stacks are unavailable; non-success HTTP status responses need not have an exception stack. A truncated label means the available output was bounded. SQL query text is never included.
+
+**Hide detailed failure output** on the pinned job revision suppresses message, stack and response content before persistence; safe reproduction metadata remains visible. Details follow execution retention and archive/purge behavior.

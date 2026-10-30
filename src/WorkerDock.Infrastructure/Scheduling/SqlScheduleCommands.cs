@@ -98,10 +98,11 @@ public sealed class SqlScheduleCommands(TenantDatabaseOptions options, ISchedule
             return await new BusinessTransaction(options).RunAsync<CommandReceipt>(async (connection, transaction, token) =>
             {
                 await CheckInstanceAsync(connection, transaction, token);
-                await using var read = Command(connection, transaction, "SELECT s.ScheduleId,s.Revision,j.Version FROM [workerdock].Schedules s WITH(UPDLOCK,HOLDLOCK) JOIN [workerdock].Jobs j WITH(UPDLOCK,HOLDLOCK) ON j.JobId=s.JobId WHERE s.JobId=@job");
+                await using var read = Command(connection, transaction, "SELECT s.ScheduleId,s.Revision,j.Version,j.Archived FROM [workerdock].Schedules s WITH(UPDLOCK,HOLDLOCK) JOIN [workerdock].Jobs j WITH(UPDLOCK,HOLDLOCK) ON j.JobId=s.JobId WHERE s.JobId=@job");
                 Add(read, "@job", SqlDbType.UniqueIdentifier, jobId); await using var row = await read.ExecuteReaderAsync(token);
                 if (!await row.ReadAsync(token)) throw new WorkerDockException("ScheduleNotFound");
-                var id = row.GetGuid(0); var revision = checked(row.GetInt64(1) + 1); var version = row.GetFieldValue<byte[]>(2); await row.CloseAsync();
+                var id = row.GetGuid(0); var revision = checked(row.GetInt64(1) + 1); var version = row.GetFieldValue<byte[]>(2); var archived = row.GetBoolean(3); await row.CloseAsync();
+                if (archived) throw new WorkerDockException("JobArchived");
                 if (!version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
                 await using (var remove = Command(connection, transaction, "UPDATE [workerdock].Schedules SET Removed=1,Revision=@revision WHERE JobId=@job")) { Add(remove, "@job", SqlDbType.UniqueIdentifier, jobId); Add(remove, "@revision", SqlDbType.BigInt, revision); await remove.ExecuteNonQueryAsync(token); }
                 await using (var bump = Command(connection, transaction, "UPDATE [workerdock].Jobs SET CurrentRevision=CurrentRevision WHERE JobId=@job AND Version=@version")) { Add(bump, "@job", SqlDbType.UniqueIdentifier, jobId); Add(bump, "@version", SqlDbType.Binary, version, 8); if (await bump.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion"); }

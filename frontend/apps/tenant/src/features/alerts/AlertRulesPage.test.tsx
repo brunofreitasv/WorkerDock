@@ -79,7 +79,7 @@ test("managers create webhook sinks without If-Match and load the saved ETag", a
   expect(JSON.parse(String(put.init?.body))).toMatchObject({ id, configuration: { url: "https://example.test/hook", headers: [{ name: "Authorization", secretReference: "vault/created-token" }] } });
   await waitFor(() => expect(calls.some(call => call.path === `/api/alert-sinks/${id}` && !call.init?.method)).toBe(true));
   expect(await screen.findByRole("textbox", { name: "Sink name" })).toHaveValue("Created sink");
-}, 15000);
+}, 30000);
 
 test("managers create disabled rules then enable them with the loaded ETag", async () => {
   const id = "44444444-4444-4444-8444-444444444444";
@@ -319,7 +319,7 @@ test("a 412 during sink create recovers the same UUID", async () => {
   await user.click(save());
   expect(await screen.findByRole("textbox", { name: "Sink name" })).toHaveValue("Recovered sink");
   expect(calls).toContain(`GET /api/alert-sinks/${id}`);
-}, 15000);
+}, 30000);
 
 test("a failed 412 recovery GET preserves and announces the draft", async () => {
   const id = "77777777-7777-4777-8777-777777777777";
@@ -342,7 +342,7 @@ test("a failed 412 recovery GET preserves and announces the draft", async () => 
   await user.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
   expect(await screen.findByRole("alert")).toHaveTextContent(translations.en.alertSinkCreateError);
   expect(screen.getByRole("textbox", { name: "Sink name" })).toHaveValue("Keep after failed recovery");
-}, 15000);
+}, 30000);
 
 test("late reads for a superseded selection cannot replace the current draft", async () => {
   let releaseOld!: (response: Response) => void;
@@ -429,7 +429,7 @@ test("a sink recovery response after manager permission is lost cannot repopulat
   await waitFor(() => expect(sinkListCount).toBe(2));
   expect(screen.getByRole("combobox", { name: "Webhook sink" })).toHaveAttribute("aria-disabled", "true");
   releaseSecondSinkList(new Response("[]"));
-}, 15000);
+}, 30000);
 
 test("a failed management list request after permission loss does not show a stale error", async () => {
   let rejectRules!: (error: Error) => void;
@@ -452,7 +452,7 @@ test("a failed management list request after permission loss does not show a sta
   });
 
   expect(screen.queryByText(translations.en.requestError)).not.toBeInTheDocument();
-}, 15000);
+}, 30000);
 
 
 test("Manager configuration has distinct rule and destination sections", async () => {

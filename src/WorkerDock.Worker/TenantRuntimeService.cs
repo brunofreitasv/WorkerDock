@@ -25,8 +25,7 @@ public sealed class TenantRuntimeService(IConfiguration configuration, ISecretVa
     {
         if (!OperatingSystem.IsWindows() ||
             !Guid.TryParse(configuration["Tenant:InstanceId"], out var instanceId) || instanceId == Guid.Empty ||
-            string.IsNullOrWhiteSpace(configuration["Executor:Path"]) ||
-            configuration["Worker:CatalogDigest"] is not { Length: 64 } catalogDigest)
+            string.IsNullOrWhiteSpace(configuration["Executor:Path"]))
             throw new WorkerDockException("WorkerConfigurationUnavailable");
         var ceiling = configuration.GetValue("Worker:HostCeiling", 10);
         var drainSeconds = configuration.GetValue("Worker:DrainSeconds", 40);
@@ -47,8 +46,6 @@ public sealed class TenantRuntimeService(IConfiguration configuration, ISecretVa
             new WorkerDock.Templates.SqlServer.SqlTemplate("1.1.0").Descriptor,
             WorkerDock.Templates.Http.HttpTemplateDescriptors.Get("1.1.0")
         ];
-        if (TemplateMetadata.AggregateDigest(installedDescriptors) != catalogDigest)
-            throw new WorkerDockException("CatalogMismatch");
         var catalog = new SqlTemplateCatalog(database, installedDescriptors);
         await catalog.RegisterAsync(installedDescriptors, stoppingToken);
 

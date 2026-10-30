@@ -20,8 +20,10 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
 {
     private readonly ExecutionValuePreparation preparation = values ?? new ExecutionValuePreparation(new DynamicValueResolver());
     public ValueTask<AttemptStart> BeginAsync(DispatchIntent intent, string workerBootId, CancellationToken ct) =>
-        TransactAsync(intent.ExecutionId, workerBootId, (data, now) => data.Begin(intent, workerBootId, now), ct);
-    public async ValueTask<AttemptStart> BeginAsync(Guid executionId, string workerBootId, CancellationToken ct)
+        BeginCoreAsync(intent.ExecutionId, workerBootId, intent, ct);
+    public ValueTask<AttemptStart> BeginAsync(Guid executionId, string workerBootId, CancellationToken ct) =>
+        BeginCoreAsync(executionId, workerBootId, null, ct);
+    private async ValueTask<AttemptStart> BeginCoreAsync(Guid executionId, string workerBootId, DispatchIntent? intent, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(workerBootId) || workerBootId.Length > 100) throw new WorkerDockException("ValidationFailed", "workerBootId");
         try
@@ -29,16 +31,32 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             return await new BusinessTransaction(options).RunAsync(async (connection, transaction, token) =>
             {
                 await VerifyAsync(connection, transaction, token);
-                var data = await LoadAsync(connection, transaction, executionId, workerBootId, token, direct: true);
+                var data = await LoadAsync(connection, transaction, executionId, workerBootId, token, direct: intent is null);
+                if (intent is not null)
+                {
+                    // Delivery identity is supplied by the transport; all execution fields come from the pinned row.
+                    var expected = data.Intent with { DeliveryId = intent.DeliveryId, AttemptOrdinal = data.Ordinal + 1, PayloadDigest = "" };
+                    data.Intent = expected with { PayloadDigest = expected.ComputeDigest() };
+                    data.ValidateBeginIntent(intent, workerBootId);
+                }
                 var previous = data.Lease;
                 var previousState = data.AttemptState;
                 var now = await NowAsync(connection, transaction, token);
+                if (intent is not null && (data.State is not ("Queued" or "RetryWaiting") || intent.AttemptOrdinal <= data.Ordinal))
+                {
+                    var existing = data.Begin(intent, workerBootId, now);
+                    await SaveAsync(connection, transaction, data, previous, previousState,
+                        previousState == "Running" && previous!.ExpiresUtc <= now, token);
+                    return existing;
+                }
+                if (intent is not null && intent.CapacityRevision != data.EffectiveCapacityRevision)
+                    return new AttemptStart("Held", null);
                 if (!data.GateOpen || !data.DescriptorAvailable || data.StopRequested ||
                     data.State is not ("Queued" or "RetryWaiting") || data.Intent.DueUtc > now)
                     return new AttemptStart(data.State == "NeedsReview" ? "NeedsReview" : "Held", null);
                 if (!await CanClaimAsync(connection, transaction, data, executionId, token))
                     return new AttemptStart("Held", null);
-                var result = data.Begin(data.Intent, workerBootId, now);
+                var result = data.Begin(intent ?? data.Intent, workerBootId, now);
                 await SaveAsync(connection, transaction, data, previous, previousState,
                     previousState == "Running" && previous!.ExpiresUtc <= now, token);
                 return result;
@@ -152,12 +170,8 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             SELECT e.JobId,e.JobRevision,e.IdempotencyKey,e.State,e.Certainty,e.AvailableAtUtc,e.ProfileRevisionId,
                 e.StopRequested,e.ForceStop,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.PolicyJson,
                 j.Enabled,j.Archived,cat.Enabled,CONVERT(bit,0),CONVERT(uniqueidentifier,NULL),CONVERT(nvarchar(max),NULL),CONVERT(char(64),NULL),
-                CASE WHEN @direct=1 AND cat.Enabled=1 AND cat.ConcurrencyLimit>0 THEN 1
-                    WHEN @direct=0 AND EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus runtime
-                        WHERE runtime.StateId=1 AND runtime.Ready=1 AND runtime.LastHeartbeatUtc>DATEADD(second,-30,SYSUTCDATETIME())
-                        AND runtime.HostCeiling>(SELECT COUNT(*) FROM [workerdock].Attempts active WHERE active.State=N'Running')
-                        AND e.HoldsJobSlot=1) THEN 1 ELSE 0 END,CONVERT(bigint,0),e.TriggerKind,e.ValueContextJson,
-                e.FirstStartedAtUtc,e.ValueSnapshotJson,e.ValueResolutionError,r.DynamicValuesJson
+                CASE WHEN cat.Enabled=1 THEN 1 ELSE 0 END,CONVERT(bigint,0),e.TriggerKind,e.ValueContextJson,
+                e.FirstStartedAtUtc,e.ValueSnapshotJson,e.ValueResolutionError,r.DynamicValuesJson,r.HideFailureDetails
             FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
                 JOIN [workerdock].Jobs j ON j.JobId=e.JobId
                 LEFT JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
@@ -200,7 +214,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
         var descriptor = new ExecutionDescriptor(id, 1, reader.GetString(9), reader.GetString(10), reader.GetString(2),
             JsonDocument.Parse(reader.GetString(11)).RootElement.Clone(), reader.IsDBNull(6) ? null : reader.GetGuid(6), null,
             JsonSerializer.SerializeToElement(new { sqlProfileDiagnostic=reader.GetString(22)=="Diagnostic" }), null,
-            context, valueSnapshot, resolutionError);
+            context, valueSnapshot, resolutionError, reader.GetBoolean(28));
         var capacityRevision = reader.GetInt64(21);
         DispatchIntent intent;
         intent = new DispatchIntent(Guid.NewGuid(), id, 1, descriptor.TemplateId, Utc(reader.GetDateTime(5)), policy.Priority,
@@ -229,7 +243,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             StoredSnapshot=valueSnapshot,StoredSnapshotPresent=storedSnapshotPresent,StoredResolutionError=storedResolutionError,
             Policy=policy,JobId=jobId,
             Intent=intent with { PayloadDigest=intent.ComputeDigest() },State=state,Uncertain=uncertain,
-            StopRequested=stop,Force=force,GateOpen=gateOpen,DescriptorAvailable=available
+            StopRequested=stop,Force=force,GateOpen=gateOpen,DescriptorAvailable=available,HoldsJobSlot=state=="Running"
         };
         await using var attempt = Command(c, t, "SELECT TOP(1) AttemptId,AttemptNumber,Generation,WorkerBootId,LeaseExpiresUtc,DeadlineUtc,State,LocalExitConfirmed,SafeCode FROM [workerdock].Attempts WHERE ExecutionId=@id ORDER BY AttemptNumber DESC");
         Add(attempt, "@id", SqlDbType.UniqueIdentifier, id);
@@ -252,28 +266,27 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
     private static async ValueTask<bool> CanClaimAsync(DbConnection c, DbTransaction t, AttemptLifecycle data, Guid executionId, CancellationToken ct)
     {
         await using var limits = Command(c, t, """
-            SELECT j.ConcurrencyLimit,cat.ConcurrencyLimit,e.State
+            SELECT j.ConcurrencyLimit,j.PauseOnNeedsReview,e.State
             FROM [workerdock].Executions e JOIN [workerdock].Jobs j ON j.JobId=e.JobId
             JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
             JOIN [workerdock].TemplateCatalog cat ON cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion
-            WHERE e.ExecutionId=@id AND j.Enabled=1 AND j.Archived=0
+            WHERE e.ExecutionId=@id AND j.Enabled=1 AND j.Archived=0 AND cat.Enabled=1
             """);
         Add(limits, "@id", SqlDbType.UniqueIdentifier, executionId);
         await using var lr = await limits.ExecuteReaderAsync(ct);
         if (!await lr.ReadAsync(ct)) return false;
         var jobLimit = lr.GetInt32(0);
-        var templateLimit = lr.GetInt32(1);
-        var state = lr.GetString(2);
+        var pauseOnNeedsReview = lr.GetBoolean(1);
         await lr.CloseAsync();
 
-        // RetryWaiting retains its durable admission slot until completion.
-        var holdsSlot = state == "RetryWaiting";
         await using var admission = Command(c, t, """
             SELECT e.ExecutionId,e.State,COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue'),
-                COALESCE(TRY_CONVERT(int,JSON_VALUE(r.PolicyJson,'$.BacklogLimit')),100)
+                COALESCE(TRY_CONVERT(int,JSON_VALUE(r.PolicyJson,'$.BacklogLimit')),100),
+                CONVERT(bit,CASE WHEN e.AvailableAtUtc<=SYSUTCDATETIME() THEN 1 ELSE 0 END),
+                CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM [workerdock].Attempts a WHERE a.ExecutionId=e.ExecutionId AND a.State=N'Running') THEN 1 ELSE 0 END)
             FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
               WHERE e.JobId=@job AND e.State IN(N'Queued',N'Running',N'RetryWaiting',N'NeedsReview')
-                  AND (e.State<>N'Queued' OR e.StopRequested=0)
+                  AND (e.State NOT IN(N'Queued',N'RetryWaiting') OR e.StopRequested=0)
             ORDER BY e.AdmissionSequence,e.ExecutionId
             """);
         Add(admission, "@job", SqlDbType.UniqueIdentifier, data.JobId);
@@ -284,11 +297,10 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             {
                 var candidateState = reader.GetString(1);
                 candidates.Add(new(reader.GetGuid(0), reader.GetString(2), reader.GetInt32(3),
-                    candidateState is "Running" or "RetryWaiting" or "NeedsReview"));
+                    reader.GetBoolean(5), candidateState, reader.GetBoolean(4)));
             }
         }
-        if (holdsSlot) return templateLimit > 0;
-        var decision = JobAdmission.Decide(candidates, jobLimit);
+        var decision = JobAdmission.Decide(candidates, jobLimit, pauseOnNeedsReview: pauseOnNeedsReview);
         if (decision.SkipReasons.TryGetValue(executionId, out var reason))
         {
             await using var skip = Command(c, t, """
@@ -304,13 +316,16 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             return false;
         }
         if (!decision.Admit.Contains(executionId)) return false;
-        await using var template = Command(c, t, """
-            SELECT COUNT(*) FROM [workerdock].Executions e
-            JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
-            WHERE r.TemplateId=@template AND e.State IN(N'Running',N'RetryWaiting',N'NeedsReview')
+        await using var host = Command(c, t, """
+            SELECT COUNT(*) FROM [workerdock].RuntimeStatus runtime
+            WHERE runtime.StateId=1 AND runtime.Ready=1 AND runtime.LastHeartbeatUtc>DATEADD(second,-30,SYSUTCDATETIME())
+                AND runtime.HostCeiling>(SELECT COUNT(*) FROM [workerdock].Attempts WHERE State=N'Running')
+                AND @jobLimit>(SELECT COUNT(*) FROM [workerdock].Attempts a
+                    JOIN [workerdock].Executions e ON e.ExecutionId=a.ExecutionId WHERE e.JobId=@job AND a.State=N'Running')
             """);
-        Add(template, "@template", SqlDbType.NVarChar, data.Descriptor.TemplateId, 100);
-        return Convert.ToInt32(await template.ExecuteScalarAsync(ct)) < templateLimit;
+        Add(host, "@job", SqlDbType.UniqueIdentifier, data.JobId);
+        Add(host, "@jobLimit", SqlDbType.Int, jobLimit);
+        return Convert.ToInt32(await host.ExecuteScalarAsync(ct)) == 1;
     }
 
     private static async ValueTask SaveAsync(DbConnection c, DbTransaction t, AttemptLifecycle data,
@@ -337,6 +352,13 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             Add(command, "@previousState", SqlDbType.NVarChar, previousState, 30); Add(command, "@expired", SqlDbType.Bit, expired);
             Add(command, "@code", SqlDbType.NVarChar, data.SafeCode, 100);
             if (await command.ExecuteNonQueryAsync(ct) != 1) throw new WorkerDockException("AttemptOwnershipLost");
+            if (!insert && previousState == "Running" && data.AttemptState != "Running" && data.FailureDiagnostic is { } diagnostic)
+            {
+                await using var saveDiagnostic = Command(c, t, "INSERT [workerdock].AttemptFailureDiagnostics(AttemptId,DiagnosticJson) SELECT @attempt,@json WHERE NOT EXISTS(SELECT 1 FROM [workerdock].AttemptFailureDiagnostics WHERE AttemptId=@attempt)");
+                Add(saveDiagnostic, "@attempt", SqlDbType.UniqueIdentifier, lease.AttemptId);
+                Add(saveDiagnostic, "@json", SqlDbType.NVarChar, JsonSerializer.Serialize(diagnostic), -1);
+                await saveDiagnostic.ExecuteNonQueryAsync(ct);
+            }
         }
         var firstStart = data.Descriptor.ValueContext?.FirstStartedAtUtc;
         var newStart = data.StoredFirstStartedAtUtc is null && firstStart is not null;
@@ -366,7 +388,7 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
             }
             return;
         }
-        await using var update = Command(c, t, "UPDATE [workerdock].Executions SET State=@state,Certainty=@certainty,AvailableAtUtc=@due,StopRequested=@stop,ForceStop=@force,HoldsJobSlot=CASE WHEN @release=1 THEN 0 WHEN @state IN(N'Running',N'RetryWaiting',N'NeedsReview') THEN 1 ELSE HoldsJobSlot END WHERE ExecutionId=@id;");
+        await using var update = Command(c, t, "UPDATE [workerdock].Executions SET State=@state,Certainty=@certainty,AvailableAtUtc=@due,StopRequested=@stop,ForceStop=@force,HoldsJobSlot=CASE WHEN @release=1 THEN 0 WHEN @state=N'Running' THEN 1 ELSE HoldsJobSlot END WHERE ExecutionId=@id;");
         Add(update, "@id", SqlDbType.UniqueIdentifier, data.Descriptor.ExecutionId); Add(update, "@state", SqlDbType.NVarChar, data.State, 30);
         Add(update, "@certainty", SqlDbType.NVarChar, data.Uncertain ? "Unknown" : "Known", 10); Add(update, "@due", SqlDbType.DateTime2, data.Intent.DueUtc.UtcDateTime);
         Add(update, "@stop", SqlDbType.Bit, data.StopRequested); Add(update, "@force", SqlDbType.Bit, data.Force); Add(update, "@release", SqlDbType.Bit, !data.HoldsJobSlot);
@@ -386,3 +408,5 @@ public sealed class SqlAttemptStore(TenantDatabaseOptions options, ExecutionValu
         command.Parameters.Add(new SqlParameter(name, type, size) { Value = value ?? DBNull.Value });
     private static DateTimeOffset Utc(DateTime value) => new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
 }
+
+

@@ -2,6 +2,7 @@ using System.Data;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using WorkerDock.Contracts.Templates;
 using Microsoft.Data.SqlClient;
 using WorkerDock.Application.Common;
 using WorkerDock.Application.Monitoring;
@@ -81,20 +82,20 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT TOP(@take) j.JobId,j.CurrentRevision,r.Name,r.TemplateId,r.TemplateVersion,j.Enabled,j.Archived,
-                CONVERT(bit,CASE WHEN s.ScheduleId IS NULL OR s.Removed=1 THEN 0 ELSE 1 END),COALESCE(s.Paused,0),
+                CONVERT(bit,CASE WHEN s.ScheduleId IS NULL OR s.Removed=1 THEN 0 ELSE 1 END),CONVERT(bit,COALESCE(s.Paused,0)),
                 (SELECT COUNT(*) FROM [workerdock].Executions e WHERE e.JobId=j.JobId AND e.State IN(N'Queued',N'Running',N'RetryWaiting',N'NeedsReview')),
                 (SELECT COUNT(*) FROM [workerdock].Executions e WHERE e.JobId=j.JobId AND e.State IN(N'Failed',N'TimedOut') AND e.CreatedAtUtc>=DATEADD(hour,-24,SYSUTCDATETIME())),
                 r.CreatedAtUtc
               FROM [workerdock].Jobs j JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision
               LEFT JOIN [workerdock].Schedules s ON s.JobId=j.JobId
-             WHERE r.CreatedAtUtc>=@from AND r.CreatedAtUtc<=@to
+             WHERE (@applyDate=0 OR (r.CreatedAtUtc>=@from AND r.CreatedAtUtc<=@to))
                AND (@search IS NULL OR r.Name LIKE @search OR r.TemplateId LIKE @search)
                AND (@template IS NULL OR r.TemplateId=@template)
                AND (@state IS NULL OR (@state=N'Enabled' AND j.Enabled=1 AND j.Archived=0) OR (@state=N'Disabled' AND j.Enabled=0 AND j.Archived=0) OR (@state=N'Archived' AND j.Archived=1))
                AND (@cursorTime IS NULL OR r.CreatedAtUtc<@cursorTime OR (r.CreatedAtUtc=@cursorTime AND j.JobId<@cursorId))
              ORDER BY r.CreatedAtUtc DESC,j.JobId DESC;
             """;
-        Add(command, "@take", SqlDbType.Int, page.Limit + 1); Add(command, "@from", SqlDbType.DateTime2, filter.FromUtc.UtcDateTime); Add(command, "@to", SqlDbType.DateTime2, filter.ToUtc.UtcDateTime);
+        Add(command, "@take", SqlDbType.Int, page.Limit + 1); Add(command, "@applyDate", SqlDbType.Bit, filter.ApplyDateFilter); Add(command, "@from", SqlDbType.DateTime2, filter.FromUtc.UtcDateTime); Add(command, "@to", SqlDbType.DateTime2, filter.ToUtc.UtcDateTime);
         Add(command, "@search", SqlDbType.NVarChar, filter.Search is null ? DBNull.Value : "%" + filter.Search + "%", 204); Add(command, "@template", SqlDbType.NVarChar, (object?)filter.TemplateId ?? DBNull.Value, 100); Add(command, "@state", SqlDbType.NVarChar, (object?)filter.State ?? DBNull.Value, 20);
         Add(command, "@cursorTime", SqlDbType.DateTime2, cursor is null ? DBNull.Value : cursor.Value.Time.UtcDateTime); Add(command, "@cursorId", SqlDbType.UniqueIdentifier, cursor is null ? DBNull.Value : cursor.Value.Id);
         var items = new List<JobSummaryDto>();
@@ -172,23 +173,67 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
         await using var connection = await OpenAsync(ct);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT e.ExecutionId,e.JobId,r.Name,r.TemplateId,e.State,e.Certainty,e.TriggerKind,e.CreatedAtUtc,e.AvailableAtUtc,e.ScheduledForUtc,e.CorrelationId,e.StopRequested,e.ForceStop
-              FROM [workerdock].Executions e JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision WHERE e.ExecutionId=@id;
-            SELECT a.AttemptId,a.AttemptNumber,a.State,a.StartedAtUtc,a.EndedAtUtc,a.DeadlineUtc,a.SafeCode,a.LocalExitConfirmed,a.EffectsMayHaveOccurred
-              FROM [workerdock].Attempts a WHERE a.ExecutionId=@id ORDER BY a.AttemptNumber;
+            SELECT e.ExecutionId,e.JobId,r.Name,r.TemplateId,e.State,e.Certainty,e.TriggerKind,e.CreatedAtUtc,e.AvailableAtUtc,e.ScheduledForUtc,e.CorrelationId,e.StopRequested,e.ForceStop,r.TemplateVersion,e.JobRevision,
+                CASE WHEN e.State NOT IN(N'Queued',N'RetryWaiting') OR e.StopRequested=1 OR j.Enabled=0 OR j.Archived=1
+                          OR NOT EXISTS(SELECT 1 FROM [workerdock].TemplateCatalog cat WHERE cat.TemplateId=r.TemplateId AND cat.TemplateVersion=r.TemplateVersion AND cat.Enabled=1) THEN NULL
+                     WHEN e.State=N'RetryWaiting' AND e.AvailableAtUtc>SYSUTCDATETIME() THEN N'NotDue'
+                     WHEN e.State=N'Queued' AND candidate.OverlapMode=N'Skip' AND j.PauseOnNeedsReview=1 AND wait.EarlierReview=1 THEN N'ReviewSkip'
+                     WHEN candidate.OverlapMode<>N'Allow' AND j.PauseOnNeedsReview=1 AND wait.EarlierReview=1 THEN N'ReviewHold'
+                     WHEN wait.RunningJobAttempts>0 AND (candidate.OverlapMode<>N'Allow' OR wait.ExclusiveRunning=1) THEN N'JobRunning'
+                     WHEN wait.RunningJobAttempts>=j.ConcurrencyLimit THEN N'JobCapacity'
+                     WHEN wait.EarlierBlocking=1 OR (candidate.OverlapMode=N'Allow' AND wait.RunningJobAttempts+wait.EarlierAllowWaiting>=j.ConcurrencyLimit) THEN N'EarlierQueued'
+                     WHEN NOT EXISTS(SELECT 1 FROM [workerdock].RuntimeStatus WHERE StateId=1 AND Ready=1 AND LastHeartbeatUtc>DATEADD(second,-30,SYSUTCDATETIME())) THEN N'WorkerUnavailable'
+                     WHEN wait.RunningHostAttempts>=(SELECT HostCeiling FROM [workerdock].RuntimeStatus WHERE StateId=1) THEN N'HostCapacity'
+                     ELSE NULL END AS WaitReason
+              FROM [workerdock].Executions e
+              JOIN [workerdock].JobRevisions r ON r.JobId=e.JobId AND r.Revision=e.JobRevision
+              JOIN [workerdock].Jobs j ON j.JobId=e.JobId
+              CROSS APPLY (SELECT COALESCE(JSON_VALUE(r.PolicyJson,'$.Overlap'),N'Queue') AS OverlapMode) candidate
+              CROSS APPLY (
+                    SELECT
+                        (SELECT COUNT(*) FROM [workerdock].Attempts a JOIN [workerdock].Executions active ON active.ExecutionId=a.ExecutionId WHERE active.JobId=e.JobId AND a.State=N'Running') AS RunningJobAttempts,
+                        (SELECT COUNT(*) FROM [workerdock].Attempts WHERE State=N'Running') AS RunningHostAttempts,
+                        (SELECT COUNT(*) FROM [workerdock].Executions prior
+                           JOIN [workerdock].JobRevisions priorRevision ON priorRevision.JobId=prior.JobId AND priorRevision.Revision=prior.JobRevision
+                           WHERE prior.JobId=e.JobId AND prior.StopRequested=0 AND prior.AdmissionSequence<e.AdmissionSequence
+                             AND (prior.State=N'Queued' OR (prior.State=N'RetryWaiting' AND prior.AvailableAtUtc<=SYSUTCDATETIME()))
+                             AND COALESCE(JSON_VALUE(priorRevision.PolicyJson,'$.Overlap'),N'Queue')=N'Allow') AS EarlierAllowWaiting,
+                        CONVERT(bit,CASE WHEN EXISTS(
+                            SELECT 1 FROM [workerdock].Executions prior
+                            JOIN [workerdock].JobRevisions priorRevision ON priorRevision.JobId=prior.JobId AND priorRevision.Revision=prior.JobRevision
+                            WHERE prior.JobId=e.JobId AND prior.StopRequested=0 AND prior.AdmissionSequence<e.AdmissionSequence
+                              AND (prior.State=N'Queued' OR (prior.State=N'RetryWaiting' AND prior.AvailableAtUtc<=SYSUTCDATETIME()))
+                              AND COALESCE(JSON_VALUE(priorRevision.PolicyJson,'$.Overlap'),N'Queue')<>N'Allow'
+                              AND (COALESCE(JSON_VALUE(priorRevision.PolicyJson,'$.Overlap'),N'Queue')<>N'Skip'
+                                   OR (prior.HoldsJobSlot=1
+                                       AND NOT (j.PauseOnNeedsReview=1 AND EXISTS(SELECT 1 FROM [workerdock].Executions reviewPrior
+                                           WHERE reviewPrior.JobId=e.JobId AND reviewPrior.State=N'NeedsReview' AND reviewPrior.AdmissionSequence<prior.AdmissionSequence)))))
+                        THEN 1 ELSE 0 END) AS EarlierBlocking,
+                        CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM [workerdock].Executions prior
+                            WHERE prior.JobId=e.JobId AND prior.State=N'NeedsReview' AND prior.AdmissionSequence<e.AdmissionSequence)
+                            THEN 1 ELSE 0 END) AS EarlierReview,
+                        CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM [workerdock].Attempts a
+                            JOIN [workerdock].Executions active ON active.ExecutionId=a.ExecutionId
+                            JOIN [workerdock].JobRevisions activeRevision ON activeRevision.JobId=active.JobId AND activeRevision.Revision=active.JobRevision
+                            WHERE active.JobId=e.JobId AND a.State=N'Running' AND COALESCE(JSON_VALUE(activeRevision.PolicyJson,'$.Overlap'),N'Queue')<>N'Allow')
+                            THEN 1 ELSE 0 END) AS ExclusiveRunning
+              ) wait
+             WHERE e.ExecutionId=@id;
+            SELECT a.AttemptId,a.AttemptNumber,a.State,a.StartedAtUtc,a.EndedAtUtc,a.DeadlineUtc,a.SafeCode,a.LocalExitConfirmed,a.EffectsMayHaveOccurred,d.DiagnosticJson
+              FROM [workerdock].Attempts a LEFT JOIN [workerdock].AttemptFailureDiagnostics d ON d.AttemptId=a.AttemptId WHERE a.ExecutionId=@id ORDER BY a.AttemptNumber;
             SELECT EventId,AttemptId,Code,AtUtc FROM [workerdock].OperationalEvents WHERE ExecutionId=@id AND EventKind=N'Execution' AND Source=N'Lifecycle' ORDER BY AtUtc,EventId;
             """;
         Add(command, "@id", SqlDbType.UniqueIdentifier, executionId);
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) throw new WorkerDockException("ExecutionNotFound");
-        var detail = new ExecutionCore(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), Utc(reader.GetDateTime(7)), Utc(reader.GetDateTime(8)), reader.IsDBNull(9) ? null : Utc(reader.GetDateTime(9)), reader.GetGuid(10), reader.GetBoolean(11), reader.GetBoolean(12));
+        var detail = new ExecutionCore(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), Utc(reader.GetDateTime(7)), Utc(reader.GetDateTime(8)), reader.IsDBNull(9) ? null : Utc(reader.GetDateTime(9)), reader.GetGuid(10), reader.GetBoolean(11), reader.GetBoolean(12), reader.GetString(13), reader.GetInt64(14), reader.IsDBNull(15) ? null : reader.GetString(15));
         await reader.NextResultAsync(ct);
         var attempts = new List<ExecutionAttemptDto>();
-        while (await reader.ReadAsync(ct)) attempts.Add(new(reader.GetGuid(0), reader.GetInt32(1), reader.GetString(2), NullableUtc(reader, 3), NullableUtc(reader, 4), NullableUtc(reader, 5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetBoolean(7), reader.GetBoolean(8)));
+        while (await reader.ReadAsync(ct)) attempts.Add(new(reader.GetGuid(0), reader.GetInt32(1), reader.GetString(2), NullableUtc(reader, 3), NullableUtc(reader, 4), NullableUtc(reader, 5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetBoolean(7), reader.GetBoolean(8), reader.IsDBNull(9) ? null : JsonSerializer.Deserialize<FailureDiagnostic>(reader.GetString(9))));
         await reader.NextResultAsync(ct);
         var timeline = new List<ExecutionEventDto>();
         while (await reader.ReadAsync(ct)) timeline.Add(new(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetGuid(1), reader.GetString(2), Utc(reader.GetDateTime(3))));
-        return new(detail.ExecutionId, detail.JobId, detail.JobName, detail.TemplateId, detail.State, detail.Certainty, detail.TriggerKind, detail.CreatedAtUtc, detail.AvailableAtUtc, detail.ScheduledForUtc, detail.CorrelationId, detail.StopRequested, detail.ForceStop, attempts, timeline);
+        return new(detail.ExecutionId, detail.JobId, detail.JobName, detail.TemplateId, detail.State, detail.Certainty, detail.TriggerKind, detail.CreatedAtUtc, detail.AvailableAtUtc, detail.ScheduledForUtc, detail.CorrelationId, detail.StopRequested, detail.ForceStop, attempts, timeline, detail.TemplateVersion, detail.JobRevision, detail.WaitReason);
     }
 
     public async ValueTask<Page<AuditSummaryDto>> AuditAsync(AuditHistoryFilter filter, PageRequest page, CancellationToken ct)
@@ -338,5 +383,5 @@ public sealed class SqlMonitoringQueries(TenantDatabaseOptions options, TimeProv
     private static void Add(SqlCommand command, string name, SqlDbType type, object value, int size = 0) { var parameter = command.Parameters.Add(name, type); if (size != 0) parameter.Size = size; parameter.Value = value; }
     private static DateTimeOffset Utc(DateTime value) => new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
     private static DateTimeOffset? NullableUtc(SqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : Utc(reader.GetDateTime(ordinal));
-    private sealed record ExecutionCore(Guid ExecutionId, Guid JobId, string JobName, string TemplateId, string State, string Certainty, string TriggerKind, DateTimeOffset CreatedAtUtc, DateTimeOffset AvailableAtUtc, DateTimeOffset? ScheduledForUtc, Guid CorrelationId, bool StopRequested, bool ForceStop);
+    private sealed record ExecutionCore(Guid ExecutionId, Guid JobId, string JobName, string TemplateId, string State, string Certainty, string TriggerKind, DateTimeOffset CreatedAtUtc, DateTimeOffset AvailableAtUtc, DateTimeOffset? ScheduledForUtc, Guid CorrelationId, bool StopRequested, bool ForceStop, string TemplateVersion, long JobRevision, string? WaitReason);
 }

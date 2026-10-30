@@ -88,13 +88,14 @@ public class SqlTemplate : IWorkerTemplate
     internal static object ConvertAuthoringValue(JsonElement value, SqlDbType type) => ConvertValue(value, type);
     public async ValueTask<TemplateResult> ExecuteAsync(TemplateExecutionContext context,CancellationToken ct)
     {
-        var effects=false; var commitStarted=false; SqlTransaction? transaction=null; SqlConnection? connection=null;
+        var effects=false; var commitStarted=false; SqlTransaction? transaction=null; SqlConnection? connection=null; SqlJobConfiguration? activeConfig=null;
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(ct);
         SqlDeadlineCancellation? deadlineSchedule=null;
         try
         {
             if(Validate(context.Execution.Configuration).Count!=0) throw new SqlTemplateException("SqlConfigurationInvalid");
             var config=context.Execution.Configuration.Deserialize<SqlJobConfiguration>(SqlJobConfiguration.JsonOptions)!;
+            activeConfig=config;
             var profile=context.Execution.ProfileConfiguration?.Deserialize<ConnectionProfileRevision>(SqlJobConfiguration.JsonOptions);
             if(profile is null || context.Execution.ProfileRevisionId!=profile.ProfileRevisionId || config.ProfileId!=profile.ProfileId) throw new SqlTemplateException("ProfileRevisionMismatch");
             if(context.Execution.DeadlineUtc is {} until)
@@ -126,17 +127,21 @@ public class SqlTemplate : IWorkerTemplate
                 using var rollback=new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 try { await transaction.RollbackAsync(rollback.Token); if(error is not OperationCanceledException) effects=false; } catch { }
             }
-            if(commitStarted) return Result("TransientFailure","SqlCommitUnknown",true);
-            if(error is SqlTemplateException safe) return Result("PermanentFailure",safe.SafeCode,effects);
-            if(error is SecretUnavailableException) return Result("PermanentFailure","SecretUnavailable",effects);
-            if(error is OperationCanceledException) return Result("TransientFailure","SqlCancelled",effects);
-            if(error is SqlException sql) return Result(sql.Number is -2 or 1205 or 4060 or 40197 or 40501 or 40613 ? "TransientFailure" : "PermanentFailure",SqlProfileDiagnostic.SafeCode(sql.Number),effects);
-            return Result("PermanentFailure","SqlExecutionFailed",effects);
+            var detail = Diagnostic(error, activeConfig?.CommandKind);
+            if(commitStarted) return Result("TransientFailure","SqlCommitUnknown",true,detail);
+            if(error is SqlTemplateException safe) return Result("PermanentFailure",safe.SafeCode,effects,detail);
+            if(error is SecretUnavailableException) return Result("PermanentFailure","SecretUnavailable",effects,detail);
+            if(error is OperationCanceledException) return Result("TransientFailure","SqlCancelled",effects,detail);
+            if(error is SqlException sql) return Result(sql.Number is -2 or 1205 or 4060 or 40197 or 40501 or 40613 ? "TransientFailure" : "PermanentFailure",SqlProfileDiagnostic.SafeCode(sql.Number),effects,detail);
+            return Result("PermanentFailure","SqlExecutionFailed",effects,detail);
         }
         finally { deadlineSchedule?.Dispose(); if(transaction is not null) await transaction.DisposeAsync(); if(connection is not null) await connection.DisposeAsync(); }
     }
     protected virtual Task CommitAsync(SqlTransaction transaction,CancellationToken ct)=>transaction.CommitAsync(ct);
-    internal static TemplateResult Result(string outcome,string code,bool effects)=>new(outcome,code,effects,JsonSerializer.SerializeToElement(new {}),null);
+    internal static TemplateResult Result(string outcome,string code,bool effects,FailureDiagnostic? diagnostic=null)=>new(outcome,code,effects,JsonSerializer.SerializeToElement(new {}),null,diagnostic);
+    internal static FailureDiagnostic Diagnostic(Exception error,string? commandKind) => error is SqlException sql
+        ? new("Sql",sql.GetType().FullName,sql.Message,sql.StackTrace,null,sql.Number,sql.State,string.IsNullOrEmpty(sql.Procedure) ? null : sql.Procedure,sql.LineNumber,commandKind)
+        : new("Sql",error.GetType().FullName,error.Message,error.StackTrace,CommandKind:commandKind);
     internal static TemplateDescriptor CreateDescriptor()
     {
         using var schema=JsonDocument.Parse("""

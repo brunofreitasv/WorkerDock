@@ -30,7 +30,7 @@ public static class JobLifecycleEndpoints
                 "ValidationFailed" => Problem(400, error.Code, error.Field),
                 "JobNotFound" or "ScheduleNotFound" => Problem(404, error.Code),
                 "StaleVersion" => Problem(412, error.Code, "headers.ifMatch"),
-                "JobArchived" or "JobDisabled" or "ProfileUnavailable" or "ScheduleExists" => Problem(409, error.Code),
+                "InvalidJobTransition" or "JobArchived" or "JobDisabled" or "ProfileUnavailable" or "ScheduleExists" => Problem(409, error.Code),
                 _ => Problem(503, "PersistenceUnavailable")
             }; }
         }).RequireAuthorization(AccessPolicies.Manage);

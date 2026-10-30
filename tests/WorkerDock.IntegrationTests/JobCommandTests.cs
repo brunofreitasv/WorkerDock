@@ -25,6 +25,19 @@ public sealed class JobCommandTests
     }
 
     [Fact]
+    public async Task New_job_defaults_to_visible_failure_details_and_edits_can_change_policy()
+    {
+        var job = Job("Policy");
+        var service = new InMemoryJobCommands(TimeProvider.System, templateCatalog: JobCommandTestCatalog.Create());
+        await service.SaveAsync(job, null, Actor, default);
+        var editor = await service.GetEditableAsync(job.JobId, default);
+        Assert.False(editor.Revision.HideFailureDetails);
+        await service.SaveAsync(editor.Revision with { HideFailureDetails = true }, editor.Version, Actor, default);
+        Assert.True((await service.GetEditableAsync(job.JobId, default)).Revision.HideFailureDetails);
+        Assert.False(service.GetRevision(job.JobId, 1)!.HideFailureDetails);
+    }
+
+    [Fact]
     public void Dynamic_payload_reserves_snapshot_space()
     {
         var configuration = JsonDocument.Parse("{}").RootElement;
@@ -293,18 +306,30 @@ public sealed class JobCommandTests
     }
 
     [Fact]
+    public async Task Archived_job_rejects_legacy_configuration_save_without_new_revision_or_audit()
+    {
+        var archived = Job("Archived");
+        var service = new InMemoryJobCommands(TimeProvider.System, archivedSeeds: [archived], templateCatalog: JobCommandTestCatalog.Create());
+        var editor = await service.GetEditableAsync(archived.JobId, default);
+        Assert.Equal("JobArchived", (await Assert.ThrowsAsync<WorkerDockException>(async () => await service.SaveAsync(editor.Revision with { Name = "Rejected" }, editor.Version, Actor, default))).Code);
+        var unchanged = await service.GetEditableAsync(archived.JobId, default);
+        Assert.Equal(editor.Version, unchanged.Version); Assert.Equal("Archived", unchanged.Revision.Name); Assert.Equal(0, service.AuditCount);
+    }
+    [Fact]
     public async Task Execution_pins_immutable_job_revision()
     {
-        var job = Job("Original");
+        var job = Job("Original") with { HideFailureDetails = true };
         var service = new InMemoryJobCommands(TimeProvider.System, [job], templateCatalog: JobCommandTestCatalog.Create());
         var first = await service.RunNowAsync(job.JobId, "first", Actor, default);
         var editable = await service.GetEditableAsync(job.JobId, default);
-        await service.SaveAsync(job with { Name = "Updated" }, editable.Version, Actor, default);
+        await service.SaveAsync(job with { Name = "Updated", HideFailureDetails = false }, editable.Version, Actor, default);
         var second = await service.RunNowAsync(job.JobId, "second", Actor, default);
         Assert.Equal(1, service.GetExecution(first.TargetId)?.JobRevision);
         Assert.Equal(2, service.GetExecution(second.TargetId)?.JobRevision);
         Assert.Equal("Original", service.GetRevision(job.JobId, 1)?.Name);
         Assert.Equal("Updated", service.GetRevision(job.JobId, 2)?.Name);
+        Assert.True(service.GetAttemptStore(first.TargetId)!.AcceptedDescriptor.HideFailureDetails);
+        Assert.False(service.GetAttemptStore(second.TargetId)!.AcceptedDescriptor.HideFailureDetails);
         Assert.NotEqual(first.TargetId, second.TargetId);
     }
 

@@ -60,7 +60,7 @@ public sealed class JobAdmissionTests
     }
 
     [Fact]
-    public async Task Actual_retry_review_and_reconciliation_keep_later_shared_work_behind_exclusive_execution()
+    public async Task Actual_retry_and_review_release_numeric_slots_for_later_execution()
     {
         var clock=new AttemptLifecycleTests.Clock(); var descriptor=AttemptLifecycleTests.Descriptor();
         var first=new InMemoryAttemptStore(clock,descriptor,AttemptLifecycleTests.Policy());
@@ -69,12 +69,12 @@ public sealed class JobAdmissionTests
             ? [new(descriptor.ExecutionId,"Queue",10,true),next,shared] : [next,shared],limit);
         var lease=(await first.BeginAsync(first.Intent,"worker",default)).Lease!;
         await first.CompleteAsync(lease,new(new TemplateResult("TransientFailure","Busy",false,JsonSerializer.SerializeToElement(new {}),null),"Completed",true,false),default);
-        Assert.Equal("RetryWaiting",first.Snapshot.State); Assert.Empty(Decide(3).Admit);
+        Assert.Equal("RetryWaiting",first.Snapshot.State); Assert.False(first.Snapshot.HoldsJobSlot); Assert.Equal(next.ExecutionId, Assert.Single(Decide(3).Admit));
         var retry=Assert.Single(first.Retries); clock.Now=retry.DueUtc;
         var retryLease=(await first.BeginAsync(retry,"worker",default)).Lease!;
         Assert.Empty(Decide(0).Admit);
         await first.CompleteAsync(retryLease,new(null,"ProcessFailed",false,true),default);
-        Assert.Equal("NeedsReview",first.Snapshot.State); Assert.Empty(Decide(3).Admit);
+        Assert.Equal("NeedsReview",first.Snapshot.State); Assert.False(first.Snapshot.HoldsJobSlot); Assert.Equal(next.ExecutionId, Assert.Single(Decide(3).Admit));
         await first.ResolveAsync(descriptor.ExecutionId,"Cancel","reconciled target effects",new ActorContext("manager","Anonymous",Guid.NewGuid()),default);
         Assert.Empty(Decide(0).Admit); Assert.Equal(new[] { next.ExecutionId },Decide(1).Admit);
         Assert.DoesNotContain(shared.ExecutionId,Decide(1).Admit);
@@ -117,4 +117,30 @@ public sealed class JobAdmissionTests
         var work = Enumerable.Range(0, 8).Select(_ => Work()).ToArray();
         Assert.Equal(work.Take(3).Select(x => x.ExecutionId), JobAdmission.Decide(work, 3).Admit);
     }
+    [Theory]
+    [InlineData("Queue", true, false, null)]
+    [InlineData("Queue", false, true, null)]
+    [InlineData("Skip", true, false, "SkippedReviewHold")]
+    [InlineData("Skip", false, true, null)]
+    [InlineData("Allow", true, true, null)]
+    public void Review_hold_is_a_policy_and_never_numeric_capacity(string mode, bool pause, bool starts, string? reason)
+    {
+        var review = new AdmissionCandidate(Guid.NewGuid(), "Queue", 10, false, "NeedsReview");
+        var next = Work(mode);
+        var decision = JobAdmission.Decide([review, next], 1, pauseOnNeedsReview: pause);
+        Assert.Equal(starts, decision.Admit.Contains(next.ExecutionId));
+        Assert.Equal(reason, decision.SkipReasons.GetValueOrDefault(next.ExecutionId));
+    }
+
+    [Fact]
+    public void Retry_not_yet_due_does_not_reserve_a_slot_or_block_later_work()
+    {
+        var retry = new AdmissionCandidate(Guid.NewGuid(), "Queue", 10, false, "RetryWaiting", false);
+        var next = Work("Queue");
+        Assert.Equal(next.ExecutionId, Assert.Single(JobAdmission.Decide([retry, next], 1).Admit));
+        Assert.Equal(retry.ExecutionId, Assert.Single(JobAdmission.Decide([retry with { IsReady = true }, next], 1).Admit));
+    }
+
 }
+
+\n

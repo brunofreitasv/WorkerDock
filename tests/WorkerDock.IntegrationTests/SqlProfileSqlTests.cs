@@ -12,7 +12,7 @@ public sealed partial class SqlProfileTests
     [InlineData(true)]
     public async Task Restricted_profile_revisions_pin_and_diagnostics_are_durable(bool snapshot)
     {
-        await using var f=new TenantSqlFixture();await f.CreateAsync(snapshot);await f.Runner.ApplyAsync("tenant","0002_template_catalog_registration",default);
+        await using var f=new TenantSqlFixture();await f.CreateAsync(snapshot);await f.Runner.ApplyAsync("tenant","0005_job_review_hold",default);
         var options=new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(f.RuntimeConnectionString,f.Database.InstanceId);
         var store=new SqlConnectionProfiles(options);var proposed=SqlTemplateTests.Profile();await store.SaveAsync(proposed,null,Actor,default);var first=await store.GetCurrentAsync(proposed.ProfileId,default);
         await store.SaveAsync(proposed with { Server="rotated" },first.Version,Actor,default);var current=await store.GetCurrentAsync(proposed.ProfileId,default);
@@ -41,3 +41,5 @@ public sealed partial class SqlProfileTests
         await f.ExecuteAsync("DROP TRIGGER [workerdock].SqlProfileAuditFailure");
     }
 }
+
+\n

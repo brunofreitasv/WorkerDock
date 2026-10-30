@@ -4,6 +4,7 @@ using WorkerDock.Application.Executions;
 using WorkerDock.Application.Jobs;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Contracts.Values;
+using WorkerDock.Contracts.Templates;
 using WorkerDock.Domain.Jobs;
 using WorkerDock.Infrastructure.Values;
 using System.Text.Json;
@@ -25,6 +26,8 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
     private readonly AttemptLifecycle data;
     private readonly List<DispatchIntent> retries = [];
     private readonly List<MemoryExecutionAudit> audits = [];
+    private readonly Dictionary<Guid, FailureDiagnostic> failureDiagnostics = [];
+    public IReadOnlyDictionary<Guid, FailureDiagnostic> FailureDiagnostics { get { lock (gate) return new Dictionary<Guid, FailureDiagnostic>(failureDiagnostics); } }
     public InMemoryAttemptStore(TimeProvider clock, ExecutionDescriptor descriptor, ExecutionPolicy policy, Action<AttemptSnapshot>? committed = null,
         Func<CancellationToken, ValueTask<JsonElement>>? integrationSnapshot = null,
         ExecutionValuePreparation? values = null, DynamicValuePlan? dynamicValues = null)
@@ -86,7 +89,14 @@ public sealed class InMemoryAttemptStore : IAttemptStore, IExecutionControls, IA
     }
     public ValueTask<AttemptLease?> RenewAsync(AttemptLease lease, CancellationToken ct) => Run(() => data.Renew(lease, clock.GetUtcNow()), ct);
     public async ValueTask CompleteAsync(AttemptLease lease, AttemptCompletion completion, CancellationToken ct) =>
-        await Run(() => { data.Complete(lease, completion, clock.GetUtcNow()); return true; }, ct);
+        await Run(() =>
+        {
+            var now = clock.GetUtcNow();
+            var owned = data.Owned(lease, now);
+            data.Complete(lease, completion, now);
+            if (owned && data.FailureDiagnostic is { } diagnostic) failureDiagnostics.TryAdd(lease.AttemptId, diagnostic);
+            return true;
+        }, ct);
     public ValueTask<int> ReviewExpiredAsync(int limit, CancellationToken ct)
     {
         if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));

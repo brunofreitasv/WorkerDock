@@ -18,7 +18,7 @@ public sealed class SqlJobLifecycle(TenantDatabaseOptions options, ITemplateCata
     public async ValueTask<CommandReceipt> ApplyAsync(Guid jobId, string action, byte[] expectedVersion, ActorContext actor, CancellationToken ct)
     {
         JobCommandValidation.ValidateActor(actor);
-        if (jobId == Guid.Empty || expectedVersion is not { Length: 8 } || action is not ("PauseSchedule" or "ResumeSchedule" or "Disable" or "Enable" or "EnableManual" or "Archive"))
+        if (jobId == Guid.Empty || expectedVersion is not { Length: 8 } || action is not ("PauseSchedule" or "ResumeSchedule" or "Disable" or "Enable" or "EnableManual" or "Archive" or "Restore"))
             throw new WorkerDockException("ValidationFailed", "action");
         try
         {
@@ -26,14 +26,15 @@ public sealed class SqlJobLifecycle(TenantDatabaseOptions options, ITemplateCata
             {
                 await using (var instance = Command(connection, transaction, "SELECT InstanceId FROM [workerdock].TenantSettings"))
                     if ((Guid?)await instance.ExecuteScalarAsync(token) != options.InstanceId) throw new WorkerDockException("TenantInstanceMismatch");
-                await using var read = Command(connection, transaction, "SELECT j.CurrentRevision,j.Version,j.Enabled,j.Archived,r.Name,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.ProfileId,r.PolicyJson,r.DynamicValuesJson FROM [workerdock].Jobs j WITH(UPDLOCK,HOLDLOCK) JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision WHERE j.JobId=@job");
+                await using var read = Command(connection, transaction, "SELECT j.CurrentRevision,j.Version,j.Enabled,j.Archived,r.Name,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.ProfileId,r.PolicyJson,r.DynamicValuesJson,r.HideFailureDetails FROM [workerdock].Jobs j WITH(UPDLOCK,HOLDLOCK) JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision WHERE j.JobId=@job");
                 Add(read, "@job", SqlDbType.UniqueIdentifier, jobId); await using var row = await read.ExecuteReaderAsync(token);
                 if (!await row.ReadAsync(token)) throw new WorkerDockException("JobNotFound");
                 var revision = row.GetInt64(0); var version = row.GetFieldValue<byte[]>(1); var enabled = row.GetBoolean(2); var archived = row.GetBoolean(3);
-                var current = new JobRevision(jobId, revision, row.GetString(4), row.GetString(5), row.GetString(6), JsonDocument.Parse(row.GetString(7)).RootElement.Clone(), row.IsDBNull(8) ? null : row.GetGuid(8), JsonSerializer.Deserialize<ExecutionPolicy>(row.GetString(9))!, row.IsDBNull(10) ? null : JsonDocument.Parse(row.GetString(10)).RootElement.Clone());
+                var current = new JobRevision(jobId, revision, row.GetString(4), row.GetString(5), row.GetString(6), JsonDocument.Parse(row.GetString(7)).RootElement.Clone(), row.IsDBNull(8) ? null : row.GetGuid(8), JsonSerializer.Deserialize<ExecutionPolicy>(row.GetString(9))!, row.IsDBNull(10) ? null : JsonDocument.Parse(row.GetString(10)).RootElement.Clone(), row.GetBoolean(11));
                 await row.CloseAsync();
                 if (!version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
-                if (archived && action != "Enable") throw new WorkerDockException("JobArchived");
+                if (archived && action != "Restore") throw new WorkerDockException("JobArchived");
+                if (!archived && action == "Restore") throw new WorkerDockException("InvalidJobTransition");
                 if (action == "Enable" && enabled) return await NoOpReceiptAsync(connection, transaction, jobId, action, token);
                 if (action is "Enable" or "EnableManual")
                 {
@@ -57,10 +58,15 @@ public sealed class SqlJobLifecycle(TenantDatabaseOptions options, ITemplateCata
                         await JobAdmission.AdmitAsync(connection, transaction, jobId, token);
                         await ResetScheduleBoundaryAsync(connection, transaction, jobId, now, token);
                         break;
+                    case "Restore":
+                        await using (var update = Command(connection, transaction, "UPDATE [workerdock].Jobs SET Enabled=0,Archived=0,DisabledAtUtc=@now WHERE JobId=@job AND Version=@version AND Archived=1"))
+                        { Add(update, "@job", SqlDbType.UniqueIdentifier, jobId); Add(update, "@version", SqlDbType.Binary, version, 8); Add(update, "@now", SqlDbType.DateTime2, now); if (await update.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion"); }
+                        await AdvanceScheduleAsync(connection, transaction, jobId, now, false, token);
+                        break;
                     case "Archive":
                         await using (var update = Command(connection, transaction, "UPDATE [workerdock].Jobs SET Enabled=0,Archived=1,DisabledAtUtc=@now WHERE JobId=@job AND Version=@version"))
                         { Add(update, "@job", SqlDbType.UniqueIdentifier, jobId); Add(update, "@version", SqlDbType.Binary, version, 8); Add(update, "@now", SqlDbType.DateTime2, now); if (await update.ExecuteNonQueryAsync(token) != 1) throw new WorkerDockException("StaleVersion"); }
-                        await RemoveScheduleAsync(connection, transaction, jobId, token);
+                        await AdvanceScheduleAsync(connection, transaction, jobId, now, false, token);
                         break;
                 }
                 if (action is "PauseSchedule" or "ResumeSchedule")
@@ -91,14 +97,14 @@ public sealed class SqlJobLifecycle(TenantDatabaseOptions options, ITemplateCata
             {
                 await using (var instance=Command(connection,transaction,"SELECT InstanceId FROM [workerdock].TenantSettings"))
                     if((Guid?)await instance.ExecuteScalarAsync(token)!=options.InstanceId)throw new WorkerDockException("TenantInstanceMismatch");
-                await using var read = Command(connection, transaction, "SELECT j.Version,r.Name,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.ProfileId,r.PolicyJson,r.DynamicValuesJson FROM [workerdock].Jobs j WITH(UPDLOCK,HOLDLOCK) JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision WHERE j.JobId=@job AND j.Archived=0");
+                await using var read = Command(connection, transaction, "SELECT j.Version,r.Name,r.TemplateId,r.TemplateVersion,r.ConfigurationJson,r.ProfileId,r.PolicyJson,r.DynamicValuesJson,r.HideFailureDetails FROM [workerdock].Jobs j WITH(UPDLOCK,HOLDLOCK) JOIN [workerdock].JobRevisions r ON r.JobId=j.JobId AND r.Revision=j.CurrentRevision WHERE j.JobId=@job AND j.Archived=0");
                 Add(read, "@job", SqlDbType.UniqueIdentifier, sourceJobId); await using var row = await read.ExecuteReaderAsync(token);
                 if (!await row.ReadAsync(token)) throw new WorkerDockException("JobNotFound");
-                var version = row.GetFieldValue<byte[]>(0); var name = row.GetString(1); var template = row.GetString(2); var templateVersion = row.GetString(3); var configuration = row.GetString(4); Guid? profile = row.IsDBNull(5) ? null : row.GetGuid(5); var policy = row.GetString(6); var dynamicValues = row.IsDBNull(7) ? null : row.GetString(7); await row.CloseAsync();
+                var version = row.GetFieldValue<byte[]>(0); var name = row.GetString(1); var template = row.GetString(2); var templateVersion = row.GetString(3); var configuration = row.GetString(4); Guid? profile = row.IsDBNull(5) ? null : row.GetGuid(5); var policy = row.GetString(6); var dynamicValues = row.IsDBNull(7) ? null : row.GetString(7); var hideFailureDetails = row.GetBoolean(8); await row.CloseAsync();
                 if (!version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
                 await using (var insert = Command(connection, transaction, "INSERT [workerdock].Jobs(JobId,CurrentRevision,Enabled,Archived,ConcurrencyLimit) VALUES(@target,1,0,0,1)")) { Add(insert, "@target", SqlDbType.UniqueIdentifier, targetJobId); await insert.ExecuteNonQueryAsync(token); }
-                await using (var revision = Command(connection, transaction, "INSERT [workerdock].JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc,DynamicValuesJson) VALUES(@target,1,@name,@template,@version,@configuration,@profile,@policy,SYSUTCDATETIME(),@dynamicValues)"))
-                { Add(revision,"@target",SqlDbType.UniqueIdentifier,targetJobId); Add(revision,"@name",SqlDbType.NVarChar,name+" (copy)",200); Add(revision,"@template",SqlDbType.NVarChar,template,100); Add(revision,"@version",SqlDbType.NVarChar,templateVersion,40); Add(revision,"@configuration",SqlDbType.NVarChar,configuration,-1); Add(revision,"@profile",SqlDbType.UniqueIdentifier,profile??(object)DBNull.Value); Add(revision,"@policy",SqlDbType.NVarChar,policy,-1); Add(revision,"@dynamicValues",SqlDbType.NVarChar,dynamicValues??(object)DBNull.Value,-1); await revision.ExecuteNonQueryAsync(token); }
+                await using (var revision = Command(connection, transaction, "INSERT [workerdock].JobRevisions(JobId,Revision,Name,TemplateId,TemplateVersion,ConfigurationJson,ProfileId,PolicyJson,CreatedAtUtc,DynamicValuesJson,HideFailureDetails) VALUES(@target,1,@name,@template,@version,@configuration,@profile,@policy,SYSUTCDATETIME(),@dynamicValues,@hideFailureDetails)"))
+                { Add(revision,"@target",SqlDbType.UniqueIdentifier,targetJobId); Add(revision,"@name",SqlDbType.NVarChar,name+" (copy)",200); Add(revision,"@template",SqlDbType.NVarChar,template,100); Add(revision,"@version",SqlDbType.NVarChar,templateVersion,40); Add(revision,"@configuration",SqlDbType.NVarChar,configuration,-1); Add(revision,"@profile",SqlDbType.UniqueIdentifier,profile??(object)DBNull.Value); Add(revision,"@policy",SqlDbType.NVarChar,policy,-1); Add(revision,"@dynamicValues",SqlDbType.NVarChar,dynamicValues??(object)DBNull.Value,-1); Add(revision,"@hideFailureDetails",SqlDbType.Bit,hideFailureDetails); await revision.ExecuteNonQueryAsync(token); }
                 var receipt = new CommandReceipt(Guid.NewGuid(), targetJobId, "Applied");
                 await using (var command = Command(connection, transaction, "INSERT [workerdock].Commands(CommandId,TargetId,CommandKind,State,CreatedAtUtc) VALUES(@id,@target,N'Duplicate',N'Applied',SYSUTCDATETIME())")) { Add(command,"@id",SqlDbType.UniqueIdentifier,receipt.CommandId); Add(command,"@target",SqlDbType.UniqueIdentifier,targetJobId); await command.ExecuteNonQueryAsync(token); }
                 await AuditAsync(connection, transaction, "JobDuplicated", targetJobId, 0, actor, token); return receipt;

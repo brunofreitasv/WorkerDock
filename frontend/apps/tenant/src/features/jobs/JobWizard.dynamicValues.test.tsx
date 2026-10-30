@@ -54,9 +54,12 @@ test("saves dynamic bindings and sends a date-only Run now override", async () =
   expect(previewRequests[0]).not.toHaveProperty("policy");
   await user.click(screen.getByRole("button", { name: "Next" }));
   await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("switch", { name: translations.en.hideFailureDetails })).not.toBeChecked();
+  await user.click(screen.getByRole("switch", { name: translations.en.hideFailureDetails }));
   await user.click(screen.getByRole("button", { name: "Next" }));
   await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
   await waitFor(() => expect(revision?.dynamicValues?.bindings).toHaveLength(1));
+  expect(revision.hideFailureDetails).toBe(true);
   expect(revision.dynamicValues.bindings[0].source).toBe("ReferenceDate");
   await user.click(screen.getByRole("button", { name: "Next" }));
   await user.click(screen.getByRole("button", { name: "Enable job" }));

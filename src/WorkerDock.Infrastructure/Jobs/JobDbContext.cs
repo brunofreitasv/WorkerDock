@@ -38,6 +38,7 @@ internal sealed class JobRow
     public bool Enabled { get; set; }
     public bool Archived { get; set; }
     public int ConcurrencyLimit { get; set; }
+    public bool PauseOnNeedsReview { get; set; }
     public byte[] Version { get; set; } = [];
 }
 
@@ -52,6 +53,7 @@ internal sealed class JobRevisionRow
     public Guid? ProfileId { get; set; }
     public string PolicyJson { get; set; } = "";
     public string? DynamicValuesJson { get; set; }
+    public bool HideFailureDetails { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }
 

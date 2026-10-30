@@ -57,6 +57,20 @@ builder.Services.TryAddSingleton<IJobCommands>(provider =>
         return environment.IsDevelopment() ? new InMemoryJobCommands(provider.GetRequiredService<TimeProvider>(),profiles:provider.GetRequiredService<IConnectionProfiles>(),integrationSettings:provider.GetRequiredService<IIntegrationSettings>(),templateCatalog:provider.GetRequiredService<ITemplateCatalog>(),authoring:provider.GetRequiredService<ITemplateAuthoringService>()) : new UnavailableJobCommands();
     return new SqlJobCommands(provider.GetRequiredService<TenantSqlStartup>().Options,provider.GetRequiredService<ITemplateCatalog>(),provider.GetRequiredService<ITemplateAuthoringService>());
 });
+builder.Services.TryAddSingleton<IJobManagementQueries>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlJobManagementQueries(provider.GetRequiredService<TenantSqlStartup>().Options)
+        : new UnavailableJobManagementQueries();
+});
+builder.Services.TryAddSingleton<IJobDefinitionCommands>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    return config["Tenant:Adapter"] != "Memory"
+        ? new SqlJobDefinitionCommands(provider.GetRequiredService<TenantSqlStartup>().Options, provider.GetRequiredService<ITemplateCatalog>(), provider.GetRequiredService<IScheduleEvaluator>(), provider.GetRequiredService<TimeProvider>(), provider.GetRequiredService<ITemplateAuthoringService>())
+        : new UnavailableJobDefinitionCommands();
+});
 builder.Services.TryAddSingleton<IIntegrationSettings>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();
@@ -197,6 +211,7 @@ app.UseWorkerDockSessions();
 app.UseAuthorization();
 app.MapWorkerDockSessions();
 app.MapJobCommands();
+app.MapJobManagement();
 app.MapExecutionControls();
 app.MapCapacity();
 app.MapTemplateCatalog();
@@ -314,7 +329,7 @@ internal sealed class UnavailableJobCommands : IJobCommands
 internal sealed class UnavailableCapacityCommands : ICapacityCommands
 {
     private static ValueTask<CommandReceipt> Unavailable() => ValueTask.FromException<CommandReceipt>(new WorkerDockException("PersistenceUnavailable"));
-    public ValueTask<CommandReceipt> SetTemplateLimitAsync(string id,int limit,ActorContext actor,CancellationToken ct) => Unavailable();
+    public ValueTask<CommandReceipt> SetJobControlsAsync(Guid id,int limit,bool pauseOnNeedsReview,ActorContext actor,CancellationToken ct) => Unavailable();
     public ValueTask<CommandReceipt> SetJobLimitAsync(Guid id,int limit,ActorContext actor,CancellationToken ct) => Unavailable();
 }
 
@@ -357,3 +372,4 @@ internal sealed class UnavailableTemplateCatalog : ITemplateCatalog
     public ValueTask<WorkerDock.Contracts.Templates.TemplateDescriptor?> GetAsync(string id,string version,CancellationToken ct) => ValueTask.FromException<WorkerDock.Contracts.Templates.TemplateDescriptor?>(new WorkerDockException("PersistenceUnavailable"));
     public ValueTask<bool> IsSelectableAsync(string id,string version,CancellationToken ct) => ValueTask.FromException<bool>(new WorkerDockException("PersistenceUnavailable"));
 }
+

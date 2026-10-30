@@ -104,6 +104,7 @@ CREATE TABLE [workerdock].Jobs (
     Enabled bit NOT NULL CONSTRAINT DF_Jobs_Enabled DEFAULT 0,
     Archived bit NOT NULL CONSTRAINT DF_Jobs_Archived DEFAULT 0,
     ConcurrencyLimit int NOT NULL CONSTRAINT DF_Jobs_Concurrency DEFAULT 1,
+    PauseOnNeedsReview bit NOT NULL CONSTRAINT DF_Jobs_PauseOnNeedsReview DEFAULT(0),
     Version rowversion NOT NULL,
     CONSTRAINT CK_Jobs_Concurrency CHECK (ConcurrencyLimit >= 0)
 );
@@ -726,6 +727,7 @@ GO
 ALTER TABLE [workerdock].JobRevisions ADD DynamicValuesJson nvarchar(max) NULL;
 GO
 ALTER TABLE [workerdock].JobRevisions ADD CONSTRAINT CK_JobRevisions_DynamicValuesJson CHECK (DynamicValuesJson IS NULL OR ISJSON(DynamicValuesJson)=1);
+ALTER TABLE [workerdock].JobRevisions ADD HideFailureDetails bit NOT NULL CONSTRAINT DF_JobRevisions_HideFailureDetails DEFAULT(0);
 
 ALTER TABLE [workerdock].Executions ADD
     ValueContextJson nvarchar(max) NULL,
@@ -1049,6 +1051,13 @@ END;
 GO
 
 -- Direct runtime permissions: preserve object, column and procedure boundaries.
+CREATE TABLE [workerdock].AttemptFailureDiagnostics (
+    AttemptId uniqueidentifier NOT NULL CONSTRAINT PK_AttemptFailureDiagnostics PRIMARY KEY,
+    DiagnosticJson nvarchar(max) NOT NULL,
+    CONSTRAINT FK_AttemptFailureDiagnostics_Attempt FOREIGN KEY(AttemptId) REFERENCES [workerdock].Attempts(AttemptId) ON DELETE CASCADE,
+    CONSTRAINT CK_AttemptFailureDiagnostics_Json CHECK(ISJSON(DiagnosticJson)=1)
+);
+
 DECLARE @QuotedRuntimePrincipal nvarchar(258)=QUOTENAME(@RuntimePrincipal);
 DECLARE @PermissionSql nvarchar(max)=CONVERT(nvarchar(max),N'')+
     N'GRANT SELECT, UPDATE ON [workerdock].TenantSettings TO '+@QuotedRuntimePrincipal+N';'+
@@ -1059,6 +1068,7 @@ DECLARE @PermissionSql nvarchar(max)=CONVERT(nvarchar(max),N'')+
     N'GRANT INSERT ON [workerdock].JobRevisions TO '+@QuotedRuntimePrincipal+N';'+
     N'GRANT SELECT, INSERT, UPDATE ON [workerdock].Executions TO '+@QuotedRuntimePrincipal+N';'+
     N'GRANT SELECT, INSERT, UPDATE ON [workerdock].Commands TO '+@QuotedRuntimePrincipal+N';'+
+    N'GRANT SELECT,INSERT ON [workerdock].AttemptFailureDiagnostics TO '+@QuotedRuntimePrincipal+N';'+
     N'GRANT SELECT ON [workerdock].Attempts TO '+@QuotedRuntimePrincipal+N';'+
     N'GRANT SELECT,INSERT,UPDATE ON [workerdock].Attempts TO '+@QuotedRuntimePrincipal+N';'+
     N'GRANT INSERT ON [workerdock].TemplateCatalog TO '+@QuotedRuntimePrincipal+N';'+
@@ -1100,5 +1110,10 @@ INSERT [workerdock].SchemaHistory(MigrationId,UpChecksum,DownChecksum,AppliedAtU
 VALUES
     (N'0001_initial','ED223DA7B15CB136EB6A1CB1D22D55F5CFB783CD0829FFE5D6DCE3CFA72EB2E2','4722DC750A186EE404566893259D2CE0BB7FA5403225FEC7B187BEFB50203BE5',SYSUTCDATETIME()),
     (N'0002_template_catalog_registration','278C80FCE18459375468CD32379A6AEC91C2D240C498D5EA53B47B43B2222645','463EE06AFF366F5CA222BDD813F4C553FF72E8B2B1DAD9FBB36078DABFAC16C9',SYSUTCDATETIME());
+
+INSERT [workerdock].SchemaHistory(MigrationId,UpChecksum,DownChecksum,AppliedAtUtc) VALUES(N'0003_job_failure_policy','30A1832F514FA67D707A0E3E23C0872E3849020846766231FB77741D6F1BD211','D188BCA32150BE15D31CE5EC959186C51D7CA886E4A84102596B65B26D561AB3',SYSUTCDATETIME());
+INSERT [workerdock].SchemaHistory(MigrationId,UpChecksum,DownChecksum,AppliedAtUtc) VALUES(N'0004_attempt_failure_diagnostics','70C47DDCA7030E29B86095E3BFF8128C181ADD68EC66E36C52ED143B302DFCF2','8DD29626159AF4CF8BBB125EF508D102BA78A072B78D6F4DB6E4D0401E5E04BE',SYSUTCDATETIME());
+
+INSERT [workerdock].SchemaHistory(MigrationId,UpChecksum,DownChecksum,AppliedAtUtc) VALUES(N'0005_job_review_hold','82960BD179F4787B77AB981DC3D755BC76797C6E99748A880CE2510FF8F04022','53E8F0C4678AF05B3F7895BBA3CFFF9A71B9E42F1F0F7D47ED271864810E71A9',SYSUTCDATETIME());
 
 COMMIT;

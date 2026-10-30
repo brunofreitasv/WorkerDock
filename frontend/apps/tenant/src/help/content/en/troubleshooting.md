@@ -17,7 +17,7 @@ Use the tenant UI to check current status and safe result codes. Do not copy pas
 
 ## Worked example
 
-If an execution is still queued, check its timeline and current state, the runtime heartbeat, child ceiling, job/template limits, and exact template version. If the execution reports a safe SQL connection code, a manager can review the job's selected profile and an operator can validate target permissions and secret-provider setup. Avoid repeatedly starting the job until its external effect and current execution state are understood.
+If an execution is still queued, check its timeline and current state, the runtime heartbeat, host ceiling, the job's capacity and overlap policy, review hold, and exact template version. Only running attempts count against host and job capacity; templates do not have a capacity limit. If the execution reports a safe SQL connection code, a manager can review the job's selected profile and an operator can validate target permissions and secret-provider setup. Avoid repeatedly starting the job until its external effect and current execution state are understood.
 
 ## Verify
 

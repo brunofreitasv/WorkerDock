@@ -101,12 +101,14 @@ public sealed class OwnershipMonitor(IAttemptStore store, IAttemptSignals signal
         catch (WorkerDock.Runtime.Processes.ExecutionProcessException error) when (error.NoExternalEffects && child is null)
         {
             exitConfirmed = true; effects = false;
-            result = new TemplateResult("PermanentFailure", error.SafeCode, false, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null);
+            result = new TemplateResult("PermanentFailure", error.SafeCode, false, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null,
+                new FailureDiagnostic("Process"));
         }
         catch (OperationCanceledException) when (!startInvoked && child is null)
         {
             exitConfirmed = true; effects = false;
-            result = new TemplateResult("PermanentFailure", "ExecutorStartAborted", false, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null);
+            result = new TemplateResult("PermanentFailure", "ExecutorStartAborted", false, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null,
+                new FailureDiagnostic("Process"));
         }
         catch
         {

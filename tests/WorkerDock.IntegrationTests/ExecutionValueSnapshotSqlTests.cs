@@ -21,7 +21,7 @@ public sealed class ExecutionValueSnapshotSqlTests
     {
         await using var fixture = new TenantSqlFixture();
         await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
+        await fixture.Runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var options = new TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         var template = HttpTemplateDescriptors.Get("1.1.0");
         var catalog = new TemplateCatalog([template]);

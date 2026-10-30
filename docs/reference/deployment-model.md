@@ -15,9 +15,10 @@ tenant URLs and health credential references, and does not provision tenant
 databases or copy tenant job data.
 The runtime is single instance per tenant on its host. A tenant-scoped named
 mutex rejects a second service; `Worker:HostCeiling` controls the maximum
-concurrent execution children. Per-template and per-job limits further bound
-admission. Creating jobs or changing those limits does not install another
-service.
+concurrent execution children. Per-job capacity further bounds admission, and
+only running attempts count against host and job capacity. Templates have no
+active capacity limit. Creating jobs or changing job capacity does not install
+another service.
 
 Production readiness remains under validation. The repository does not include a
 production `ISecretVault` integration for the Control Center, and its Production
@@ -38,7 +39,7 @@ it has no SQL principal. Runtime identities must not have schema-change rights.
 Keep configuration, credentials, and Data Protection keys outside release
 packages, protected by the relevant application identities.
 
-Your deployment process should preserve protected configuration and Data Protection keys across releases. Runtime configuration needs the reviewed template catalog digest and a child ceiling from 1 through 1000. Resolve conflicting tenant instance identities before deploying.
+Your deployment process should preserve protected configuration and Data Protection keys across releases. The Worker derives its template catalog digest from the trusted descriptors installed in its package; runtime configuration needs a child ceiling from 1 through 1000. Resolve conflicting tenant instance identities before deploying.
 
 Before opening the application to users, start the Web host and runtime service,
 check `/health/ready`, process states and logs, and verify the runtime heartbeat

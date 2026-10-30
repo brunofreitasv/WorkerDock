@@ -18,10 +18,10 @@ internal static class SqlProfileDiagnostic
             if(await command.ExecuteScalarAsync(bounded.Token) is not int) return SqlTemplate.Result("PermanentFailure","SqlCatalogUnavailable",false);
             return SqlTemplate.Result("Success","SqlConnectivityConfirmed",false);
         }
-        catch(SqlException error) { return SqlTemplate.Result("PermanentFailure",SafeCode(error.Number),false); }
-        catch(SqlTemplateException error) { return SqlTemplate.Result("PermanentFailure",error.SafeCode,false); }
-        catch(SecretUnavailableException) { return SqlTemplate.Result("PermanentFailure","SecretUnavailable",false); }
-        catch(OperationCanceledException) { return SqlTemplate.Result("PermanentFailure","SqlDiagnosticTimeout",false); }
-        catch { return SqlTemplate.Result("PermanentFailure","SqlTargetUnavailable",false); }
+        catch(SqlException error) { return SqlTemplate.Result("PermanentFailure",SafeCode(error.Number),false,SqlTemplate.Diagnostic(error,"Query")); }
+        catch(SqlTemplateException error) { return SqlTemplate.Result("PermanentFailure",error.SafeCode,false,SqlTemplate.Diagnostic(error,"Query")); }
+        catch(SecretUnavailableException error) { return SqlTemplate.Result("PermanentFailure","SecretUnavailable",false,SqlTemplate.Diagnostic(error,"Query")); }
+        catch(OperationCanceledException error) { return SqlTemplate.Result("PermanentFailure","SqlDiagnosticTimeout",false,SqlTemplate.Diagnostic(error,"Query")); }
+        catch(Exception error) { return SqlTemplate.Result("PermanentFailure","SqlTargetUnavailable",false,SqlTemplate.Diagnostic(error,"Query")); }
     }
 }

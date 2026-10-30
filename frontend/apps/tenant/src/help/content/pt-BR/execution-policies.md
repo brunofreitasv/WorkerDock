@@ -13,7 +13,7 @@ Usuários com acesso de leitura podem consultar este guia e o histórico de exec
 1. Abra [Tarefas](#/jobs), edite um rascunho e acesse **Política**.
 2. Defina o tempo limite da tarefa. **Sem limite de tempo** remove o prazo externo da tarefa; os handlers SQL ou HTTP ainda podem ter seu próprio limite.
 3. Defina o máximo de tentativas, os atrasos inicial e máximo, a variação aleatória e se resultados incertos podem ser repetidos. Novas tentativas podem repetir efeitos externos; use idempotência no destino quando disponível.
-4. Escolha a sobreposição: **Enfileirar**, **Ignorar** ou **Permitir**. Defina o limite da fila para trabalho enfileirado.
+4. Defina **Capacidade da tarefa** para limitar quantas execuções podem estar em andamento ao mesmo tempo. Escolha a sobreposição: **Enfileirar**, **Ignorar** ou **Permitir**. Defina o limite da fila para trabalho enfileirado. Para **Enfileirar** e **Ignorar**, escolha se novas execuções devem aguardar revisão pendente. É possível alterar a capacidade e a opção de revisão nos detalhes da tarefa; somente execuções em andamento contam para a capacidade.
 5. Para tarefas agendadas, escolha como tratar trabalho perdido: **Ignorar**, **Agrupar** ou **Recuperar**. No editor atual do tenant, **Recuperar** aceita no máximo três ocorrências dentro da janela de recuperação de um dia; o editor oferece a seleção do modo, sem controles para alterar os limites de quantidade ou idade.
 6. Revise a política, salve o rascunho desativado e ative a tarefa. Altere a política por meio de uma revisão da tarefa revisada.
 

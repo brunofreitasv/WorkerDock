@@ -34,6 +34,112 @@ test("job wizard does not duplicate the personal language preference control", (
   expect(screen.queryByRole("combobox", { name: "Wizard language" })).not.toBeInTheDocument();
 });
 
+test("new wizard defaults job capacity to one and review hold to off", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    const body = url.pathname === "/api/templates" ? { items: [{ selectable: true, descriptor: { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } } }] } : url.pathname === "/api/time-zones" ? ["UTC"] : {};
+    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "Defaults");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("spinbutton", { name: "Job capacity" })).toHaveValue(1);
+  expect(screen.getByRole("switch", { name: "Pause this job until you review an unresolved run" })).not.toBeChecked();
+  expect(screen.getByText(/Queue starts runs one at a time in order/)).toBeVisible();
+});
+
+test("failed execution-control save keeps the disabled draft and selected values for retry", async () => {
+  const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };
+  const jobId = "11111111-1111-4111-8111-111111111111";
+  let controlSaveCount = 0;
+  let enabled = false;
+  const controlBodies: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    const method = init?.method ?? "GET";
+    let status = 200;
+    let body: any = {};
+    if (url.pathname === "/api/templates") body = { items: [{ selectable: true, descriptor }] };
+    else if (url.pathname === "/api/time-zones") body = ["UTC"];
+    else if (url.pathname === "/api/jobs" && method === "POST") { status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}/configuration`) body = { revision: { jobId, revision: 1, name: "Capacity draft", templateId: "sample", templateVersion: "1", configuration: {}, profileId: null, policy: { timeout: null, overlap: "Queue" } }, version: [1], enabled, archived: false, concurrencyLimit: 1, pauseOnNeedsReview: false };
+    else if (url.pathname === `/api/jobs/${jobId}/execution-controls` && method === "PUT") { controlSaveCount++; controlBodies.push(JSON.parse(String(init?.body))); if (controlSaveCount === 1) status = 503; }
+    else if (url.pathname === `/api/jobs/${jobId}` && method === "PUT") { status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}/actions` && method === "POST") { enabled = true; status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === "/api/antiforgery") body = { requestToken: "test" };
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ETag: '"current"' } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "Capacity draft");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.clear(screen.getByRole("spinbutton", { name: "Job capacity" }));
+  await user.type(screen.getByRole("spinbutton", { name: "Job capacity" }), "4");
+  await user.click(screen.getByRole("switch", { name: "Pause this job until you review an unresolved run" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getByText("Unable to complete the request")).toBeVisible());
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  expect(screen.getByRole("spinbutton", { name: "Job capacity" })).toHaveValue(4);
+  expect(screen.getByRole("switch", { name: "Pause this job until you review an unresolved run" })).toBeChecked();
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("button", { name: "Enable job" })).toBeDisabled();
+  expect(enabled).toBe(false);
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getByText("Disabled draft saved.")).toBeVisible());
+  expect(controlBodies).toEqual([{ limit: 4, pauseOnNeedsReview: true }, { limit: 4, pauseOnNeedsReview: true }]);
+});
+
+test("changing controls after draft save blocks activation until the controls are saved", async () => {
+  const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };
+  const jobId = "11111111-1111-4111-8111-111111111111";
+  let limit = 1;
+  let pauseOnNeedsReview = false;
+  const user = userEvent.setup();
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    const method = init?.method ?? "GET";
+    let status = 200;
+    let body: any = {};
+    if (url.pathname === "/api/templates") body = { items: [{ selectable: true, descriptor }] };
+    else if (url.pathname === "/api/time-zones") body = ["UTC"];
+    else if (url.pathname === "/api/jobs" && method === "POST") { status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}/configuration`) body = { revision: { jobId, revision: 1, name: "Capacity draft", templateId: "sample", templateVersion: "1", configuration: {}, profileId: null, policy: { timeout: null, overlap: "Queue" } }, version: [1], enabled: false, archived: false, concurrencyLimit: limit, pauseOnNeedsReview };
+    else if (url.pathname === `/api/jobs/${jobId}/execution-controls` && method === "PUT") { ({ limit, pauseOnNeedsReview } = JSON.parse(String(init?.body))); status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === `/api/jobs/${jobId}` && method === "PUT") { status = 202; body = { targetId: jobId }; }
+    else if (url.pathname === "/api/antiforgery") body = { requestToken: "test" };
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ETag: '"current"' } });
+  }));
+  render(<JobWizard t={translations.en} />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "Capacity draft");
+  for (let i = 0; i < 4; i++) await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getByText("Disabled draft saved.")).toBeVisible());
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  await user.clear(screen.getByRole("spinbutton", { name: "Job capacity" }));
+  await user.type(screen.getByRole("spinbutton", { name: "Job capacity" }), "4");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("Save the changed execution controls before enabling this job.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Enable job" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: translations.en.enableJobAction })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  await user.click(screen.getByRole("button", { name: "Save disabled draft" }));
+  await waitFor(() => expect(screen.getByText("Disabled draft saved.")).toBeVisible());
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("button", { name: "Enable job" })).toBeEnabled();
+  expect(limit).toBe(4);
+});
+
 test("an unconfirmed schedule removal stays unresolved, keeps safety actions, and blocks manual enable", async () => {
   const descriptor = { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } };
   let scheduleExists = false;

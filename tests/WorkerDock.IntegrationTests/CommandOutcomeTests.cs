@@ -26,7 +26,7 @@ public sealed class CommandOutcomeSqlTests
     public async Task Sql_unconfirmed_running_stop_fails_and_stale_completion_cannot_apply_it(bool snapshot)
     {
         await using var fixture = new TenantSqlFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
+        await fixture.Runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         await SqlCapacityTestSetup.ReadyAsync(options, "command-worker");
@@ -52,7 +52,7 @@ public sealed class CommandOutcomeSqlTests
     public async Task Sql_stop_completion_ordering_settles_confirmed_stop_only(bool snapshot, bool stopFirst)
     {
         await using var fixture = new TenantSqlFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
+        await fixture.Runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         await SqlCapacityTestSetup.ReadyAsync(options, "command-worker");
@@ -85,8 +85,8 @@ public sealed class ManualRequestSqlTests
     public async Task ManualRequestRetry_ReturnsOriginalExecution(bool snapshot)
     {
         await using var fixture = new TenantSqlFixture(); await fixture.CreateAsync(snapshot);
-        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
-        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
+        await fixture.Runner.ApplyAsync("tenant", "0005_job_review_hold", default);
+        await fixture.Runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create()); var job = CommandOutcomeTests.Job();

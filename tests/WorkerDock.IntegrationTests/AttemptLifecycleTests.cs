@@ -60,7 +60,7 @@ public sealed class AttemptLifecycleTests
             Assert.Null(await store.RenewAsync(lease, default));
             Assert.Equal(1, await store.ReviewExpiredAsync(10, default));
             Assert.Equal(replay ? "RetryWaiting" : "NeedsReview", store.Snapshot.State);
-            Assert.True(store.Snapshot.HoldsJobSlot);
+            Assert.False(store.Snapshot.HoldsJobSlot);
             Assert.Equal("Completed", (await store.BeginAsync(store.Intent, "other", default)).Decision);
             await store.CompleteAsync(lease, new(Result(), "Completed", true, false), default);
             Assert.Equal(replay ? "RetryWaiting" : "NeedsReview", store.Snapshot.State);
@@ -117,7 +117,7 @@ public sealed class AttemptLifecycleTests
         await store.ReviewExpiredAsync(10, default);
         Assert.Equal("NeedsReview", store.Snapshot.State);
         Assert.True(store.Snapshot.StopRequested);
-        Assert.True(store.Snapshot.HoldsJobSlot);
+        Assert.False(store.Snapshot.HoldsJobSlot);
         Assert.Empty(store.Retries);
     }
 

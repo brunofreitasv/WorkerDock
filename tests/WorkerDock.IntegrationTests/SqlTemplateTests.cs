@@ -106,7 +106,8 @@ public sealed partial class SqlTemplateTests
         var context=new WorkerDock.Contracts.Templates.TemplateExecutionContext(descriptor,new SentinelVault(),new WorkerDock.Infrastructure.Logging.SafeExecutionLog(_=>{}));
         var mismatch=await new SqlTemplate().ExecuteAsync(context,default);Assert.Equal("ProfileRevisionMismatch",mismatch.SafeCode);Assert.False(mismatch.EffectsMayHaveOccurred);
         var unavailable=await new SqlTemplate().ExecuteAsync(context with { Execution=descriptor with { ProfileRevisionId=profile.ProfileRevisionId } },default);
-        Assert.False(unavailable.EffectsMayHaveOccurred);Assert.DoesNotContain("secret-sentinel",JsonSerializer.Serialize(unavailable));Assert.Equal("PermanentFailure",unavailable.Outcome);
+        Assert.False(unavailable.EffectsMayHaveOccurred);Assert.DoesNotContain("secret-sentinel",unavailable.SafeSummary.GetRawText());Assert.Equal("PermanentFailure",unavailable.Outcome);
+        Assert.Equal("secret-sentinel",unavailable.Diagnostic?.Message);
     }
     [Fact]
     public async Task Vault_credential_rotation_occurs_at_use_and_literals_never_enter_summary()

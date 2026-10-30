@@ -21,12 +21,12 @@ import { useSession } from "./auth/SessionProvider";
 import { signOut } from "./api/client";
 import { VaultSettingsPage } from "./features/settings/VaultSettingsPage";
 import { OutboundPolicyPage } from "./features/settings/OutboundPolicyPage";
-import { ManualJobEditor } from "./features/jobs/ManualJobEditor";
+import { JobManagementPage } from "./features/jobs/JobManagementPage";
+import { JobHistoryTable } from "./features/jobs/JobHistoryTable";
 import { ProfileEditor } from "./features/profiles/ProfileEditor";
 import { TemplatePicker, type CatalogItem } from "./features/templates/TemplatePicker";
 import { Dashboard } from "./features/monitoring/Dashboard";
 import { JobsTable } from "./features/monitoring/JobsTable";
-import { JobHistoryTable } from "./features/jobs/JobHistoryTable";
 import { WorkersPage } from "./features/monitoring/WorkersPage";
 import { ExecutionDetails } from "./features/monitoring/ExecutionDetails";
 import { ExecutionHistoryPage } from "./features/monitoring/ExecutionHistoryPage";
@@ -38,6 +38,7 @@ import { helpTopics } from "./help/topics";
 import { useTenantSettings } from "./features/settings/useTenantSettings";
 import { TenantSettingsForm } from "./features/settings/TenantSettingsForm";
 import { PersonalSettings } from "./features/settings/PersonalSettings";
+import { SettingsNavigation, type SettingsTab } from "./features/settings/SettingsNavigation";
 function routeFromHash(hash: string): string {
   if (!hash.startsWith("#/")) return "dashboard";
   return hash.slice(2) || "dashboard";
@@ -52,18 +53,29 @@ export default function App() {
   const [active, setActive] = useState(
     () => routeFromHash(window.location.hash),
   );
-  const [settingsTab, setSettingsTab] = useState("personal");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("personal");
   const [catalogItem, setCatalogItem] = useState<CatalogItem>();
   const [actionError, setActionError] = useState(false);
+  const [jobsDirty, setJobsDirty] = useState(false);
   useEffect(() => {
-    const change = () => setActive(routeFromHash(window.location.hash));
+    const change = () => {
+      const next = routeFromHash(window.location.hash);
+      if (jobsDirty && !window.confirm(t.jobDiscardConfirm)) {
+        window.history.pushState(null, "", "#/" + active);
+        return;
+      }
+      setJobsDirty(false);
+      setActive(next);
+    };
     window.addEventListener("hashchange", change);
     return () => window.removeEventListener("hashchange", change);
-  }, []);
+  }, [jobsDirty, active, t.jobDiscardConfirm]);
   const navigate = (id: string) => {
     const route = id.startsWith("#/") ? id.slice(2) : id;
+    if (jobsDirty && !window.confirm(t.jobDiscardConfirm)) return;
+    setJobsDirty(false);
     setActive(route);
-    window.history.replaceState(null, "", "#/" + route);
+    window.history.pushState(null, "", "#/" + route);
   };
   const navigation: NavigationGroup[] = session?.canRead ? [
     { id: "monitoring", label: t.navMonitoring, items: [
@@ -73,7 +85,7 @@ export default function App() {
       { id: "alerts", label: t.alerts },
     ] },
     { id: "maintenance", label: t.navMaintenance, items: [
-      ...(session.canManage ? [{ id: "jobs", label: t.jobs }] : []),
+      { id: "jobs", label: t.jobs },
       { id: "templates", label: t.templates },
     ] },
     { id: "administration", label: t.navAdministration, items: [
@@ -83,8 +95,8 @@ export default function App() {
     ] },
   ] : [];
   const flatNavigation = navigation.flatMap((group) => group.items);
-  const activePage = active.startsWith("help:") ? "help" : active;
-  const activeNavigation = active.startsWith("job-history:") || activePage.startsWith("execution:") ? "monitoring" : active === "executions" ? "dashboard" : activePage;
+  const activePage = active.startsWith("help:") ? "help" : active.startsWith("job-history:") ? "jobs" : active === "jobs" || active.startsWith("jobs/") || active.startsWith("jobs?") ? "jobs" : active;
+  const activeNavigation = activePage.startsWith("execution:") ? "monitoring" : active.startsWith("job-history:") ? "jobs" : active === "executions" ? "dashboard" : activePage;
   const helpSlug = active.startsWith("help:") ? active.slice("help:".length) : undefined;
   const title = active.startsWith("job-history:") ? (preferences.language === "pt-BR" ? "Histórico da tarefa" : "Job history") : active.startsWith("execution:") ? "Execution details" : active === "executions" ? t.executionHistory : activePage === "help"
     ? helpTopics.find(topic => topic.slug === helpSlug)?.title[preferences.language] ?? t.help
@@ -96,7 +108,7 @@ export default function App() {
     : active === "audit" ? "audit"
     : active === "alerts" ? "alert-rules"
     : active === "templates" ? "templates"
-    : active === "jobs" ? "jobs"
+    : activePage === "jobs" ? "jobs"
     : active === "settings" && settingsTab === "profiles" ? "sql-profiles"
     : active === "settings" ? "settings"
     : undefined;
@@ -145,28 +157,21 @@ export default function App() {
             <>
               {activePage === "help" ? <HelpPage language={preferences.language} slug={helpSlug} canManage={session.canManage} onNavigate={navigate} /> : active === "settings" ? (
                 <>
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 3, flexWrap: "wrap" }}>
-                    <Button variant={settingsTab === "personal" ? "contained" : "outlined"} onClick={() => setSettingsTab("personal")}>{t.personalSettings}</Button>
-                    {session.canManage && <>
-                      <Button variant={settingsTab === "general" ? "contained" : "outlined"} onClick={() => setSettingsTab("general")}>{t.tenantConfiguration}</Button>
-                      <Button variant={settingsTab === "vault" ? "contained" : "outlined"} onClick={() => setSettingsTab("vault")}>{t.vaultSettings}</Button>
-                      <Button variant={settingsTab === "outbound" ? "contained" : "outlined"} onClick={() => setSettingsTab("outbound")}>{t.outboundSettings}</Button>
-                      <Button variant={settingsTab === "profiles" ? "contained" : "outlined"} onClick={() => setSettingsTab("profiles")}>{t.profiles}</Button>
-                      <Button variant={settingsTab === "retention" ? "contained" : "outlined"} onClick={() => setSettingsTab("retention")}>{t.retention}</Button>
-                    </>}
-                  </Stack>
+                  <SettingsNavigation t={t} selected={settingsTab} canManage={session.canManage} onSelect={setSettingsTab} />
                   {settingsTab === "personal" || !session.canManage ? <PersonalSettings t={t} mode={session.mode} canManage={session.canManage} language={preferences.language} setLanguage={preferences.setLanguage} timeZone={preferences.timeZone} setTimeZone={preferences.setTimeZone} />
                     : settingsTab === "general" ? <TenantSettingsForm t={t} current={tenantSettings.current} loading={tenantSettings.loading} error={tenantSettings.error} reload={tenantSettings.reload} acceptSave={tenantSettings.acceptSave} />
                     : settingsTab === "vault" ? <VaultSettingsPage t={t} />
                     : settingsTab === "outbound" ? <OutboundPolicyPage t={t} />
-                    : settingsTab === "profiles" ? <ProfileEditor />
-                    : <RetentionPage />}
+                    : settingsTab === "profiles" ? <ProfileEditor language={preferences.language} />
+                    : <RetentionPage language={preferences.language} />}
                 </>
               ) : (
-                active.startsWith("job-history:") ? (
+              active.startsWith("job-history:") ? (
                   session.canManage ? <JobHistoryTable jobId={active.slice("job-history:".length)} language={preferences.language} timeZone={preferences.timeZone} /> : <Alert severity="error">{t.permission}</Alert>
-                ) : active === "jobs" ? (
-                  session.canManage ? <ManualJobEditor t={t} defaultZone={preferences.timeZone} /> : <Alert severity="error">{t.permission}</Alert>
+                ) : activePage === "jobs" ? (
+                  <Box component="section" aria-label={t.jobs} sx={{ display: "grid", gap: 3 }}>
+                    <JobManagementPage t={t} route={active} canManage={session.canManage} defaultZone={preferences.timeZone} onNavigate={navigate} onDirtyChange={setJobsDirty} />
+                  </Box>
                 ) : active === "templates" ? (
                   <Paper variant="outlined" sx={{ p: 3, mb: 3, maxWidth: 900 }}>
                     <Stack spacing={2}>
@@ -177,7 +182,7 @@ export default function App() {
                   </Paper>
                 ) : (
                 active.startsWith("execution:") ? (
-                  <ExecutionDetails executionId={active.slice("execution:".length)} language={preferences.language} />
+                  <ExecutionDetails executionId={active.slice("execution:".length)} language={preferences.language} canManage={session.canManage} />
                 ) : active === "executions" ? (
                   <ExecutionHistoryPage language={preferences.language} timeZone={preferences.timeZone} onExecution={id => navigate(`execution:${id}`)} />
                 ) : active === "monitoring" ? (

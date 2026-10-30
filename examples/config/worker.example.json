@@ -11,7 +11,6 @@
     }
   },
   "Worker": {
-    "CatalogDigest": "<64_CHARACTER_TEMPLATE_CATALOG_SHA256>",
     "HostCeiling": 10,
     "DrainSeconds": 40
   },

@@ -14,10 +14,10 @@ import type { DynamicValuePreviewRequest } from "./dynamicValueApi";
 
 type Issue = { path: string; code: string };
 type SqlProfile = { current: { profileId: string; name: string; server: string; allowedCatalogs: string[] }; retired: boolean };
-type Revision = { jobId: string; revision: number; name: string; templateId: string; templateVersion: string; configuration: Record<string, unknown>; profileId: string | null; policy: Record<string, unknown>; dynamicValues?: DynamicValuePlan | null };
-type EditorDto = { revision: Revision; version: number[]; enabled: boolean; archived: boolean; concurrencyLimit: number };
+type Revision = { jobId: string; revision: number; name: string; templateId: string; templateVersion: string; configuration: Record<string, unknown>; profileId: string | null; policy: Record<string, unknown>; dynamicValues?: DynamicValuePlan | null; hideFailureDetails: boolean };
+type EditorDto = { revision: Revision; version: number[]; enabled: boolean; archived: boolean; concurrencyLimit: number; pauseOnNeedsReview: boolean };
 type PersistedScheduleState = "none" | "present" | "unknown" | "dirty";
-type DraftSnapshot = { selected?: CatalogItem; name: string; configuration: Record<string, unknown>; dynamicValues: DynamicValuePlan | null; policy: typeof blankPolicy; scheduleEnabled: boolean; schedule: ScheduleEditorInputDto; missedMode: string };
+type DraftSnapshot = { selected?: CatalogItem; name: string; configuration: Record<string, unknown>; dynamicValues: DynamicValuePlan | null; policy: typeof blankPolicy; hideFailureDetails: boolean; concurrencyLimit: number; pauseOnNeedsReview: boolean; scheduleEnabled: boolean; schedule: ScheduleEditorInputDto; missedMode: string };
 export function selectDefaultTemplate(items: CatalogItem[]): CatalogItem | undefined {
   const first = items.find(item => item.selectable);
   if (!first) return undefined;
@@ -49,6 +49,11 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
   const [sqlProfilesRefresh, setSqlProfilesRefresh] = useState(0);
   const [dynamicValues, setDynamicValues] = useState<DynamicValuePlan | null>(null);
   const [policy, setPolicy] = useState({ ...blankPolicy });
+  const [concurrencyLimit, setConcurrencyLimit] = useState(1);
+  const [pauseOnNeedsReview, setPauseOnNeedsReview] = useState(false);
+  const [controlsDirty, setControlsDirty] = useState(false);
+  const [controlsSaveFailed, setControlsSaveFailed] = useState(false);
+  const [hideFailureDetails, setHideFailureDetails] = useState(false);
   const [missedMode, setMissedMode] = useState("Skip");
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduleState, setScheduleState] = useState<PersistedScheduleState>("none");
@@ -93,7 +98,8 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
     let removingSchedule = false;
     let writingSchedule = false;
     let operationJobId = job?.jobId;
-    const revision: Revision = { jobId: job?.jobId ?? "00000000-0000-0000-0000-000000000000", revision: 0, name: name.trim(), templateId: selected.descriptor.id, templateVersion: selected.descriptor.version, configuration, profileId: typeof configuration.profileId === "string" && configuration.profileId ? configuration.profileId : null, policy, dynamicValues: hasDynamicAnnotation(selected.descriptor.configurationSchema) ? dynamicValues : null };
+    const isNewDraft = !job;
+    const revision: Revision = { jobId: job?.jobId ?? "00000000-0000-0000-0000-000000000000", revision: 0, name: name.trim(), templateId: selected.descriptor.id, templateVersion: selected.descriptor.version, configuration, profileId: typeof configuration.profileId === "string" && configuration.profileId ? configuration.profileId : null, policy, dynamicValues: hasDynamicAnnotation(selected.descriptor.configurationSchema) ? dynamicValues : null, hideFailureDetails };
     try {
       const saved = job ? await mutate<{ commandId?: string; targetId?: string; targetJobId?: string }>(`/api/jobs/${job.jobId}`, "PUT", revision, job.etag ?? undefined) : await mutate<{ commandId?: string; targetId?: string; targetJobId?: string }>("/api/jobs", "POST", revision);
       const id = job?.jobId ?? saved.targetId ?? saved.targetJobId;
@@ -101,6 +107,16 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
       operationJobId = id;
       let current = await read<EditorDto>(`/api/jobs/${id}/configuration`);
       setJob({ jobId: id, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived });
+      if (isNewDraft || controlsDirty) {
+        try {
+          await mutate(`/api/jobs/${id}/execution-controls`, "PUT", { limit: concurrencyLimit, pauseOnNeedsReview });
+          setControlsDirty(false); setControlsSaveFailed(false);
+        } catch (error) {
+          setControlsDirty(true); setControlsSaveFailed(true);
+          throw error;
+        }
+        current = await read<EditorDto>(`/api/jobs/${id}/configuration`);
+      }
       if (scheduleEnabled) {
         writingSchedule = true;
         setScheduleState("dirty");
@@ -148,13 +164,14 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
   };
   const restoreDraft = () => {
     if (!recoveryDraft) return;
-    setSelected(recoveryDraft.selected); setName(recoveryDraft.name); setConfiguration(recoveryDraft.configuration); setDynamicValues(recoveryDraft.dynamicValues); setPolicy(recoveryDraft.policy);
+    setSelected(recoveryDraft.selected); setName(recoveryDraft.name); setConfiguration(recoveryDraft.configuration); setDynamicValues(recoveryDraft.dynamicValues); setPolicy(recoveryDraft.policy); setHideFailureDetails(recoveryDraft.hideFailureDetails); setConcurrencyLimit(recoveryDraft.concurrencyLimit); setPauseOnNeedsReview(recoveryDraft.pauseOnNeedsReview);
+    setControlsDirty(true); setControlsSaveFailed(false);
     setScheduleEnabled(recoveryDraft.scheduleEnabled); setSchedule(recoveryDraft.schedule); setMissedMode(recoveryDraft.missedMode);
     if (recoveryDraft.scheduleEnabled) setScheduleState("dirty");
     setRecoveryDraft(undefined); setReviewAcknowledged(false); setStep(4); setMessage(t.draftRestoredReviewRequired);
   };
   const recordStaleConflict = () => {
-    setRecoveryDraft({ selected, name, configuration, dynamicValues, policy, scheduleEnabled, schedule, missedMode });
+    setRecoveryDraft({ selected, name, configuration, dynamicValues, policy, hideFailureDetails, concurrencyLimit, pauseOnNeedsReview, scheduleEnabled, schedule, missedMode });
     setStaleConflict(true); setMessage(t.staleDraftPreserved);
   };
   const loadCurrentRevision = async () => {
@@ -168,6 +185,9 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
       setConfiguration(current.data.revision.configuration);
       setDynamicValues(current.data.revision.dynamicValues ?? (template && hasDynamicAnnotation(template.descriptor.configurationSchema) ? emptyDynamicPlan("UTC") : null));
       setPolicy({ ...blankPolicy, ...current.data.revision.policy });
+      setConcurrencyLimit(current.data.concurrencyLimit); setPauseOnNeedsReview(current.data.pauseOnNeedsReview);
+      setControlsDirty(false); setControlsSaveFailed(false);
+      setHideFailureDetails(current.data.revision.hideFailureDetails ?? false);
       let currentHasSchedule = false;
       let currentScheduleState: PersistedScheduleState = "unknown";
       try {
@@ -234,7 +254,7 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
       const current = await read<EditorDto>(`/api/jobs/${jobId}/configuration`);
       const template = catalog.find(item => item.descriptor.id === current.data.revision.templateId && item.descriptor.version === current.data.revision.templateVersion);
       if (template) setSelected(template);
-      setName(current.data.revision.name); setConfiguration(current.data.revision.configuration); setDynamicValues(current.data.revision.dynamicValues ?? (template && hasDynamicAnnotation(template.descriptor.configurationSchema) ? emptyDynamicPlan("UTC") : null)); setPolicy({ ...blankPolicy, ...current.data.revision.policy });
+      setName(current.data.revision.name); setConfiguration(current.data.revision.configuration); setDynamicValues(current.data.revision.dynamicValues ?? (template && hasDynamicAnnotation(template.descriptor.configurationSchema) ? emptyDynamicPlan("UTC") : null)); setPolicy({ ...blankPolicy, ...current.data.revision.policy }); setHideFailureDetails(current.data.revision.hideFailureDetails ?? false); setConcurrencyLimit(current.data.concurrencyLimit); setPauseOnNeedsReview(current.data.pauseOnNeedsReview); setControlsDirty(false); setControlsSaveFailed(false);
       setJob({ jobId, name: current.data.revision.name, etag: current.etag, enabled: current.data.enabled, archived: current.data.archived });
       let targetScheduleState: PersistedScheduleState = "unknown";
       try {
@@ -293,6 +313,8 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
       {step === 1 && selected && <>{selected.descriptor.id === "workerdock.sql-server" && <Button disabled={sqlProfiles.status === "loading"} onClick={() => setSqlProfilesRefresh(value => value + 1)}>{t.sqlProfilesRefresh}</Button>}<TemplateForm descriptor={selected.descriptor} value={configuration} onChange={value => { setConfiguration(value); setIssues([]); }} errors={fieldErrors} dynamicValues={dynamicValues} onDynamicValuesChange={setDynamicValues} t={t} jobTimeout={policy.timeout} sqlProfiles={selected.descriptor.id === "workerdock.sql-server" ? sqlProfiles : undefined} />{localIssues.length > 0 && <Alert severity="warning">{t.localValidation}: {localIssues.length}</Alert>}<DynamicValuePreview request={previewRequest} t={t} /><Button onClick={() => { setBusy(true); void mutate<{ issues: Issue[] }>("/api/template-validation", "POST", { templateId: selected.descriptor.id, templateVersion: selected.descriptor.version, configuration, dynamicValues, jobTimeout: policy.timeout, triggerKind: scheduleEnabled ? "Scheduled" : "Manual" }).then(result => { setIssues(result.issues); setMessage(result.issues.length ? t.validation : t.configurationValid); }).catch(() => setMessage(t.requestError)).finally(() => setBusy(false)); }} disabled={busy}>{t.validateConfiguration}</Button></>}
       {step === 2 && <Stack spacing={2}><FormControlLabel control={<Switch checked={scheduleEnabled} onChange={event => setScheduleEnabled(event.target.checked)} />} label={t.useSchedule} />{scheduleEnabled && <ScheduleEditor value={schedule} onChange={setSchedule} preview={preview} t={t} />}{scheduleEnabled && dynamicValues && schedule.zoneId !== dynamicValues.timeZoneId && <Button onClick={() => setDynamicValues({ ...dynamicValues, timeZoneId: schedule.zoneId, bindings: dynamicValues.bindings.map(binding => binding.timeZoneId ? { ...binding, timeZoneId: schedule.zoneId } : binding) })}>{t.useScheduleTimeZone}</Button>}{job && scheduleEnabled && <Button color="error" onClick={() => setDeleteScheduleOpen(true)}>{t.deleteSchedule}</Button>}<Dialog open={deleteScheduleOpen} onClose={() => setDeleteScheduleOpen(false)}><DialogTitle>{t.confirmDeleteScheduleTitle}</DialogTitle><DialogContent>{t.confirmDeleteSchedule}</DialogContent><DialogActions><Button onClick={() => setDeleteScheduleOpen(false)}>{t.cancel}</Button><Button color="error" disabled={busy} onClick={() => void deleteSchedule()}>{t.deleteSchedule}</Button></DialogActions></Dialog></Stack>}
       {step === 3 && <Stack spacing={2}>
+        <FormControlLabel control={<Switch checked={hideFailureDetails} onChange={event => setHideFailureDetails(event.target.checked)} />} label={t.hideFailureDetails} />
+        <Typography variant="body2">{t.hideFailureDetailsHelp}</Typography>
         <TextField label={t.timeout} type="number" value={timeSpanSeconds(policy.timeout)} onChange={event => updatePolicy("timeout", event.target.value === "" ? null : secondsToTimeSpan(Number(event.target.value)))} helperText={t.timeoutHelp} />
         <FormControlLabel control={<Switch checked={policy.timeout === null} onChange={event => updatePolicy("timeout", event.target.checked ? null : "00:01:00")} />} label={t.noTimeout} />
         <TextField label={t.maxAttempts} type="number" value={policy.maxAttempts} onChange={event => updatePolicy("maxAttempts", Number(event.target.value))} />
@@ -300,14 +322,17 @@ export function JobWizard({ t, defaultZone = "UTC" }: { t: Labels; defaultZone?:
         <TextField label={t.retryMaxDelay} value={policy.retryMaxDelay} error={retryDelayConflict} helperText={retryDelayConflict ? t.retryDelayOrder : undefined} onChange={event => updatePolicy("retryMaxDelay", event.target.value)} />
         <TextField label={t.jitterRatio} type="number" slotProps={{ htmlInput: { min: 0, max: 1, step: 0.1 } }} value={policy.jitterRatio} onChange={event => updatePolicy("jitterRatio", Number(event.target.value))} />
         <FormControlLabel control={<Switch checked={policy.retryUncertain} onChange={event => updatePolicy("retryUncertain", event.target.checked)} />} label={t.retryUncertain} />
+        <TextField label={t.jobCapacity} type="number" value={concurrencyLimit} onChange={event => { setControlsDirty(true); setConcurrencyLimit(Math.max(0, Math.floor(Number(event.target.value) || 0))); }} helperText={concurrencyLimit === 0 ? t.jobCapacityPausedHelp : t.jobCapacityHelp} slotProps={{ htmlInput: { min: 0, step: 1 } }} />
         <TextField select label={t.overlap} helperText={t.overlapHelp} value={policy.overlap} onChange={event => updatePolicy("overlap", event.target.value)}><MenuItem value="Queue">{t.queueOverlap}</MenuItem><MenuItem value="Skip">{t.skipOverlap}</MenuItem><MenuItem value="Allow">{t.allowOverlap}</MenuItem></TextField>
+        {policy.overlap !== "Allow" && <FormControlLabel control={<Switch checked={pauseOnNeedsReview} onChange={event => { setControlsDirty(true); setPauseOnNeedsReview(event.target.checked); }} />} label={policy.overlap === "Skip" ? t.skipNewRunsWhileReview : t.waitForReviewBeforeStarting} />}
+        {policy.overlap === "Allow" && <Typography>{t.allowOverlapCapacityHelp}</Typography>}
         <TextField label={t.backlogLimit} type="number" value={policy.backlogLimit} onChange={event => updatePolicy("backlogLimit", Number(event.target.value))} />
         <TextField label={t.priority} type="number" value={policy.priority} onChange={event => updatePolicy("priority", Number(event.target.value))} />
         {scheduleEnabled && <TextField select label={t.missedWork} helperText={t.missedPolicyHelp} value={missedMode} onChange={event => setMissedMode(event.target.value)}><MenuItem value="Skip">{t.skipMissed}</MenuItem><MenuItem value="Coalesce">{t.coalesceMissed}</MenuItem><MenuItem value="CatchUp">{t.catchUpMissed}</MenuItem></TextField>}
       </Stack>}
       {step === 4 && !reviewAcknowledged && <Button onClick={() => setReviewAcknowledged(true)}>{t.confirmCurrentRevisionReview}</Button>}
-      {step === 4 && <Stack spacing={2}><Typography variant="h6">{t.stageReview}</Typography><Typography>{name} · {selected?.descriptor.displayName} · {scheduleEnabled ? schedule.kind : scheduleState === "none" ? t.manualJobType : scheduleState === "present" ? t.scheduleStillPresent : scheduleState === "dirty" ? t.scheduleDraftUnconfirmed : t.scheduleRemovalUnconfirmed}</Typography>{scheduleState === "unknown" && <Alert severity="warning">{t.scheduleRemovalUnconfirmed}</Alert>}{scheduleState === "dirty" && <Alert severity="warning">{t.scheduleDraftUnconfirmed}</Alert>}{scheduleState === "present" && !scheduleEnabled && <Alert severity="warning">{t.scheduleStillPresent}</Alert>}{job && <Typography>{t.jobStatus}: {job.enabled ? t.enabled : t.disabled}</Typography>}{scheduleEnabled && <ScheduleEditor value={schedule} onChange={setSchedule} preview={preview} t={t} />}{dynamicValues && dynamicValues.bindings.map(binding => <Typography key={binding.target}>{binding.target}: {binding.source} · {binding.format} · {binding.timeZoneId ?? dynamicValues.timeZoneId} · {binding.months}m {binding.days}d · {binding.boundary}</Typography>)}{dynamicValues && <Typography>{t.dynamicTimeZone}: {dynamicValues.timeZoneId}</Typography>}{selected?.descriptor.id === "workerdock.sql-server" && (configuration.commandTimeoutSeconds == null || configuration.commandTimeoutSeconds === "") && <Alert severity="warning">{t.sqlTimeoutWarning}{policy.timeout ? ` ${t.sqlTimeoutLimitedByJob}` : ""}</Alert>}<Typography>{policy.timeout === null ? t.noTimeout : `${timeSpanSeconds(policy.timeout)} ${t.seconds}`} · {policy.maxAttempts} {t.attempts} · {policy.overlap}</Typography><DynamicValuePreview request={previewRequest} t={t} />{issues.length > 0 && <Alert severity="error" role="alert">{t.validation}</Alert>}{retryDelayConflict && <Alert severity="error" role="alert">{t.retryDelayOrder}</Alert>}<Button variant="contained" disabled={busy || staleConflict || !reviewAcknowledged || localIssues.length > 0 || issues.length > 0 || retryDelayConflict} onClick={() => void saveDraft()}>{t.saveDraft}</Button></Stack>}
-      {step === 5 && <Stack spacing={2}><Typography variant="h6">{t.reviewAndEnable}</Typography>{scheduleState === "unknown" && <Alert severity="warning">{t.scheduleRemovalUnconfirmed}</Alert>}{scheduleState === "dirty" && <Alert severity="warning">{t.scheduleDraftUnconfirmed}</Alert>}{scheduleState === "present" && !scheduleEnabled && <Alert severity="warning">{t.scheduleStillPresent}</Alert>}{job ? <><JobDetails job={{ ...job, name }} canManage t={t} actionsDisabled={busy || staleConflict || !reviewAcknowledged || (!canEnable && !safetyActions)} safetyActions={safetyActions} onDuplicate={id => void reviewDuplicate(id)} onRefresh={() => void refreshJob()} onStale={recordStaleConflict} /><Button variant="contained" disabled={busy || staleConflict || !reviewAcknowledged || !canEnable || job.enabled || localIssues.length > 0 || issues.length > 0} onClick={() => void activate()}>{t.enableJob}</Button><Button disabled={!job.enabled || busy} onClick={() => setRunNowOpen(true)}>{t.runNow}</Button><RunNowDialog open={runNowOpen} timeZoneId={dynamicValues?.timeZoneId ?? defaultZone} supportsReferenceDate={Boolean(dynamicValues?.bindings.some(binding => binding.source === "ReferenceDate"))} busy={busy} onClose={() => setRunNowOpen(false)} onConfirm={runNow} t={t} /></> : <Alert severity="info">{t.draftSaved}</Alert>}</Stack>}
+      {step === 4 && <Stack spacing={2}><Typography variant="h6">{t.stageReview}</Typography><Typography>{name} · {selected?.descriptor.displayName} · {scheduleEnabled ? schedule.kind : scheduleState === "none" ? t.manualJobType : scheduleState === "present" ? t.scheduleStillPresent : scheduleState === "dirty" ? t.scheduleDraftUnconfirmed : t.scheduleRemovalUnconfirmed}</Typography>{scheduleState === "unknown" && <Alert severity="warning">{t.scheduleRemovalUnconfirmed}</Alert>}{scheduleState === "dirty" && <Alert severity="warning">{t.scheduleDraftUnconfirmed}</Alert>}{scheduleState === "present" && !scheduleEnabled && <Alert severity="warning">{t.scheduleStillPresent}</Alert>}{job && <Typography>{t.jobStatus}: {job.enabled ? t.enabled : t.disabled}</Typography>}<Typography>{t.jobCapacity}: {concurrencyLimit}{concurrencyLimit === 0 ? ` · ${t.jobCapacityPausedHelp}` : ""}</Typography>{policy.overlap !== "Allow" && <Typography>{policy.overlap === "Skip" ? t.skipNewRunsWhileReview : t.waitForReviewBeforeStarting}: {pauseOnNeedsReview ? t.enabled : t.disabled}</Typography>}{policy.overlap === "Allow" && <Typography>{t.allowOverlapCapacityHelp}</Typography>}{scheduleEnabled && <ScheduleEditor value={schedule} onChange={setSchedule} preview={preview} t={t} />}{dynamicValues && dynamicValues.bindings.map(binding => <Typography key={binding.target}>{binding.target}: {binding.source} · {binding.format} · {binding.timeZoneId ?? dynamicValues.timeZoneId} · {binding.months}m {binding.days}d · {binding.boundary}</Typography>)}{dynamicValues && <Typography>{t.dynamicTimeZone}: {dynamicValues.timeZoneId}</Typography>}{selected?.descriptor.id === "workerdock.sql-server" && (configuration.commandTimeoutSeconds == null || configuration.commandTimeoutSeconds === "") && <Alert severity="warning">{t.sqlTimeoutWarning}{policy.timeout ? ` ${t.sqlTimeoutLimitedByJob}` : ""}</Alert>}<Typography>{policy.timeout === null ? t.noTimeout : `${timeSpanSeconds(policy.timeout)} ${t.seconds}`} · {policy.maxAttempts} {t.attempts} · {policy.overlap}</Typography><DynamicValuePreview request={previewRequest} t={t} />{issues.length > 0 && <Alert severity="error" role="alert">{t.validation}</Alert>}{retryDelayConflict && <Alert severity="error" role="alert">{t.retryDelayOrder}</Alert>}<Button variant="contained" disabled={busy || staleConflict || !reviewAcknowledged || localIssues.length > 0 || issues.length > 0 || retryDelayConflict} onClick={() => void saveDraft()}>{t.saveDraft}</Button></Stack>}
+      {step === 5 && <Stack spacing={2}><Typography variant="h6">{t.reviewAndEnable}</Typography>{scheduleState === "unknown" && <Alert severity="warning">{t.scheduleRemovalUnconfirmed}</Alert>}{scheduleState === "dirty" && <Alert severity="warning">{t.scheduleDraftUnconfirmed}</Alert>}{scheduleState === "present" && !scheduleEnabled && <Alert severity="warning">{t.scheduleStillPresent}</Alert>}{controlsSaveFailed && <Alert severity="error">{t.jobControlsSaveError}</Alert>}{controlsDirty && !controlsSaveFailed && <Alert severity="warning">{t.jobControlsPendingSave}</Alert>}{job ? <><JobDetails job={{ ...job, name }} canManage t={t} actionsDisabled={busy || controlsDirty || controlsSaveFailed || staleConflict || !reviewAcknowledged || (!canEnable && !safetyActions)} safetyActions={safetyActions} onDuplicate={id => void reviewDuplicate(id)} onRefresh={() => void refreshJob()} onStale={recordStaleConflict} /><Button variant="contained" disabled={busy || controlsDirty || controlsSaveFailed || staleConflict || !reviewAcknowledged || !canEnable || job.enabled || localIssues.length > 0 || issues.length > 0} onClick={() => void activate()}>{t.enableJob}</Button><Button disabled={!job.enabled || busy} onClick={() => setRunNowOpen(true)}>{t.runNow}</Button><RunNowDialog open={runNowOpen} timeZoneId={dynamicValues?.timeZoneId ?? defaultZone} supportsReferenceDate={Boolean(dynamicValues?.bindings.some(binding => binding.source === "ReferenceDate"))} busy={busy} onClose={() => setRunNowOpen(false)} onConfirm={runNow} t={t} /></> : <Alert severity="info">{t.draftSaved}</Alert>}</Stack>}
       <Stack direction="row" sx={{ justifyContent: "space-between" }}><Button disabled={step === 0 || busy} onClick={() => setStep(value => Math.max(0, value - 1))}>{t.back}</Button>{step < 5 && <Button variant="contained" disabled={busy} onClick={() => void next()}>{t.next}</Button>}</Stack>
     </Stack>
   </Paper>;

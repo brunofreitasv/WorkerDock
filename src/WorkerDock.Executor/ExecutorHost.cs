@@ -67,6 +67,12 @@ public static class ExecutorHost
     private static async Task<TemplateResult> ExecuteAsync(ExecuteRequest request, Func<ExecutionDescriptor, IReadOnlyList<TemplateDescriptor>> descriptors, Func<ExecutionDescriptor, IReadOnlyList<IWorkerTemplate>> templates, Func<ExecutionDescriptor, ExecutionAdapters> adapters, IpcDiagnosticRelay diagnostics, CancellationToken ct)
     {
         using var secrets = new RedactingSecrets();
+        TemplateResult ExceptionFailure(string code, bool effects, Exception error)
+        {
+            var raw = new FailureDiagnostic("Template", error.GetType().FullName, error.Message, error.StackTrace);
+            var diagnostic = FailureDiagnosticSanitizer.Sanitize(raw, request.Execution.HideFailureDetails, secrets.Redact);
+            return Failure(code, effects) with { Diagnostic = diagnostic };
+        }
         try
         {
             if (!ExecutionPayloadLimits.FitsPreparedDescriptor(request.Execution)) return Failure("IpcMessageTooLarge", false);
@@ -81,7 +87,7 @@ public static class ExecutorHost
                 return Failure("DynamicSnapshotInvalid", false);
             IReadOnlyList<TemplateDescriptor> installedDescriptors;
             try { installedDescriptors = descriptors(request.Execution); }
-            catch { return Failure("TemplateExecutionFailed", false); }
+            catch (Exception error) { return ExceptionFailure("TemplateExecutionFailed", false, error); }
             if (installedDescriptors.GroupBy(x => (x.Id, x.Version)).Any(x => x.Count() > 1)) return Failure("TemplateRegistrationConflict", false);
             var descriptor = installedDescriptors.SingleOrDefault(x => x.Id == request.Execution.TemplateId && x.Version == request.Execution.TemplateVersion);
             if (descriptor is null) return Failure("TemplateVersionUnavailable", false);
@@ -93,10 +99,10 @@ public static class ExecutorHost
                 if (TemplateSchemaValidator.Validate(descriptor, request.Execution.Configuration).Count != 0)
                     return Failure("TemplateConfigurationInvalid", false);
             }
-            catch { return Failure("TemplateConfigurationInvalid", false); }
+            catch (Exception error) { return ExceptionFailure("TemplateConfigurationInvalid", false, error); }
             IReadOnlyList<IWorkerTemplate> installed;
             try { installed = templates(request.Execution); }
-            catch { return Failure("TemplateExecutionFailed", false); }
+            catch (Exception error) { return ExceptionFailure("TemplateExecutionFailed", false, error); }
             if (installed.GroupBy(x => (x.Descriptor.Id, x.Descriptor.Version)).Any(x => x.Count() > 1)) return Failure("TemplateRegistrationConflict", false);
             var template = installed.SingleOrDefault(x => x.Descriptor.Id == descriptor.Id && x.Descriptor.Version == descriptor.Version);
             if (template is null || template.Descriptor.MetadataDigest != descriptor.MetadataDigest) return Failure("TemplateMetadataMismatch", false);
@@ -104,11 +110,11 @@ public static class ExecutorHost
             {
                 if (template.Validate(request.Execution.Configuration).Count != 0) return Failure("TemplateConfigurationInvalid", false);
             }
-            catch { return Failure("TemplateConfigurationInvalid", false); }
+            catch (Exception error) { return ExceptionFailure("TemplateConfigurationInvalid", false, error); }
             ct.ThrowIfCancellationRequested();
             ExecutionAdapters composed;
             try { composed = adapters(request.Execution); }
-            catch { return Failure("TemplateExecutionFailed", false); }
+            catch (Exception error) { return ExceptionFailure("TemplateExecutionFailed", false, error); }
             secrets.Provider = composed.Secrets;
             diagnostics.SetTarget(composed.Log);
             var context = new TemplateExecutionContext(request.Execution, secrets, new RedactingLog(secrets, diagnostics));
@@ -116,13 +122,17 @@ public static class ExecutorHost
             if (result.Outcome is not ("Success" or "TransientFailure" or "PermanentFailure") || !Code(result.SafeCode)) return Failure("TemplateResultInvalid", true);
             var safe = secrets.Redact(JsonSerializer.Serialize(result.SafeSummary));
             using var document = JsonDocument.Parse(safe);
-            var sanitized = result with { SafeCode = secrets.Redact(result.SafeCode), SafeSummary = document.RootElement.Clone() };
+            var diagnostic = result.Outcome == "Success" ? null :
+                FailureDiagnosticSanitizer.Sanitize(result.Diagnostic, request.Execution.HideFailureDetails, secrets.Redact);
+            var sanitized = result with { SafeCode = secrets.Redact(result.SafeCode), SafeSummary = document.RootElement.Clone(), Diagnostic = diagnostic };
+            if (diagnostic is not null && JsonSerializer.SerializeToUtf8Bytes(sanitized).Length > FailureDiagnosticSanitizer.MaximumResultBytes)
+                sanitized = sanitized with { Diagnostic = null };
             _ = ExecutionProtocol.Serialize(sanitized);
             return sanitized;
         }
-        catch (SecretUnavailableException) { return Failure("SecretUnavailable", true); }
-        catch (OperationCanceledException) { return Failure("TemplateCancelled", true); }
-        catch { return Failure("TemplateExecutionFailed", true); }
+        catch (SecretUnavailableException error) { return ExceptionFailure("SecretUnavailable", true, error); }
+        catch (OperationCanceledException error) { return ExceptionFailure("TemplateCancelled", true, error); }
+        catch (Exception error) { return ExceptionFailure("TemplateExecutionFailed", true, error); }
     }
     private static TemplateResult Failure(string code, bool effects) => new("PermanentFailure", code, effects, JsonSerializer.SerializeToElement(new { }), null);
     private static bool SafeResolutionCode(string code) => code is

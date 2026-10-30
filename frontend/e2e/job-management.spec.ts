@@ -60,7 +60,7 @@ async function setup(page: import("@playwright/test").Page, options: { initialSc
     return route.fulfill({ status: 202, json: { targetId: "22222222-2222-4222-8222-222222222222", commandId: "run-command", state: "Pending" } });
   });
   await page.route("**/api/executions/*/stop", route => { requests.push({ method: "POST", path: route.request().url(), body: route.request().postDataJSON() }); return route.fulfill({ status: 202, json: { commandId: "stop-command" } }); });
-  await page.goto("/#/jobs");
+  await page.goto("/#/jobs/new");
   await expect(page.getByRole("heading", { name: "Create job" })).toBeVisible();
   return { requests, rejectEnable: () => { rejectEnableOnce = true; } };
 }
@@ -237,4 +237,16 @@ test("scheduled source duplicate derives its own no-schedule state and can be en
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByRole("button", { name: "Enable job" })).toBeEnabled();
   expect(requests.some(request => request.method === "GET" && request.path.includes("/api/jobs/") && request.path.endsWith("/schedule"))).toBe(true);
+});
+
+test("durable inventory restores archived view and literal search from the route", async ({ page }) => {
+  await setup(page);
+  await page.route("**/api/jobs*", route => route.request().method() === "GET"
+    ? route.fulfill({ json: { items: [{ jobId, name: "Café_100%", templateId: "sample", templateVersion: "1", enabled: false, archived: true, scheduleKind: null, scheduleZoneId: null, schedulePaused: false, configurationUpdatedUtc: "2020-01-01T00:00:00Z" }], nextCursor: null } })
+    : route.continue());
+  await page.goto("/#/jobs?view=archived&search=Caf%C3%A9_%25");
+  await expect(page.getByText("Café_100%")).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "View" })).toContainText("Archived");
+  await page.reload();
+  await expect(page.getByText("Café_100%")).toBeVisible();
 });

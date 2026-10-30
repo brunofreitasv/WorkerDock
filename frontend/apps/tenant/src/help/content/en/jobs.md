@@ -11,7 +11,7 @@ Creating, editing, enabling, disabling, duplicating, archiving, and stopping job
 1. Open [Jobs](#/jobs) and enter a name, then choose a template in **Template**.
 2. In **Configuration**, fill the fields generated from the installed template and choose **Validate configuration**. Correct any reported issues before continuing.
 3. In **Schedule**, leave **Use a schedule** off for a manual job, or configure a schedule if needed.
-4. In **Policy**, choose retry, timeout, overlap, and missed-work behavior. These settings control execution behavior; they do not validate a target system.
+4. In **Policy**, set job capacity and choose retry, timeout, overlap, and missed-work behavior. Capacity limits how many runs of this job may be running at once. For **Queue** or **Skip**, also choose whether new runs wait for or skip around pending review. These settings control execution behavior; they do not validate a target system.
 5. Review the job and choose **Save disabled draft**. The saved draft is disabled and does not start work.
 6. Review the saved configuration and choose **Enable job** in the final stage when it is ready. Use **Run now** to request a manual execution.
 7. In job details, use **Pause schedule** or **Resume schedule**, **Disable job**, **Duplicate**, or **Archive** as appropriate. Duplicate creates a disabled copy that needs review. Use **Stop execution** to request stopping a running execution.

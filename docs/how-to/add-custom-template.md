@@ -12,10 +12,10 @@ Register reviewed package instances explicitly in the Executor composition root.
 
 1. Build and review a .NET template package implementing `IWorkerTemplate`; give every metadata change a new descriptor version.
 2. Reference and register its descriptor in the trusted lists in `src/WorkerDock.Web/Program.cs` and `src/WorkerDock.Worker/Program.cs`. Register its handler in `src/WorkerDock.Executor/Program.cs`. These roots are explicit by design; adding a job in the dashboard does not load an assembly.
-3. Recompute `Worker:CatalogDigest` from the exact installed descriptor set using `TemplateMetadata.AggregateDigest`, and update every worker's protected configuration. Deploy matching Web, Worker, and Executor packages together. A catalog mismatch keeps the worker from acquiring work.
+3. Deploy matching Web, Worker, and Executor packages together. The Worker derives the aggregate digest from its trusted descriptors and registers them in SQL; existing entries with different metadata are rejected.
 4. Start the worker, confirm its catalog registration and readiness, then select the new template in the job creation flow. New jobs begin disabled and require validation and activation.
 
-The [tenant configuration guide](configure-tenants.md) explains where the worker digest and service variables live. No dashboard user can upload template code.
+The [tenant configuration guide](configure-tenants.md) explains the runtime service settings. No dashboard user can upload template code.
 
 `Validate` returns bounded path/code issues without side effects. `ExecuteAsync` receives `context.Execution`, the child-local resolve-only vault and safe logging facade. Use the pinned `ProfileRevisionId` and nonsecret profile snapshot, stable `IdempotencyKey`, and optional `DeadlineUtc`. Secret values resolve at execution time; a profile revision pins reference metadata rather than a credential value. Missing deadline means unlimited handler duration, while startup, IPC setup and local termination remain bounded.
 

@@ -21,7 +21,7 @@ public static class ScheduleEndpoints
 
         app.MapGet("/api/jobs/{id:guid}/schedule", async (Guid id, IScheduleCommands commands, HttpResponse response, CancellationToken ct) =>
         {
-            try { var schedule = await commands.GetAsync(id, ct); response.Headers.ETag = ETag(schedule.Version); return Results.Ok(new { input = ToInput(schedule.Definition), resolvedUtc = schedule.Definition.OneTimeUtc, schedule.Policy, schedule.Paused }); }
+            try { var schedule = await commands.GetAsync(id, ct); response.Headers.ETag = ETag(schedule.Version); return Results.Ok(new { input = ScheduleInputConverter.ToInput(schedule.Definition), resolvedUtc = schedule.Definition.OneTimeUtc, schedule.Policy, schedule.Paused }); }
             catch (WorkerDockException error) { return Error(error); }
         }).RequireAuthorization(AccessPolicies.Manage);
 
@@ -30,7 +30,7 @@ public static class ScheduleEndpoints
             if (!TryExpectedVersion(http, out var version)) return Problem(412, "InvalidIfMatch", "headers.ifMatch");
             try
             {
-                var definition = ConvertInput(request.Input);
+                var definition = ScheduleInputConverter.ConvertInput(request.Input);
                 var receipt = await commands.SaveAsync(id, definition, request.Policy, version, SessionEndpoints.Actor(http.HttpContext), ct);
                 return Results.Accepted($"/api/commands/{receipt.CommandId}", receipt);
             }
@@ -50,7 +50,7 @@ public static class ScheduleEndpoints
         {
             try
             {
-                var definition = ConvertInput(request.Input);
+                var definition = ScheduleInputConverter.ConvertInput(request.Input);
                 var items = await commands.PreviewAsync(definition, request.AfterUtc, request.Count, ct);
                 var zone = TimeZoneInfo.FindSystemTimeZoneById(definition.ZoneId);
                 return Results.Ok(items.Select(utc => new SchedulePreviewItem(utc, zone.GetUtcOffset(utc.UtcDateTime))));
@@ -61,31 +61,6 @@ public static class ScheduleEndpoints
         }).RequireAuthorization(AccessPolicies.Manage);
     }
 
-    private static ScheduleDefinition ConvertInput(ScheduleEditorInput input)
-    {
-        if (string.IsNullOrWhiteSpace(input.ZoneId)) throw new WorkerDockException("ValidationFailed", "zoneId");
-        DateTimeOffset? once = null;
-        if (input.Kind == "Once")
-        {
-            if (input.Cron is not null || input.LocalOnce is null || input.LocalOnce.Value.Kind != DateTimeKind.Unspecified)
-                throw new WorkerDockException("ValidationFailed", "localOnce");
-            // ResolveLocalOnce is the sole authority for gaps and ambiguous times.
-            once = new FiveFieldScheduleEvaluator().ResolveLocalOnce(input.LocalOnce.Value, input.ZoneId, input.SelectedOffset);
-        }
-        else if (input.Kind == "Cron")
-        {
-            if (input.LocalOnce is not null || input.SelectedOffset is not null || string.IsNullOrWhiteSpace(input.Cron)) throw new WorkerDockException("ValidationFailed", "cron");
-        }
-        else throw new WorkerDockException("ValidationFailed", "kind");
-        return new ScheduleDefinition(Guid.NewGuid(), 1, input.Kind, input.Cron, input.ZoneId, once, DateTimeOffset.UtcNow);
-    }
-
-    private static ScheduleEditorInput ToInput(ScheduleDefinition definition)
-    {
-        if (definition.Kind != "Once" || definition.OneTimeUtc is not { } utc) return new(definition.Kind, definition.Cron, definition.ZoneId, null, null);
-        var local = TimeZoneInfo.ConvertTime(utc, TimeZoneInfo.FindSystemTimeZoneById(definition.ZoneId));
-        return new(definition.Kind, null, definition.ZoneId, DateTime.SpecifyKind(local.DateTime, DateTimeKind.Unspecified), local.Offset);
-    }
     private static bool TryExpectedVersion(HttpRequest request, out byte[] version)
     {
         version = [];

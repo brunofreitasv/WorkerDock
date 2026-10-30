@@ -104,7 +104,6 @@ public sealed class TenantSqlHostStartupTests
         info.Environment["Tenant__Sql__Database"] = "StartupTest";
         info.Environment["Tenant__Sql__User"] = "startup_user";
         info.Environment["Tenant__Sql__PasswordReference"] = "unmapped.password";
-        info.Environment["Worker__CatalogDigest"] = new string('a', 64);
         info.Environment["Executor__Path"] = "unused-executor.exe";
         info.Environment["WORKERDOCK_DEVELOPMENT_VAULT"] = "1";
         info.Environment["WORKERDOCK_DEVELOPMENT_SECRET_MAP"] = JsonSerializer.Serialize(new Dictionary<string, string> { ["other.password"] = secretVariable });

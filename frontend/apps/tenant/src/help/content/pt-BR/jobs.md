@@ -11,7 +11,7 @@ Criar, editar, ativar, desativar, duplicar, arquivar e interromper tarefas exige
 1. Abra [Tarefas](#/jobs), informe um nome e escolha um modelo em **Modelo**.
 2. Em **Configuração**, preencha os campos gerados pelo modelo instalado e escolha **Validar configuração**. Corrija os problemas apresentados antes de continuar.
 3. Em **Agendamento**, deixe **Usar um agendamento** desativado para uma tarefa manual ou configure um agendamento se necessário.
-4. Em **Política**, escolha as opções de tentativas, tempo limite, sobreposição e trabalho perdido. Essas opções controlam a execução; elas não validam o sistema de destino.
+4. Em **Política**, escolha as opções de tentativas, tempo limite, capacidade da tarefa, sobreposição e trabalho perdido. A capacidade define quantas execuções da tarefa podem estar em andamento ao mesmo tempo. Ao escolher **Enfileirar** ou **Ignorar**, também defina se novas execuções devem aguardar revisão pendente. Essas opções controlam a execução; elas não validam o sistema de destino.
 5. Revise a tarefa e escolha **Salvar rascunho desativado**. O rascunho salvo permanece desativado e não inicia o trabalho.
 6. Revise a configuração salva e escolha **Ativar tarefa** na etapa final quando estiver pronta. Use **Executar agora** para solicitar uma execução manual.
 7. Nos detalhes da tarefa, use **Pausar agendamento** ou **Retomar agendamento**, **Desativar tarefa**, **Duplicar** ou **Arquivar** conforme necessário. Uma cópia duplicada fica desativada e precisa ser revisada. Use **Interromper execução** para solicitar a interrupção de uma execução em andamento.

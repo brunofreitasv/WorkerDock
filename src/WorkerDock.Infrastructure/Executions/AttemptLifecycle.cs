@@ -4,6 +4,7 @@ using WorkerDock.Application.Dispatch;
 using WorkerDock.Application.Executions;
 using WorkerDock.Contracts.Execution;
 using WorkerDock.Contracts.Values;
+using WorkerDock.Contracts.Templates;
 using WorkerDock.Domain.Executions;
 using WorkerDock.Domain.Jobs;
 
@@ -24,7 +25,7 @@ internal sealed class AttemptLifecycle
     public required DispatchIntent Intent { get; set; }
     public required Guid JobId { get; init; }
     public string State { get; set; } = "Queued";
-    public bool HoldsJobSlot { get; set; } = true;
+    public bool HoldsJobSlot { get; set; }
     public bool StopRequested { get; set; }
     public bool Force { get; set; }
     public long EffectiveCapacityRevision { get; set; }
@@ -35,16 +36,27 @@ internal sealed class AttemptLifecycle
     public string? AttemptState { get; set; }
     public bool LocalExitConfirmed { get; set; }
     public string? SafeCode { get; set; }
+    public FailureDiagnostic? FailureDiagnostic { get; private set; }
     public List<string> Events { get; } = [];
     public DispatchIntent? NewDispatch { get; private set; }
     public int Ordinal => Lease?.Ordinal ?? 0;
     private static bool Terminal(string state) => state is "Succeeded" or "Failed" or "Stopped" or "TimedOut" or "Skipped";
 
-    public AttemptStart Begin(DispatchIntent intent, string boot, DateTimeOffset now)
+    public void ValidateBeginIntent(DispatchIntent intent, string boot)
     {
         if (string.IsNullOrWhiteSpace(boot) || boot.Length > 100 || intent.PayloadDigest != intent.ComputeDigest() ||
             intent.ExecutionId != Descriptor.ExecutionId || intent.EntityRevision != Intent.EntityRevision || intent.TemplateId != Descriptor.TemplateId)
             throw new WorkerDockException("DispatchIntegrityError");
+        if (intent.AttemptOrdinal > Ordinal &&
+            (intent with { Priority = Intent.Priority, CapacityRevision = Intent.CapacityRevision, PayloadDigest = Intent.PayloadDigest } != Intent ||
+                intent.AttemptOrdinal != Ordinal + 1))
+            throw new WorkerDockException("DispatchIntegrityError");
+        if (intent.AttemptOrdinal < 1) throw new WorkerDockException("DispatchIntegrityError");
+    }
+
+    public AttemptStart Begin(DispatchIntent intent, string boot, DateTimeOffset now)
+    {
+        ValidateBeginIntent(intent, boot);
         if (Lease is { } existing && intent.AttemptOrdinal <= existing.Ordinal)
         {
             if (intent.AttemptOrdinal < existing.Ordinal || AttemptState != "Running") return new("Completed", null);
@@ -59,7 +71,8 @@ internal sealed class AttemptLifecycle
         if (!GateOpen || StopRequested || !DescriptorAvailable || intent.DueUtc > now || State is not ("Queued" or "RetryWaiting")) return new("Held", null);
         Lease = new(Guid.NewGuid(), intent.ExecutionId, intent.AttemptOrdinal, (Lease?.Generation ?? 0) + 1,
             boot, now + OwnershipDefaults.LeaseDuration, Policy.Timeout is { } timeout ? now + timeout : null);
-        State = "Running"; AttemptState = "Running"; LocalExitConfirmed = false; SafeCode = null;
+        State = "Running"; HoldsJobSlot = true; AttemptState = "Running"; LocalExitConfirmed = false; SafeCode = null;
+        FailureDiagnostic = null;
         if (Descriptor.ValueContext is { FirstStartedAtUtc: null } context)
             Descriptor = Descriptor with { ValueContext = context with { FirstStartedAtUtc = now } };
         Events.Add("Running");
@@ -127,6 +140,7 @@ internal sealed class AttemptLifecycle
         Uncertain = completion.EffectsMayHaveOccurred || completion.HandlerResult?.EffectsMayHaveOccurred == true;
         SafeCode = completion.HandlerResult?.SafeCode;
         var result = completion.HandlerResult;
+        FailureDiagnostic = PersistedFailureDiagnostic.Validate(result, Descriptor.HideFailureDetails);
         AttemptState = !LocalExitConfirmed ? "Abandoned" : StopRequested || completion.LocalOutcome == "Stopped" ? "Stopped" :
             completion.LocalOutcome == "Completed" ? result?.Outcome == "Success" ? "Succeeded" : "Failed" : completion.LocalOutcome;
         if (!LocalExitConfirmed) Uncertain = true;
@@ -151,7 +165,7 @@ internal sealed class AttemptLifecycle
     {
         var retry = RetryDecision.Decide(Policy, Ordinal, null, null, true, StopRequested, null, Random.Shared.NextDouble());
         if (retry.Retry) ScheduleRetry(now + retry.Delay);
-        else { State = "NeedsReview"; Events.Add(State); }
+        else { State = "NeedsReview"; HoldsJobSlot = false; Events.Add(State); }
     }
     public void Stop(bool force)
     {
@@ -176,7 +190,8 @@ internal sealed class AttemptLifecycle
     {
         var intent = Intent with { DeliveryId = Guid.NewGuid(), AttemptOrdinal = Ordinal + 1, DueUtc = due, PayloadDigest = "" };
         NewDispatch = Intent = intent with { PayloadDigest = intent.ComputeDigest() };
-        State = "RetryWaiting"; Events.Add(State);
+        State = "RetryWaiting"; HoldsJobSlot = false; Events.Add(State);
     }
     private void Finish(string state) { State = state; HoldsJobSlot = false; Events.Add(state); }
 }
+

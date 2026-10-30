@@ -13,3 +13,6 @@ Null `timeoutSeconds` inherits the outer attempt deadline. A positive value may 
 The Executor client disables redirects, proxy discovery, cookies and the default finite `HttpClient.Timeout`. Every new socket is opened to an approved IP address directly, with the actual peer checked before TLS starts. The original URI hostname remains in place for certificate validation and SNI. TLS validation failures are permanent and do not claim a remote HTTP effect. Redirect responses are returned to the caller and never forwarded with credentials to a second destination.
 
 Local tests may inject a purpose-built `IOutboundPolicy` that approves a loopback listener. This test seam is passed explicitly and is not part of production policy configuration; the production policy continues to deny loopback, metadata and link-local destinations.
+## Failure response diagnostics
+
+Failed HTTP attempts expose method, status, media type and response byte count when available in execution details. With detailed failure output enabled, bounded decodable text response content is retained; binary/undecodable bodies have metadata only. HTTP status failures without an exception show an unavailable stack. Truncation is explicitly labeled. The pinned **Hide detailed failure output** setting suppresses message, stack and body before persistence.

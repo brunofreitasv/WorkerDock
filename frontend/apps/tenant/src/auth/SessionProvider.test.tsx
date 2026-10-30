@@ -38,15 +38,15 @@ const session = (
     </SessionProvider>,
   );
 };
-test("viewer can navigate dashboard monitoring and audit while management is hidden", async () => {
+test("viewer can navigate dashboard monitoring, audit, and the read-only jobs inventory", async () => {
   session();
   expect(await screen.findByRole("link", { name: "Dashboard" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Job monitoring" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Documentation" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Audit" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Settings" })).toBeVisible();
-  expect(screen.queryByRole("link", { name: "Jobs" })).not.toBeInTheDocument();
-  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Monitoring", "Maintenance", "Administration"]);
+  expect(screen.getByRole("link", { name: "Jobs" })).toBeVisible();
+  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Monitoring", "Maintenance", "Administration", "Current health", "Open items", "24-hour activity", "Recent executions", "Upcoming work"]);
   expect(screen.getByRole("heading", { name: "Monitoring", level: 2 })).toBeVisible();
   await userEvent.click(screen.getByRole("link", { name: "Job monitoring" }));
   expect(
@@ -54,6 +54,36 @@ test("viewer can navigate dashboard monitoring and audit while management is hid
   ).toBeVisible();
   await userEvent.click(screen.getByRole("link", { name: "Audit" }));
   expect(await screen.findByRole("heading", { name: "Audit" })).toBeVisible();
+});
+
+test("viewer reaches Jobs from app navigation and opens the controls-only detail", async () => {
+  window.history.replaceState(null, "", "#/dashboard");
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    calls.push(url.pathname);
+    const data = url.pathname === "/api/session"
+      ? { authenticated: true, canRead: true, canManage: false, mode: "RoleProtected", language: "en", timeZone: "UTC" }
+      : url.pathname === "/api/settings"
+        ? { displayName: "WorkerDock", displayTimeZone: "UTC", version: "v1" }
+        : url.pathname === "/api/jobs"
+          ? { items: [{ jobId: "job-1", name: "Read-only job", templateId: "demo", templateVersion: "1", enabled: false, archived: false, scheduleKind: null, scheduleZoneId: null, schedulePaused: false, configurationUpdatedUtc: "2026-01-01T00:00:00Z" }], nextCursor: null }
+          : url.pathname === "/api/jobs/job-1/execution-controls"
+            ? { limit: 2, pauseOnNeedsReview: true }
+            : {};
+    return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+  render(<SessionProvider><App /></SessionProvider>);
+  await userEvent.click(await screen.findByRole("link", { name: "Jobs" }));
+  expect(await screen.findByRole("link", { name: "Read-only job" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Create job" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("link", { name: "Read-only job" }));
+  expect(await screen.findByRole("spinbutton", { name: "Job capacity" })).toHaveValue(2);
+  expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Run now" })).not.toBeInTheDocument();
+  expect(calls).toContain("/api/jobs");
+  expect(calls).toContain("/api/jobs/job-1/execution-controls");
+  expect(calls).not.toContain("/api/jobs/job-1");
 });
 
 test("viewer opens a deep-linked documentation topic with Documentation selected and contextual help", async () => {
@@ -109,7 +139,7 @@ test("Profiles-tab contextual help opens the SQL profiles guide", async () => {
     return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
   }));
   render(<SessionProvider><App /></SessionProvider>);
-  await userEvent.click(await screen.findByRole("button", { name: "SQL profiles" }));
+  await userEvent.click(await screen.findByRole("tab", { name: "SQL profiles" }));
   await userEvent.click(await screen.findByRole("button", { name: "Documentation for this page" }));
   expect(screen.getAllByRole("heading", { name: "Manage SQL Server profiles" }).length).toBeGreaterThan(0);
   expect(window.location.hash).toBe("#/help:sql-profiles");
@@ -256,7 +286,7 @@ test("manager edits settings using server version and antiforgery then sees save
     </SessionProvider>,
   );
   await userEvent.click(await screen.findByRole("link", { name: "Settings" }));
-  await userEvent.click(await screen.findByRole("button", { name: "Tenant configuration" }));
+  await userEvent.click(await screen.findByRole("tab", { name: "Tenant configuration" }));
   const name = await screen.findByRole("textbox", { name: "Display name" });
   await userEvent.clear(name);
   await userEvent.type(name, "Equipe");
@@ -275,12 +305,12 @@ test("reader settings are personal and management APIs are not requested", async
   }));
   window.history.replaceState(null, "", "#/settings");
   render(<SessionProvider><App /></SessionProvider>);
-  expect(await screen.findByRole("button", { name: "Personal settings" })).toBeVisible();
+  expect(await screen.findByRole("tab", { name: "Personal settings" })).toBeVisible();
   expect(screen.getByRole("status")).toHaveTextContent("Role-protected management");
   expect(screen.getByRole("combobox", { name: "Language" })).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Tenant configuration" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: "Tenant configuration" })).not.toBeInTheDocument();
   expect(screen.getByText("Team North")).toBeVisible();
-  expect(document.title).toBe("Team North");
+  await waitFor(() => expect(document.title).toBe("Team North"));
   expect(calls).toContain("/api/settings");
   expect(calls.some((url) => /vault|outbound|connection-profiles|retention/.test(url))).toBe(false);
 });
@@ -305,7 +335,7 @@ test("save success updates the app branding; stale save preserves the persisted 
   }));
   window.history.replaceState(null, "", "#/settings");
   render(<SessionProvider><App /></SessionProvider>);
-  await userEvent.click(await screen.findByRole("button", { name: "Tenant configuration" }));
+  await userEvent.click(await screen.findByRole("tab", { name: "Tenant configuration" }));
   const name = await screen.findByRole("textbox", { name: "Display name" });
   await userEvent.clear(name); await userEvent.type(name, "New Name");
   await userEvent.click(screen.getByRole("button", { name: "Save" }));

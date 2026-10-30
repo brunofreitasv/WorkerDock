@@ -27,7 +27,7 @@ Return a fresh `SecretValue` per successful resolution and honor cancellation. T
 
 `SafeExecutionLog` accepts only `TemplateStarted`, `TemplateCompleted`, `TemplateFailed` and `SecretUnavailable`. Its maximum eight fields use fixed names: `executionId`, `attemptId`, `correlationId` (GUIDs), `durationMs`, `affectedRows` (nonnegative integers), `outcome` (the three contract outcomes) and `safeCode` (the installed fixed code vocabulary). Values are bounded to 80 characters. Unknown events, fields or codes reject the complete event before emission. Extend the vocabulary only through reviewed code changes. There is no generic message/exception/body/header/SQL field.
 
-Known resolved values are additionally redacted from structured handler results and wrapped diagnostic fields. This is secondary protection: reviewed handlers must return safe summaries and must not deliberately encode credentials in nominally safe fields. Raw child stdout/stderr is drained and discarded; raw provider/driver exceptions are never returned. Execution events and bounded metric aggregates are persisted by the observability components; the development adapter can emit optional structured traces.
+Known resolved values are additionally redacted from structured handler results and wrapped diagnostic fields. This is secondary protection: reviewed handlers must return safe summaries and must not deliberately encode credentials in nominally safe fields. Raw child stdout/stderr is drained and discarded. Provider messages and stacks are bounded and redacted according to the pinned failure-output policy described below. Execution events and bounded metric aggregates are persisted by the observability components; the development adapter can emit optional structured traces.
 
 ## Verification
 
@@ -40,3 +40,6 @@ dotnet test tests/WorkerDock.ProcessTests -c Release --filter FullyQualifiedName
 ```
 
 The synthetic rotation fixtures inspect safe exception projections, child outcomes, diagnostic files and child command arguments. The complete process suite also checks discarded stdout/stderr and JSON-escaped redaction. No real credentials are test fixtures. See `database.md` for separate live SQL catalog, migration and restricted-grant proofs; memory and Windows process success do not establish those properties.
+## Failure diagnostic visibility
+
+Executor redacts known resolved secrets and their JSON-escaped forms before failure diagnostics cross IPC. Redaction is best effort: arbitrary private values returned by SQL or HTTP may be unknown. Use **Hide detailed failure output** to suppress messages, stacks and response content before persistence. Existing Read-authorized execution-detail users can read the remaining policy-appropriate fields; changing a job later does not change its pinned historical revision. Diagnostic text is rendered as text, never HTML.

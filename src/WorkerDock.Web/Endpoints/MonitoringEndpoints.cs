@@ -98,7 +98,7 @@ public static class MonitoringEndpoints
         var state = request.Query["state"].FirstOrDefault();
         var template = request.Query["templateId"].FirstOrDefault();
         if (from > to || to - from > TimeSpan.FromDays(90) || search is { Length: > 100 } || template is { Length: > 100 } || state is not (null or "Enabled" or "Disabled" or "Archived")) return false;
-        filter = new(from, to, string.IsNullOrWhiteSpace(search) ? null : search, state, string.IsNullOrWhiteSpace(template) ? null : template); return true;
+        filter = new(from, to, string.IsNullOrWhiteSpace(search) ? null : search, state, string.IsNullOrWhiteSpace(template) ? null : template, rawFrom is not null || rawTo is not null); return true;
     }
 
     private static bool TryExecutionHistoryFilter(HttpRequest request, TimeProvider clock, out ExecutionHistoryFilter? filter)

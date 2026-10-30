@@ -5,6 +5,7 @@ using WorkerDock.Infrastructure.Authentication;
 namespace WorkerDock.Web.Endpoints;
 
 public sealed record SetCapacityRequest(int Limit);
+public sealed record SetJobControlsRequest(int Limit, bool PauseOnNeedsReview);
 public static class CapacityEndpoints
 {
     public static void MapCapacity(this IEndpointRouteBuilder app)
@@ -14,8 +15,8 @@ public static class CapacityEndpoints
             try { return Results.Ok(await queries.WorkersAsync(ct)); }
             catch(WorkerDockException e) { return Results.Problem(statusCode:503,extensions:new Dictionary<string,object?> { ["code"]=e.Code }); }
         }).RequireAuthorization(AccessPolicies.Read);
-        app.MapPut("/api/templates/{id}/limit", (string id, SetCapacityRequest input, ICapacityCommands commands, HttpContext context, CancellationToken ct) =>
-            Apply(() => commands.SetTemplateLimitAsync(id,input.Limit,SessionEndpoints.Actor(context),ct))).RequireAuthorization(AccessPolicies.Manage);
+        app.MapPut("/api/jobs/{id:guid}/execution-controls", (Guid id, SetJobControlsRequest input, ICapacityCommands commands, HttpContext context, CancellationToken ct) =>
+            Apply(() => commands.SetJobControlsAsync(id,input.Limit,input.PauseOnNeedsReview,SessionEndpoints.Actor(context),ct))).RequireAuthorization(AccessPolicies.Manage);
         app.MapPut("/api/jobs/{id:guid}/limit", (Guid id, SetCapacityRequest input, ICapacityCommands commands, HttpContext context, CancellationToken ct) =>
             Apply(() => commands.SetJobLimitAsync(id,input.Limit,SessionEndpoints.Actor(context),ct))).RequireAuthorization(AccessPolicies.Manage);
     }

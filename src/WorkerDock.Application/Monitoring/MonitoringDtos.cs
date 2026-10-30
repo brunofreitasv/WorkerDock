@@ -1,8 +1,10 @@
+using WorkerDock.Contracts.Templates;
+
 namespace WorkerDock.Application.Monitoring;
 
 public sealed record PageRequest(string? Cursor, int Limit);
 public sealed record Page<T>(IReadOnlyList<T> Items, string? NextCursor);
-public sealed record MonitoringFilter(DateTimeOffset FromUtc, DateTimeOffset ToUtc, string? Search, string? State, string? TemplateId);
+public sealed record MonitoringFilter(DateTimeOffset FromUtc, DateTimeOffset ToUtc, string? Search, string? State, string? TemplateId, bool ApplyDateFilter = true);
 public sealed record ExecutionHistoryFilter(DateTimeOffset FromUtc, DateTimeOffset ToUtc, string? Search, string? State, string? TemplateId, Guid? JobId = null);
 public sealed record AuditHistoryFilter(DateTimeOffset FromUtc, DateTimeOffset ToUtc, string? Search, string? EventType);
 
@@ -27,9 +29,9 @@ public sealed record UpcomingJobDto(Guid JobId, string JobName, string TemplateI
 public sealed record RecentExecutionDto(Guid ExecutionId, Guid JobId, string JobName, string State, DateTimeOffset CreatedAtUtc, Guid CorrelationId, string TemplateId = "", TimeSpan? Duration = null);
 public sealed record ExecutionHistoryItemDto(Guid ExecutionId, Guid JobId, string JobName, string TemplateId, string State, string TriggerKind, DateTimeOffset CreatedAtUtc, DateTimeOffset? StartedAtUtc, TimeSpan? Duration);
 public sealed record JobSummaryDto(Guid JobId, long Revision, string Name, string TemplateId, string TemplateVersion, bool Enabled, bool Archived, bool HasSchedule, bool SchedulePaused, int ActiveExecutions, int Failed24h, DateTimeOffset CreatedAtUtc);
-public sealed record ExecutionAttemptDto(Guid AttemptId, int AttemptNumber, string State, DateTimeOffset? StartedAtUtc, DateTimeOffset? EndedAtUtc, DateTimeOffset? DeadlineUtc, string? SafeCode, bool LocalExitConfirmed, bool EffectsMayHaveOccurred);
+public sealed record ExecutionAttemptDto(Guid AttemptId, int AttemptNumber, string State, DateTimeOffset? StartedAtUtc, DateTimeOffset? EndedAtUtc, DateTimeOffset? DeadlineUtc, string? SafeCode, bool LocalExitConfirmed, bool EffectsMayHaveOccurred, FailureDiagnostic? Diagnostic = null);
 public sealed record ExecutionEventDto(Guid EventId, Guid? AttemptId, string State, DateTimeOffset OccurredAtUtc);
-public sealed record ExecutionDetailsDto(Guid ExecutionId, Guid JobId, string JobName, string TemplateId, string State, string Certainty, string TriggerKind, DateTimeOffset CreatedAtUtc, DateTimeOffset AvailableAtUtc, DateTimeOffset? ScheduledForUtc, Guid CorrelationId, bool StopRequested, bool ForceStop, IReadOnlyList<ExecutionAttemptDto> Attempts, IReadOnlyList<ExecutionEventDto> Timeline);
+public sealed record ExecutionDetailsDto(Guid ExecutionId, Guid JobId, string JobName, string TemplateId, string State, string Certainty, string TriggerKind, DateTimeOffset CreatedAtUtc, DateTimeOffset AvailableAtUtc, DateTimeOffset? ScheduledForUtc, Guid CorrelationId, bool StopRequested, bool ForceStop, IReadOnlyList<ExecutionAttemptDto> Attempts, IReadOnlyList<ExecutionEventDto> Timeline, string? TemplateVersion = null, long? JobRevision = null, string? WaitReason = null);
 public sealed record AuditSummaryDto(Guid EventId, string EventType, string ActorSubject, string AuthenticationMode, Guid CorrelationId, DateTimeOffset OccurredAtUtc);
 public sealed record RuntimeStatusDto(Guid? BootId, bool Ready, int HostCeiling, DateTimeOffset? LastHeartbeatUtc);
 public sealed record TenantHealthDto(Guid InstanceId, string Overall, IReadOnlyDictionary<string, string> Components, DateTimeOffset ObservedUtc);

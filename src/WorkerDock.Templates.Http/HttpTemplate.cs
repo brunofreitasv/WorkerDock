@@ -40,10 +40,15 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
     {
         var started = Stopwatch.GetTimestamp();
         var sendStarted = false;
+        string? method = null;
+        FailureDiagnostic ExceptionDiagnostic(Exception error) => new("Http", error.GetType().FullName, error.Message, error.StackTrace, HttpMethod: method);
+        TemplateResult ExceptionResult(string outcome, string code, bool effects, Exception error) =>
+            Result(outcome, code, effects) with { Diagnostic = ExceptionDiagnostic(error) };
         try
         {
             if (Validate(context.Execution.Configuration).Count != 0) return Result("PermanentFailure", "HttpConfigurationInvalid", false);
             var config = Normalize(context.Execution.Configuration.Deserialize<HttpJobConfiguration>(HttpJobConfigurationJson.Options))!;
+            method = config.Method.ToUpperInvariant();
             var uri = BuildUri(config, context.Execution.IdempotencyKey);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             using var scheduledDeadline = new CancellationSchedule(deadline, context.Execution.DeadlineUtc);
@@ -103,32 +108,56 @@ public sealed class HttpTemplate(HttpClient client, Func<Uri, CancellationToken,
             sendStarted = true;
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             var bodyBytes = await ReadBoundedAsync(response.Content, config.MaxResponseBytes, deadline.Token);
-            if (bodyBytes is null) return Result("PermanentFailure", "ResponseTooLarge", true);
+            if (bodyBytes is null) return Result("PermanentFailure", "ResponseTooLarge", true) with
+            {
+                Diagnostic = new FailureDiagnostic("Http", HttpMethod: method, HttpStatus: (int)response.StatusCode,
+                    MediaType: response.Content.Headers.ContentType?.MediaType,
+                    ResponseBytes: response.Content.Headers.ContentLength is >= 0 and <= int.MaxValue ? (int)response.Content.Headers.ContentLength.Value : null)
+            };
             var status = (int)response.StatusCode;
             var elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             var retryAfter = ParseRetryAfter(response.Headers.RetryAfter, DateTimeOffset.UtcNow);
             var summary = config.ResponseMode == "SafeSummary"
                 ? JsonSerializer.SerializeToElement(new { status, durationMilliseconds = Math.Max(0, (long)elapsed), bytes = bodyBytes.Length })
                 : JsonSerializer.SerializeToElement(new { });
+            var success = IsSuccess(config, status);
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            var diagnostic = success ? null : new FailureDiagnostic("Http", ResponseContent: DecodeErrorBody(bodyBytes, mediaType),
+                HttpMethod: method, HttpStatus: status, MediaType: mediaType, ResponseBytes: bodyBytes.Length);
             Array.Clear(bodyBytes);
-            if (IsSuccess(config, status)) return new("Success", "HttpCompleted", true, summary, retryAfter);
+            if (success) return new("Success", "HttpCompleted", true, summary, retryAfter);
             if (status is 408 or 425 or 429 || status >= 500)
-                return new("TransientFailure", "HttpRemoteTransient", true, summary, retryAfter);
-            return new("PermanentFailure", "HttpRemoteRejected", true, summary, retryAfter);
+                return new("TransientFailure", "HttpRemoteTransient", true, summary, retryAfter, diagnostic);
+            return new("PermanentFailure", "HttpRemoteRejected", true, summary, retryAfter, diagnostic);
         }
-        catch (SecretUnavailableException) { return Result("PermanentFailure", "SecretUnavailable", false); }
-        catch (HttpTemplateException error) { return Result("PermanentFailure", error.SafeCode, false); }
-        catch (WorkerDock.Contracts.Templates.OutboundDestinationDeniedException error) { return Result("PermanentFailure", error.SafeCode, false); }
-        catch (OperationCanceledException)
+        catch (SecretUnavailableException error) { return ExceptionResult("PermanentFailure", "SecretUnavailable", false, error); }
+        catch (HttpTemplateException error) { return ExceptionResult("PermanentFailure", error.SafeCode, false, error); }
+        catch (WorkerDock.Contracts.Templates.OutboundDestinationDeniedException error) { return ExceptionResult("PermanentFailure", error.SafeCode, false, error); }
+        catch (OperationCanceledException error)
         {
-            return Result("TransientFailure", ct.IsCancellationRequested ? "HttpCancelled" : "HttpTimeout", sendStarted);
+            return ExceptionResult("TransientFailure", ct.IsCancellationRequested ? "HttpCancelled" : "HttpTimeout", sendStarted, error);
         }
         catch (InvalidOperationException error) when (error.Message.StartsWith("Http", StringComparison.Ordinal))
-        { return Result("PermanentFailure", error.Message, false); }
-        catch (HttpRequestException error) when (HasDestinationDenial(error)) { return Result("PermanentFailure", "OutboundAddressDenied", false); }
-        catch (HttpRequestException error) when (HasTlsFailure(error)) { return Result("PermanentFailure", "HttpTlsValidationFailed", false); }
-        catch (HttpRequestException) { return Result("TransientFailure", "HttpTransportFailure", sendStarted); }
-        catch { return Result("PermanentFailure", "HttpExecutionFailed", sendStarted); }
+        { return ExceptionResult("PermanentFailure", error.Message, false, error); }
+        catch (HttpRequestException error) when (HasDestinationDenial(error)) { return ExceptionResult("PermanentFailure", "OutboundAddressDenied", false, error); }
+        catch (HttpRequestException error) when (HasTlsFailure(error)) { return ExceptionResult("PermanentFailure", "HttpTlsValidationFailed", false, error); }
+        catch (HttpRequestException error) { return ExceptionResult("TransientFailure", "HttpTransportFailure", sendStarted, error); }
+        catch (Exception error) { return ExceptionResult("PermanentFailure", "HttpExecutionFailed", sendStarted, error); }
+    }
+
+    private static string? DecodeErrorBody(byte[] bytes, string? mediaType)
+    {
+        if (bytes.Length == 0 || mediaType is null ||
+            !(mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ||
+              mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase) ||
+              mediaType.EndsWith("+json", StringComparison.OrdinalIgnoreCase) ||
+              mediaType.Equals("application/xml", StringComparison.OrdinalIgnoreCase))) return null;
+        try
+        {
+            var text = new UTF8Encoding(false, true).GetString(bytes);
+            return text.IndexOf('\0') >= 0 ? null : text;
+        }
+        catch (DecoderFallbackException) { return null; }
     }
 
     private bool Valid(HttpJobConfiguration c)

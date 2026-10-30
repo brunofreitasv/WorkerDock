@@ -81,10 +81,11 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
             if (expectedVersion is null && exists) throw new WorkerDockException("JobExists");
             if (expectedVersion is not null && !exists) throw new WorkerDockException("JobNotFound");
             if (exists && !editor!.Version.AsSpan().SequenceEqual(expectedVersion)) throw new WorkerDockException("StaleVersion");
+            if (exists && editor!.Archived) throw new WorkerDockException("JobArchived");
             var number = exists ? editor!.Revision.Revision + 1 : 1;
             var revision = JobCommandValidation.Freeze(proposed with { Revision = number });
             var next = new JobEditorDto(revision, BitConverter.GetBytes(number), exists && editor!.Enabled,
-                exists && editor!.Archived, exists ? editor!.ConcurrencyLimit : 1);
+                exists && editor!.Archived, exists ? editor!.ConcurrencyLimit : 1, exists && editor!.PauseOnNeedsReview);
             var receipt = new CommandReceipt(Guid.NewGuid(), proposed.JobId, "Applied");
             await CheckPhaseAsync("Audit", ct);
             var audit = new MemoryJobAudit(Guid.NewGuid(), "JobRevisionSaved", proposed.JobId,
@@ -189,7 +190,7 @@ public sealed class InMemoryJobCommands : IJobCommands, IExecutionControls
             });
             attemptStores[executionId] = new InMemoryAttemptStore(clock,
                 new ExecutionDescriptor(executionId, 1, editor.Revision.TemplateId, editor.Revision.TemplateVersion,
-                    execution.IdempotencyKey, editor.Revision.Configuration, pinnedProfile?.ProfileRevisionId, pinnedProfile is null ? null : JsonSerializer.SerializeToElement(pinnedProfile), integration, null, valueContext), editor.Revision.Policy,
+                    execution.IdempotencyKey, editor.Revision.Configuration, pinnedProfile?.ProfileRevisionId, pinnedProfile is null ? null : JsonSerializer.SerializeToElement(pinnedProfile), integration, null, valueContext, HideFailureDetails: editor.Revision.HideFailureDetails), editor.Revision.Policy,
                 committed: snapshot => SettleCommands(executionId, snapshot),
                 integrationSnapshot: integrationSettings is null ? null : async token => IntegrationConfigurationJson.Serialize(await integrationSettings.GetSnapshotAsync(token)),
                 dynamicValues: plan);

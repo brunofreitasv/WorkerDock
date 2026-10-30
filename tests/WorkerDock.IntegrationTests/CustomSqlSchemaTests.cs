@@ -40,11 +40,11 @@ public sealed class CustomSqlSchemaTests
         Assert.Equal("0001_initial", entry.GetProperty("id").GetString());
         foreach (var direction in new[] { "up", "down" })
         {
-            var path = Path.Combine(directory, "0001_initial." + direction + ".sql");
+            var path = Path.Combine(directory, "migrations", "0001_initial." + direction + ".sql");
             Assert.Equal(entry.GetProperty(direction + "Sha256").GetString(), Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))));
         }
 
-        var up = File.ReadAllText(Path.Combine(directory, "0001_initial.up.sql"));
+        var up = File.ReadAllText(Path.Combine(directory, "migrations", "0001_initial.up.sql"));
         Assert.Contains("@InstanceId", up);
         Assert.Contains("@RuntimePrincipal", up);
         Assert.DoesNotContain("Quartz", up, StringComparison.OrdinalIgnoreCase);
@@ -71,7 +71,7 @@ public sealed class CustomSqlSchemaTests
         var directory = Path.Combine(Root, "database", "tenant");
         foreach (var file in new[] { "0001_initial.up.sql", "current-state.sql" })
         {
-            var sql = File.ReadAllText(Path.Combine(directory, file));
+            var sql = File.ReadAllText(Path.Combine(directory, file == "current-state.sql" ? file : Path.Combine("migrations", file)));
             Assert.DoesNotMatch(@"(?<![\w\[@])RowCount(?![\w\]])", sql);
             Assert.Contains("[RowCount]", sql);
         }
@@ -83,7 +83,7 @@ public sealed class CustomSqlSchemaTests
         var directory = Path.Combine(Root, "database", "tenant");
         foreach (var file in new[] { "0001_initial.up.sql", "current-state.sql" })
         {
-            var sql = File.ReadAllText(Path.Combine(directory, file));
+            var sql = File.ReadAllText(Path.Combine(directory, file == "current-state.sql" ? file : Path.Combine("migrations", file)));
             Assert.True(sql.IndexOf("ALTER TABLE [workerdock].TenantSettings ADD", StringComparison.Ordinal) <
                         sql.IndexOf("CREATE PROCEDURE [workerdock].PurgeAuditEvents", StringComparison.Ordinal));
             Assert.Matches(@"(?s)ALTER TABLE \[workerdock\]\.TenantSettings ADD\s+.*?RetentionVersion bigint NOT NULL CONSTRAINT DF_TenantSettings_RetentionVersion DEFAULT\(1\);\s*GO\s*ALTER TABLE \[workerdock\]\.TenantSettings ADD CONSTRAINT CK_TenantSettings_Retention", sql);
@@ -151,7 +151,7 @@ public sealed class CustomSqlSchemaTests
     [Fact]
     public void Fresh_baseline_rollback_guard_covers_every_table_except_known_seeds()
     {
-        var down = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "database", "tenant", "0001_initial.down.sql"));
+        var down = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "database", "tenant", "migrations", "0001_initial.down.sql"));
         Assert.Contains("FROM sys.tables t JOIN sys.schemas s", down);
         Assert.True(down.IndexOf("EXEC sys.sp_executesql @GuardSql", StringComparison.Ordinal) < down.IndexOf("DROP TABLE", StringComparison.Ordinal));
         var match = Regex.Match(down, @"(?im)^\s+AND t\.name NOT IN\((?<names>[^)]*)\)");
@@ -171,7 +171,7 @@ public sealed class CustomSqlSchemaTests
     public void Fresh_baseline_keeps_dedup_recovery_and_alert_cursors_on_owner_rows()
     {
         var root = Root;
-        var up = File.ReadAllText(Path.Combine(root, "database", "tenant", "0001_initial.up.sql"));
+        var up = File.ReadAllText(Path.Combine(root, "database", "tenant", "migrations", "0001_initial.up.sql"));
         var snapshot = File.ReadAllText(Path.Combine(root, "database", "tenant", "current-state.sql"));
         foreach (var sql in new[] { up, snapshot })
         {
@@ -190,9 +190,9 @@ public sealed class CustomSqlSchemaTests
     public void Fresh_baseline_sql_and_runtime_queries_match_the_single_node_schema()
     {
         var root = Root;
-        var up = File.ReadAllText(Path.Combine(root, "database", "tenant", "0001_initial.up.sql"));
+        var up = File.ReadAllText(Path.Combine(root, "database", "tenant", "migrations", "0001_initial.up.sql"));
         var snapshot = File.ReadAllText(Path.Combine(root, "database", "tenant", "current-state.sql"));
-        var down = File.ReadAllText(Path.Combine(root, "database", "tenant", "0001_initial.down.sql"));
+        var down = File.ReadAllText(Path.Combine(root, "database", "tenant", "migrations", "0001_initial.down.sql"));
         var queue = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Executions", "SqlExecutionQueue.cs"));
         var attempts = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Executions", "SqlAttemptStore.cs"));
         var retention = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Retention", "SqlRetentionService.cs"));
@@ -200,7 +200,8 @@ public sealed class CustomSqlSchemaTests
         var monitoring = File.ReadAllText(Path.Combine(root, "src", "WorkerDock.Infrastructure", "Monitoring", "SqlMonitoringQueries.cs"));
 
         Assert.Contains("AS JobConcurrencyLimit", queue);
-        Assert.Contains("AS TemplateConcurrencyLimit", queue);
+        Assert.DoesNotContain("TemplateConcurrencyLimit", queue, StringComparison.Ordinal);
+        Assert.DoesNotContain("TemplateConcurrency", queue, StringComparison.Ordinal);
         Assert.DoesNotContain("candidate.EffectiveLimit", queue);
         Assert.Contains("j.Enabled,j.Archived,cat.Enabled,CONVERT(bit,0),CONVERT(uniqueidentifier,NULL)", attempts);
         Assert.Contains("MAX(r.AtUtc) DetectedAtUtc", alerts);
@@ -236,7 +237,7 @@ public sealed class CustomSqlSchemaTests
     public void Fresh_baseline_permissions_keep_audit_and_archive_protection()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "database", "tenant");
-        var up = File.ReadAllText(Path.Combine(directory, "0001_initial.up.sql"));
+        var up = File.ReadAllText(Path.Combine(directory, "migrations", "0001_initial.up.sql"));
         var snapshot = File.ReadAllText(Path.Combine(directory, "current-state.sql"));
         foreach (var sql in new[] { up, snapshot })
         {
@@ -259,7 +260,7 @@ public sealed class CustomSqlSchemaTests
         }
         Assert.Equal(up[up.IndexOf("-- Direct runtime permissions", StringComparison.Ordinal)..].Trim(),
             snapshot[snapshot.IndexOf("-- Direct runtime permissions", StringComparison.Ordinal)..snapshot.IndexOf("INSERT [workerdock].SchemaHistory", StringComparison.Ordinal)].Trim());
-        Assert.DoesNotContain("DROP ROLE", File.ReadAllText(Path.Combine(directory, "0001_initial.down.sql")));
+        Assert.DoesNotContain("DROP ROLE", File.ReadAllText(Path.Combine(directory, "migrations", "0001_initial.down.sql")));
         Assert.False(File.Exists(Path.Combine(Root, "database", "tenant", "permissions.sql")));
         Assert.False(File.Exists(Path.Combine(Root, "database", "tenant", "permissions.rollback.sql")));
     }

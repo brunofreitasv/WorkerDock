@@ -3,7 +3,7 @@ using WorkerDock.Domain.Jobs;
 
 namespace WorkerDock.Application.Jobs;
 
-public sealed record JobEditorDto(JobRevision Revision, byte[] Version, bool Enabled, bool Archived, int ConcurrencyLimit);
+public sealed record JobEditorDto(JobRevision Revision, byte[] Version, bool Enabled, bool Archived, int ConcurrencyLimit, bool PauseOnNeedsReview = false);
 
 public interface IJobCommands
 {

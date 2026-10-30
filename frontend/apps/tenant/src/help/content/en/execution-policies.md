@@ -13,7 +13,7 @@ Read users can read this guide and execution history. Managers set and change po
 1. Open [Jobs](#/jobs), edit a draft, and go to **Policy**.
 2. Set the job timeout. **No timeout** removes the outer job deadline; SQL or HTTP handlers can still have their own bounded timeout.
 3. Set maximum attempts, retry base and maximum delay, jitter, and whether uncertain outcomes may retry. Retries can repeat external effects, so use destination idempotency where available.
-4. Choose overlap behavior: **Queue**, **Skip**, or **Allow**. Set the backlog limit for queued work.
+4. Set **Job capacity** to limit how many runs may be running at once. Choose overlap behavior: **Queue**, **Skip**, or **Allow**, and set the backlog limit for queued work. For **Queue** and **Skip**, choose whether new runs wait for or skip around pending review. Capacity and review behavior can also be changed in job details; only running attempts count against capacity.
 5. For scheduled jobs, choose missed-work handling: **Skip**, **Coalesce**, or **Catch up**. In the current tenant editor, **Catch up** accepts at most three occurrences inside the one-day catch-up age window; the editor exposes the mode selector, not controls for changing the count or age limits.
 6. Review the policy, save the draft disabled, then enable the job. Change policy through a reviewed job revision.
 

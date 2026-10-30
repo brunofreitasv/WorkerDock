@@ -61,7 +61,7 @@ public sealed class RuntimeLoops(Func<CancellationToken, ValueTask> heartbeat)
         {
             try { await action(stop.Token); }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { return; }
-            catch (WorkerDockException error) when (error.Code is "TenantInstanceMismatch" or "RuntimeStatusUnavailable" or "WorkerConfigurationUnavailable" or "CatalogMismatch")
+            catch (WorkerDockException error) when (error.Code is "TenantInstanceMismatch" or "RuntimeStatusUnavailable" or "WorkerConfigurationUnavailable")
             {
                 stop.Cancel();
                 throw;

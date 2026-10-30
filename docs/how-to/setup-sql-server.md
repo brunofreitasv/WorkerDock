@@ -7,7 +7,7 @@ WorkerDock tenant databases require SQL Server 2022 or newer with database compa
 ```mermaid
 flowchart LR
     Operator["Operator chooses a preparation path"]
-    Manifest["0001_initial + 0002_template_catalog_registration"] --> MigrationScript["Explicit target via Invoke-TenantMigration.ps1"]
+    Manifest["0001_initial through 0004_attempt_failure_diagnostics"] --> MigrationScript["Explicit target via Invoke-TenantMigration.ps1"]
     Snapshot["Fresh-only current-state.sql snapshot"]
     Operator --> MigrationScript
     Operator --> Snapshot
@@ -21,7 +21,7 @@ flowchart LR
 ```
 
 For a new tenant database, apply the checksummed manifest through
-`0002_template_catalog_registration` using `scripts/Invoke-TenantMigration.ps1`, or apply
+`0004_attempt_failure_diagnostics` using `scripts/Invoke-TenantMigration.ps1`, or apply
 `database/tenant/current-state.sql` to a fresh empty database. Both create the
 same final schema. Migration `0002` lets the Web host promote the two built-in
 catalog placeholders to their trusted descriptors. The snapshot already
@@ -98,12 +98,12 @@ $assemblyDirectory = (Resolve-Path 'src/WorkerDock.Web/bin/Release/net10.0').Pat
   -Action Apply `
   -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 -Database '<TENANT_DATABASE>' `
   -Credential $credential -RuntimePrincipal '<TENANT_DATABASE_USER>' -InitialSetup `
-  -TargetMigration '0002_template_catalog_registration' `
+  -TargetMigration '0004_attempt_failure_diagnostics' `
   -ScriptsRoot (Resolve-Path 'database').Path `
   -AssemblyDirectory $assemblyDirectory
 ```
 
-The manifest contains the `0001_initial` baseline and `0002_template_catalog_registration` patch. The script verifies every checksum, schema history, server version, compatibility level, existing runtime database user, and stable tenant instance ID. Save the GUID printed after a successful
+The manifest contains the `0001_initial` baseline and patches through `0004_attempt_failure_diagnostics`. The script verifies every checksum, schema history, server version, compatibility level, existing runtime database user, and stable tenant instance ID. Save the GUID printed after a successful
 initial setup and use it for `Tenant:InstanceId` in Web and runtime
 configuration. For an already initialized tenant, supply that same GUID with
 `-InstanceId` instead of `-InitialSetup`. Keep the migration identity separate
@@ -162,3 +162,5 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release
 The fixtures own their generated databases and test objects. Their test-only SQL lives under `tests/sql` and `tests/WorkerDock.IntegrationTests/Sql`; it is not part of runtime provisioning. Missing SQL configuration causes the SQL fixtures to report `SQL_TEST_BLOCKED`. Record actual runs in the [release evidence](../validation/release-evidence.md).
 
 See [database object reference](../reference/database-objects.md), [Control Center setup](configure-control-center.md), and [deployment model](../reference/deployment-model.md) for object inventories and runtime design details.
+
+Migration `0004_attempt_failure_diagnostics` adds bounded, policy-filtered failure diagnostics per attempt. They are archived with the attempt and cascade-delete when execution retention purges that attempt. Existing attempts have no diagnostics. Apply all manifest migrations through `0004_attempt_failure_diagnostics` before starting the updated runtime.

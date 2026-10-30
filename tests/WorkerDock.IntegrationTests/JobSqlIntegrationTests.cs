@@ -16,7 +16,7 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0001_initial", default);
+            .ApplyAsync("tenant", "0005_job_review_hold", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
@@ -38,7 +38,7 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0001_initial", default);
+            .ApplyAsync("tenant", "0005_job_review_hold", default);
         await database.ExecuteAsync("CREATE TRIGGER [workerdock].TestJobAuditFailure ON [workerdock].AuditEvents AFTER INSERT AS THROW 51000, 'Injected audit failure', 1;");
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
@@ -59,7 +59,7 @@ public sealed class JobSqlIntegrationTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(snapshot);
         await new MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, database.ScriptsRoot)
-            .ApplyAsync("tenant", "0001_initial", default);
+            .ApplyAsync("tenant", "0005_job_review_hold", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());

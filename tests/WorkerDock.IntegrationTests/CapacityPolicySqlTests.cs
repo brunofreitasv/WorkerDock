@@ -13,10 +13,10 @@ namespace WorkerDock.IntegrationTests;
 public sealed class CapacityPolicySqlTests
 {
     [Fact]
-    public async Task Template_and_job_limits_are_applied_on_their_owner_rows()
+    public async Task Migration_defaults_and_live_controls_are_audited()
     {
         await using var fixture = new TenantSqlFixture(); await fixture.CreateAsync(false);
-        await fixture.Runner.ApplyAsync("tenant", "0001_initial", default);
+        await fixture.Runner.ApplyAsync("tenant", "0004_attempt_failure_diagnostics", default);
         var options = new WorkerDock.Infrastructure.Persistence.TenantDatabaseOptions(fixture.RuntimeConnectionString, fixture.Database.InstanceId);
         await JobCommandTestCatalog.RegisterSqlAsync(options);
         var actor = new ActorContext("manager", "Anonymous", Guid.NewGuid());
@@ -25,10 +25,14 @@ public sealed class CapacityPolicySqlTests
         await jobs.SaveAsync(job, null, actor, default);
         var commands = new SqlCapacityCommands(options);
 
-        Assert.Equal("Applied", (await commands.SetTemplateLimitAsync("workerdock.http", 3, actor, default)).State);
-        Assert.Equal("Applied", (await commands.SetJobLimitAsync(job.JobId, 2, actor, default)).State);
-        Assert.Equal(3, await fixture.Database.ScalarAsync("SELECT ConcurrencyLimit FROM [workerdock].TemplateCatalog WHERE TemplateId=N'workerdock.http' AND TemplateVersion=N'1.1.0'"));
-        Assert.Equal(2, await fixture.Database.ScalarAsync($"SELECT ConcurrencyLimit FROM [workerdock].Jobs WHERE JobId='{job.JobId}'"));
+        await fixture.Runner.ApplyAsync("tenant", "0005_job_review_hold", default);
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT PauseOnNeedsReview FROM [workerdock].Jobs WHERE JobId='{job.JobId}'"));
+        var fresh = CommandOutcomeTests.Job();
+        await jobs.SaveAsync(fresh, null, actor, default);
+        Assert.Equal(0, await fixture.Database.ScalarAsync($"SELECT PauseOnNeedsReview FROM [workerdock].Jobs WHERE JobId='{fresh.JobId}'"));
+        Assert.Equal("Applied", (await commands.SetJobControlsAsync(job.JobId, 3, false, actor, default)).State);
+        Assert.Equal(1, await fixture.Database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Jobs WHERE JobId='{job.JobId}' AND ConcurrencyLimit=3 AND PauseOnNeedsReview=0"));
+        Assert.Equal(1, await fixture.Database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AuditEvents WHERE EventType=N'JobControls' AND JSON_VALUE(DetailsJson,'$.limit')='3' AND JSON_VALUE(DetailsJson,'$.pauseOnNeedsReview')='false'"));
     }
 
     [Fact]

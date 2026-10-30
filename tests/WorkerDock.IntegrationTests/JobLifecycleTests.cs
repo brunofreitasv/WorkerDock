@@ -26,12 +26,11 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var descriptor = HttpTemplateDescriptors.Get("1.1.0");
         var catalog = new TemplateCatalog([descriptor]);
         await catalog.RegisterAsync([descriptor], default);
-        await database.ExecuteAsync($"INSERT [workerdock].TemplateCatalog(TemplateId,TemplateVersion,MetadataDigest,Enabled) VALUES(N'workerdock.http',N'1.1.0',N'{descriptor.MetadataDigest}',1)");
         var jobId = Guid.NewGuid();
         var plan = DynamicValueJson.Write(new(1, "UTC", [new("/parameters/when", DynamicValueSource.ScheduledTimestamp, null, 0, 0, DynamicValueBoundary.None, DynamicValueFormat.IsoUtcTimestamp)]));
         var configuration = JsonSerializer.SerializeToElement(new
@@ -61,7 +60,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var version = await VersionAsync(database, jobId);
         var lifecycle = new SqlJobLifecycle(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), null, new FiveFieldScheduleEvaluator(), TimeProvider.System);
@@ -79,7 +78,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
@@ -111,7 +110,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var lifecycle = new SqlJobLifecycle(options, JobCommandTestCatalog.Create(), new FiveFieldScheduleEvaluator(), TimeProvider.System);
@@ -134,7 +133,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var lifecycle = new SqlJobLifecycle(options, null, new FiveFieldScheduleEvaluator(), TimeProvider.System);
@@ -156,7 +155,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         var start = new DateTime(2026, 10, 18, 0, 0, 0, DateTimeKind.Utc);
@@ -181,7 +180,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:00:00' WHERE ScheduleId='{scheduleId}'");
@@ -200,7 +199,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:00:00' WHERE ScheduleId='{scheduleId}'");
@@ -209,7 +208,7 @@ public sealed class JobLifecycleTests
         Assert.Equal(2, await writer.MaterializeAsync(scheduleId, 1, new DateTimeOffset(2026, 10, 18, 0, 2, 0, TimeSpan.Zero), default));
         Assert.Equal(0, await writer.MaterializeAsync(scheduleId, 1, new DateTimeOffset(2026, 10, 18, 0, 1, 0, TimeSpan.Zero), default));
 
-        Assert.Equal("2026-10-18T00:02:00.0000000", await ScalarStringAsync(database, $"SELECT CONVERT(nvarchar(33),CursorUtc,126) FROM [workerdock].Schedules WHERE ScheduleId='{scheduleId}'"));
+        Assert.Equal("2026-10-18T00:02:00", await ScalarStringAsync(database, $"SELECT CONVERT(nvarchar(33),CursorUtc,126) FROM [workerdock].Schedules WHERE ScheduleId='{scheduleId}'"));
         Assert.Equal(2, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ScheduleId='{scheduleId}' AND TriggerKind=N'Scheduled'"));
     }
 
@@ -220,7 +219,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var exhaustedJob = await SeedScheduledJobAsync(database, enabled: true);
         var activeJob = await SeedScheduledJobAsync(database, enabled: true);
         var onceId = await ScheduleIdAsync(database, exhaustedJob);
@@ -241,7 +240,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
@@ -257,7 +256,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:00:00',MissedMode=N'CatchUp',LatenessToleranceMs=60000,CatchUpCount=3,CatchUpAgeMs=10800000 WHERE ScheduleId='{scheduleId}'");
@@ -280,7 +279,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
@@ -300,7 +299,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         for (var i = 0; i < 105; i++) await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var store = new SqlScheduleSweep(options, new OccurrenceWriter(options, new FiveFieldScheduleEvaluator()), new FixedRulesFingerprint(new string('B', 64)));
@@ -317,7 +316,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var lifecycle = new SqlJobLifecycle(new TenantDatabaseOptions(database.ConnectionString, database.InstanceId), null, new FiveFieldScheduleEvaluator(), TimeProvider.System);
         await lifecycle.ApplyAsync(jobId, "PauseSchedule", await VersionAsync(database, jobId), Actor, default);
@@ -336,7 +335,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var commands = new SqlScheduleCommands(options, new FiveFieldScheduleEvaluator(), TimeProvider.System);
@@ -355,7 +354,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var commands = new SqlScheduleCommands(options, new FiveFieldScheduleEvaluator(), TimeProvider.System);
@@ -385,7 +384,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
         var profiles = new SqlConnectionProfiles(options);
         var proposed = SqlTemplateTests.Profile();
@@ -404,12 +403,12 @@ public sealed class JobLifecycleTests
 
     [Trait("Store", "Sql")]
     [Fact]
-    public async Task Archive_tombstones_future_schedule_but_preserves_running_execution()
+    public async Task Archive_preserves_schedule_and_running_execution_without_materializing_work()
     {
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var runner = new WorkerDock.Infrastructure.Migrations.MigrationRunner(database.ConnectionString, database.InstanceId, database.RuntimePrincipal, Path.Combine(AppContext.BaseDirectory, "database"));
-        await runner.ApplyAsync("tenant", "0001_initial", default);
+        await runner.ApplyAsync("tenant", "0005_job_review_hold", default);
         var jobId = await SeedScheduledJobAsync(database, enabled: true);
         var scheduleId = await ScheduleIdAsync(database, jobId);
         await database.ExecuteAsync($"UPDATE [workerdock].Schedules SET Cron=N'* * * * *',ActivatedUtc='2026-10-18T00:00:00',CursorUtc='2026-10-18T00:00:00' WHERE ScheduleId='{scheduleId}'");
@@ -425,7 +424,7 @@ public sealed class JobLifecycleTests
 
         Assert.Equal(0, materializedAfterArchive);
         Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Executions WHERE ExecutionId='{executionId}' AND State=N'Running'"));
-        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Schedules WHERE ScheduleId='{scheduleId}' AND Removed=1 AND Revision=2"));
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Schedules WHERE ScheduleId='{scheduleId}' AND Removed=0 AND Revision=2"));
     }
 
     [Trait("Store", "Sql")]
@@ -435,6 +434,7 @@ public sealed class JobLifecycleTests
         await using var database = new SqlDatabaseFixture();
         await database.CreateAsync(false);
         var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        await database.ApplyLatestSchemaAsync();
         await SqlCapacityTestSetup.ReadyAsync(options, "enable-held-worker");
         var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
         var job = new JobRevision(Guid.NewGuid(), 0, "held retry", "workerdock.http", "1.1.0", System.Text.Json.JsonSerializer.SerializeToElement(new { }), null,
@@ -449,6 +449,55 @@ public sealed class JobLifecycleTests
 
     }
 
+    [Trait("Store", "Sql")]
+    [Fact]
+    public async Task Restore_returns_disabled_preserves_pause_and_prevents_missed_replay_until_explicit_enable()
+    {
+        await using var database = await JobManagementTestData.CreateAsync();
+        var id = await JobManagementTestData.SeedAsync(database, "Restore", enabled: true);
+        await JobManagementTestData.ScheduleAsync(database, id, paused: true);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        var lifecycle = new SqlJobLifecycle(options, JobCommandTestCatalog.Create(), new FiveFieldScheduleEvaluator(), TimeProvider.System);
+        var original = await VersionAsync(database, id);
+        await lifecycle.ApplyAsync(id, "Archive", original, Actor, default);
+        var archivedVersion = await VersionAsync(database, id);
+        Assert.False(original.SequenceEqual(archivedVersion));
+        await lifecycle.ApplyAsync(id, "Restore", archivedVersion, Actor, default);
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Jobs WHERE JobId='{id}' AND Archived=0 AND Enabled=0"));
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Schedules WHERE JobId='{id}' AND Paused=1 AND Removed=0"));
+        Assert.Equal(0, await new SqlScheduleSweep(options, new OccurrenceWriter(options, new FiveFieldScheduleEvaluator())).RunDueAsync(DateTimeOffset.UtcNow, 100, default));
+        Assert.Equal(1, await database.ScalarAsync("SELECT COUNT(*) FROM [workerdock].AuditEvents WHERE EventType=N'JobRestore'"));
+        Assert.Equal("InvalidJobTransition", (await Assert.ThrowsAsync<WorkerDockException>(async () => await lifecycle.ApplyAsync(id, "Restore", await VersionAsync(database, id), Actor, default))).Code);
+    }
+
+    [Trait("Store", "Sql")]
+    [Fact]
+    public async Task Restore_does_not_resurrect_legacy_removed_schedule_and_legacy_save_rejects_archived_job()
+    {
+        await using var database = await JobManagementTestData.CreateAsync();
+        var id = await JobManagementTestData.SeedAsync(database, "Legacy", archived: true);
+        await JobManagementTestData.ScheduleAsync(database, id, removed: true);
+        var options = new TenantDatabaseOptions(database.ConnectionString, database.InstanceId);
+        var commands = new SqlJobCommands(options, JobCommandTestCatalog.Create());
+        var editor = await commands.GetEditableAsync(id, default);
+        Assert.Equal("JobArchived", (await Assert.ThrowsAsync<WorkerDockException>(async () => await commands.SaveAsync(editor.Revision with { Name = "Changed" }, editor.Version, Actor, default))).Code);
+        var lifecycle = new SqlJobLifecycle(options, JobCommandTestCatalog.Create(), new FiveFieldScheduleEvaluator(), TimeProvider.System);
+        await lifecycle.ApplyAsync(id, "Restore", editor.Version, Actor, default);
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Schedules WHERE JobId='{id}' AND Removed=1 AND Revision=1"));
+    }
+    [Trait("Store", "Sql")]
+    [Fact]
+    public async Task Legacy_schedule_delete_rejects_archived_jobs_without_changing_schedule_or_etag()
+    {
+        await using var database = await JobManagementTestData.CreateAsync();
+        var id = await JobManagementTestData.SeedAsync(database, "Archived schedule", archived: true);
+        await JobManagementTestData.ScheduleAsync(database, id);
+        var version = await VersionAsync(database, id);
+        var commands = new SqlScheduleCommands(new(database.ConnectionString, database.InstanceId), new FiveFieldScheduleEvaluator(), TimeProvider.System);
+        Assert.Equal("JobArchived", (await Assert.ThrowsAsync<WorkerDockException>(async () => await commands.DeleteAsync(id, version, Actor, default))).Code);
+        Assert.Equal(version, await VersionAsync(database, id));
+        Assert.Equal(1, await database.ScalarAsync($"SELECT COUNT(*) FROM [workerdock].Schedules WHERE JobId='{id}' AND Removed=0 AND Revision=1"));
+    }
     private static async Task<Guid> SeedScheduledJobAsync(SqlDatabaseFixture database, bool enabled, Guid? profileId = null)
     {
         var jobId = Guid.NewGuid(); var scheduleId = Guid.NewGuid();

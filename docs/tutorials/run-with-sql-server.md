@@ -115,7 +115,6 @@ $env:Tenant__Sql__PasswordReference='tenant.runtime.sql.password'
 $env:WORKERDOCK_DEVELOPMENT_VAULT='1'
 $env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.runtime.sql.password":"TENANT_RUNTIME_PASSWORD"}'
 $env:TENANT_RUNTIME_PASSWORD='<retrieve-from-protected-local-secret-store>'
-$env:Worker__CatalogDigest='8A719E8D8B3F5A5D5046ED8299D5D555F924F05B5E6AA64AE53B7F3A91AC2765'
 $env:Worker__HostCeiling='10'
 $env:Worker__DrainSeconds='40'
 $env:Executor__Path=(Resolve-Path 'src/WorkerDock.Executor/bin/Release/net10.0-windows/win-x64/publish/WorkerDock.Executor.exe').Path
@@ -151,21 +150,10 @@ SQL setup above is unchanged; no central SQL provisioning or migration is
 needed. Restart each affected process after rotating the password in the local
 secret source. See [Control Center setup](../how-to/configure-control-center.md).
 
-To allow one HTTP attempt, set the template limit. `Worker:HostCeiling` sets
-the runtime's maximum concurrent child count. In another PowerShell window:
-
-```powershell
-$origin='https://localhost:5001'
-$null=Invoke-WebRequest "$origin/api/session" -SessionVariable browser
-$csrf=Invoke-RestMethod "$origin/api/antiforgery" -WebSession $browser
-$headers=@{'X-WorkerDock-CSRF'=$csrf.requestToken;'Origin'=$origin}
-Invoke-RestMethod "$origin/api/templates/workerdock.http/limit" -Method Put -WebSession $browser -Headers $headers -ContentType 'application/json' -Body '{"limit":1}'
-```
-
-These commands require management access and return accepted command receipts.
+Set the host-wide concurrency ceiling with `Worker:HostCeiling`. Job capacity is set in the **Policy** step when creating a job and in its job details; both controls count only running attempts. To allow one HTTP attempt, set that job's capacity to 1. No template capacity setting is required.
 A job also needs a valid configuration and must be enabled. The runtime polls
-for queued executions and respects the tenant child ceiling plus template and
-job limits.
+for queued executions and respects the tenant host ceiling and
+job capacity. Only running attempts count against capacity.
 
 ## Stop and clean up
 
