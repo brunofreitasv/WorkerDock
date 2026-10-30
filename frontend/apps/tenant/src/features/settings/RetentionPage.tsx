@@ -12,6 +12,7 @@ import {
   Typography,
 } from '@mui/material';
 import { ApiError, mutate, read } from '../../api/client';
+import type { Language } from '@workerdock/ui';
 
 type RetentionPolicy = {
   logDays: number;
@@ -46,7 +47,10 @@ function readPolicy(value: unknown): RetentionPolicy {
     archiveDays: candidate.archiveDays ?? defaults.archiveDays,
   };
 }
-export default function RetentionPage() {
+export default function RetentionPage({ language = 'en' }: { language?: Language }) {
+  const sectionCopy = language === 'pt-BR'
+    ? { title: 'Retenção e arquivo', periods: 'Períodos de retenção', archive: 'Arquivo' }
+    : { title: 'Retention and archive', periods: 'Retention periods', archive: 'Archive' };
   const [policy, setPolicy] = useState<RetentionPolicy>(defaults);
   const [etag, setEtag] = useState<string>();
   const [loading, setLoading] = useState(true);
@@ -108,10 +112,10 @@ export default function RetentionPage() {
   if (loading) return <Box role="status" aria-label="Loading retention settings" sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>;
 
   return (
-    <Box component="section" aria-label="Retention and archive" sx={{ maxWidth: 760 }}>
+    <Box component="section" aria-label={sectionCopy.title} sx={{ maxWidth: 760 }}>
       <Stack spacing={3}>
         <Box>
-          <Typography variant="h6" component="h2">Retention and archive</Typography>
+          <Typography variant="h6" component="h2">{sectionCopy.title}</Typography>
           <Typography color="text.secondary" sx={{ mt: 1 }}>Choose how long WorkerDock keeps logs, execution history and audit records.</Typography>
         </Box>
         {error && <Alert severity="error" role="alert">{error}</Alert>}
@@ -119,8 +123,8 @@ export default function RetentionPage() {
         <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
           <Box component="form" onSubmit={save}>
             <Stack spacing={3}>
-              <Box component="section" aria-label="Retention periods" sx={{ display: 'grid', gap: 2 }}>
-                <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>Retention periods</Typography>
+              <Box component="section" aria-label={sectionCopy.periods} sx={{ display: 'grid', gap: 2 }}>
+                <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>{sectionCopy.periods}</Typography>
               {fields.map(field => (
                 <TextField
                   key={field.key}
@@ -135,8 +139,8 @@ export default function RetentionPage() {
                 />
               ))}
               </Box>
-              <Box component="section" aria-label="Archive" sx={{ display: 'grid', gap: 2 }}>
-                <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>Archive</Typography>
+              <Box component="section" aria-label={sectionCopy.archive} sx={{ display: 'grid', gap: 2 }}>
+                <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>{sectionCopy.archive}</Typography>
                 <FormControlLabel
                   control={<Checkbox checked={policy.archiveBeforeDelete} onChange={event => {
                     setSaved(false);

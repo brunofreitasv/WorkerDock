@@ -18,3 +18,10 @@ test("retention is a settings section with grouped periods and archive controls"
   expect(section.querySelectorAll("section")).toHaveLength(2);
   expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
 });
+
+test("retention section headings follow pt-BR", async () => {
+  render(<RetentionPage language="pt-BR" />);
+  expect(await screen.findByRole("region", { name: "Retenção e arquivo" })).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Períodos de retenção" })).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Arquivo" })).toBeInTheDocument();
+});

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, CircularProgress, MenuItem, Paper, Stack, TextField, Typography } from "@mui/material";
-import { SecretReferenceField } from "@workerdock/ui";
+import { SecretReferenceField, type Language } from "@workerdock/ui";
 import { ApiError, mutate, read } from "../../api/client";
 
 type Profile = { profileRevisionId: string; profileId: string; revision: number; name: string; server: string; allowedCatalogs: string[]; authentication: string; userName: string | null; passwordReference: { name: string } | null; encrypt: boolean; trustServerCertificate: boolean };
@@ -8,7 +8,10 @@ type ProfileItem = { current: Profile; version: number[]; retired: boolean };
 const zero = "00000000-0000-0000-0000-000000000000";
 const empty = (): Profile => ({ profileRevisionId: zero, profileId: zero, revision: 0, name: "SQL Server profile", server: "", allowedCatalogs: [], authentication: "Integrated", userName: null, passwordReference: null, encrypt: true, trustServerCertificate: false });
 
-export function ProfileEditor() {
+export function ProfileEditor({ language = "en" }: { language?: Language }) {
+  const groupCopy = language === "pt-BR"
+    ? { connection: "Conexão", authentication: "Autenticação", actions: "Ações do perfil" }
+    : { connection: "Connection", authentication: "Authentication", actions: "Profile actions" };
   const [items, setItems] = useState<ProfileItem[]>([]); const [selected, setSelected] = useState<ProfileItem>();
   const [profile, setProfile] = useState<Profile>(empty); const [etag, setEtag] = useState<string>(); const [catalog, setCatalog] = useState("");
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [message, setMessage] = useState(""); const [diagnostic, setDiagnostic] = useState("");
@@ -36,18 +39,18 @@ export function ProfileEditor() {
     <Paper component="section" aria-label={selected ? "Edit profile" : "New SQL Server profile"} variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
       <Stack spacing={3}>
         <Typography component="h2" variant="h6">{selected ? "Edit profile" : "New SQL Server profile"}</Typography>
-        <Box role="group" aria-label="Connection" sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
+        <Box role="group" aria-label={groupCopy.connection} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
           <TextField label="Profile name" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} required />
           <TextField label="Server" value={profile.server} onChange={(e) => setProfile({ ...profile, server: e.target.value })} required />
           <TextField label="Allowed catalogs" multiline minRows={2} helperText="One catalog name per line." value={catalog} onChange={(e) => setCatalog(e.target.value)} required sx={{ gridColumn: { sm: "1 / -1" } }} />
         </Box>
-        <Box role="group" aria-label="Authentication" sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
+        <Box role="group" aria-label={groupCopy.authentication} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
           <TextField select label="Authentication" value={profile.authentication} onChange={(e) => setProfile({ ...profile, authentication: e.target.value })}><MenuItem value="Integrated">Integrated</MenuItem><MenuItem value="VaultPassword">Vault password</MenuItem></TextField>
           {profile.authentication === "VaultPassword" && <><TextField label="User name" value={profile.userName ?? ""} onChange={(e) => setProfile({ ...profile, userName: e.target.value })} /><SecretReferenceField value={profile.passwordReference?.name ?? ""} onChange={(name) => setProfile({ ...profile, passwordReference: name ? { name } : null })} /></>}
           <TextField select label="Encrypt connection" value={String(profile.encrypt)} onChange={(e) => setProfile({ ...profile, encrypt: e.target.value === "true" })}><MenuItem value="true">Enabled</MenuItem><MenuItem value="false">Disabled</MenuItem></TextField>
           <TextField select label="Trust server certificate" value={String(profile.trustServerCertificate)} onChange={(e) => setProfile({ ...profile, trustServerCertificate: e.target.value === "true" })}><MenuItem value="false">Disabled</MenuItem><MenuItem value="true">Enabled</MenuItem></TextField>
         </Box>
-        <Stack role="group" aria-label="Profile actions" direction={{ xs: "column", sm: "row" }} spacing={1}>
+        <Stack role="group" aria-label={groupCopy.actions} direction={{ xs: "column", sm: "row" }} spacing={1}>
           <Button variant="contained" disabled={busy || selected?.retired} onClick={() => void save()}>Save profile</Button>
           {selected && !selected.retired && <Button disabled={busy || !catalog.trim()} onClick={() => void runDiagnostic()}>Run safe diagnostic</Button>}
           {selected && !selected.retired && <Button disabled={busy} onClick={() => void retire()}>Retire profile</Button>}

@@ -16,3 +16,11 @@ test("profiles separate inventory, connection, authentication, and actions", asy
   expect(screen.getByRole("group", { name: "Authentication" })).toBeInTheDocument();
   expect(screen.getByRole("group", { name: "Profile actions" })).toContainElement(screen.getByRole("button", { name: "Save profile" }));
 });
+
+test("profile form groups follow pt-BR", async () => {
+  render(<ProfileEditor language="pt-BR" />);
+  expect(await screen.findByRole("region", { name: "SQL Server profiles" })).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Conexão" })).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Autenticação" })).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Ações do perfil" })).toBeInTheDocument();
+});
