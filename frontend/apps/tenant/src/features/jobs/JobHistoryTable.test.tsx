@@ -94,7 +94,7 @@ test("groups job filters and results, and Clear restores the default query", asy
   const results = screen.getByRole("region", { name: "Results" });
   expect(within(results).getByRole("button", { name: "Refresh" })).toBeVisible();
   expect(within(results).getByText("Scroll horizontally to view all columns.")).toBeInTheDocument();
-  expect(await within(results).findByText(/^Updated:/)).toBeVisible();
+  expect(results.firstElementChild).toContainElement(await within(results).findByText(/^Updated:/));
   await user.click(within(filters).getByRole("button", { name: "Last 30 days" }));
   await user.click(within(filters).getByRole("combobox", { name: "Status" }));
   await user.click(screen.getByRole("option", { name: "Failed" }));

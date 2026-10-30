@@ -92,6 +92,7 @@ test("groups audit filters and results, and Clear restores the default query", a
   const filters = screen.getByRole("region", { name: "Filters" });
   const results = screen.getByRole("region", { name: "Results" });
   expect(within(results).getByRole("button", { name: "Refresh" })).toBeVisible();
+  expect(results.firstElementChild).toContainElement(await within(results).findByText(/^Updated:/));
   expect(within(results).getByText("Scroll horizontally to view all columns.")).toBeInTheDocument();
   await user.type(within(filters).getByRole("textbox", { name: "Search audit" }), "actor");
   await user.click(within(filters).getByRole("button", { name: "Last 30 days" }));

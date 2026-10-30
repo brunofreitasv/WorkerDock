@@ -165,6 +165,7 @@ test("groups filters and results, and Clear restores the default query", async (
   const results = screen.getByRole("region", { name: "Results" });
   expect(within(filters).getByRole("button", { name: "Last 7 days" })).toHaveAttribute("aria-pressed", "true");
   expect(within(results).getByRole("button", { name: "Refresh" })).toBeVisible();
+  expect(results.firstElementChild).toContainElement(await within(results).findByText(/^Updated:/));
   expect(within(results).getByText("Scroll horizontally to view all columns.")).toBeInTheDocument();
   expect(within(filters).queryByRole("button", { name: "Refresh" })).not.toBeInTheDocument();
   await user.type(within(filters).getByRole("textbox", { name: "Search executions" }), "Nightly");

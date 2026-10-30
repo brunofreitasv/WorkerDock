@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Button, Typography } from "@mui/material";
+import { Button, Stack, Typography } from "@mui/material";
 import { FilterPanel, ResultsPanel } from "@workerdock/ui";
 
 export function HistoryFilters({ title, children, onClear, clearLabel, language = "en" }: { title: string; children: ReactNode; onClear?: () => void; clearLabel?: string; language?: "en" | "pt-BR" }) {
@@ -7,5 +7,8 @@ export function HistoryFilters({ title, children, onClear, clearLabel, language 
 }
 
 export function HistoryResults({ title, updatedAt, refreshLabel, onRefresh, footer, children }: { title: string; updatedAt?: ReactNode; refreshLabel: string; onRefresh: () => void; footer?: ReactNode; children: ReactNode }) {
-  return <ResultsPanel title={title} meta={updatedAt && <Typography variant="caption" color="text.secondary">{updatedAt}</Typography>} actions={<Button onClick={onRefresh}>{refreshLabel}</Button>} footer={footer}>{children}</ResultsPanel>;
+  return <ResultsPanel title={title} actions={<Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { sm: "center" } }}>
+    {updatedAt && <Typography variant="caption" color="text.secondary">{updatedAt}</Typography>}
+    <Button onClick={onRefresh}>{refreshLabel}</Button>
+  </Stack>} footer={footer}>{children}</ResultsPanel>;
 }

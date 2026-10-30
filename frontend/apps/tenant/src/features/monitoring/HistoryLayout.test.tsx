@@ -22,7 +22,10 @@ test("places refresh, updated time, rows and pagination in a separate results su
   const onRefresh = vi.fn();
   render(<HistoryResults title="Results" updatedAt="Updated: 12:00" refreshLabel="Refresh" onRefresh={onRefresh} footer={<span>Page 1</span>}><span>Row 1</span></HistoryResults>);
   const section = screen.getByRole("region", { name: "Results" });
-  expect(section).toContainElement(screen.getByText("Updated: 12:00"));
+  const header = section.firstElementChild;
+  expect(header).toContainElement(screen.getByText("Updated: 12:00"));
+  expect(header).toContainElement(screen.getByRole("button", { name: "Refresh" }));
+  expect(header).not.toContainElement(screen.getByText("Row 1"));
   expect(section).toContainElement(screen.getByText("Row 1"));
   expect(section).toContainElement(screen.getByText("Page 1"));
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
