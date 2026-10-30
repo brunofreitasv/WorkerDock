@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Checkbox, FormControlLabel, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Button, Checkbox, FormControlLabel, MenuItem, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { read } from "../../api/client";
+import { EmptyState, StatusBadge } from "@workerdock/ui";
+import { HistoryFilters, HistoryResults } from "../monitoring/HistoryLayout";
 import { CursorPager } from "../monitoring/CursorPager";
 import { PeriodControl } from "../monitoring/PeriodControl";
 import { toUtcRange, type HistoryPeriod } from "../monitoring/historyTime";
@@ -38,42 +40,44 @@ export function IncidentHistoryTable({ language, timeZone }: { language: string;
   const changePeriod = (value: HistoryPeriod) => { setPeriod(value); setActivePeriodEnabled(true); setAnchor(new Date()); reset(); };
   const toggleActivePeriod = (enabled: boolean) => { setActivePeriodEnabled(enabled); setAnchor(new Date()); reset(); };
   const restart = () => { setAnchor(new Date()); reset(); setRefreshSequence(x => x + 1); };
+  const clearFilters = () => { setState("Active"); setRuleId(""); setPeriod({ kind: "30d" }); setActivePeriodEnabled(false); setAnchor(new Date()); reset(); };
   const stateLabel = (value: string) => value === "Active" ? label("Open and unknown", "Abertos e desconhecidos") : value === "Resolved" ? label("Resolved", "Resolvidos") : label("All incidents", "Todos os incidentes");
   const displayState = (value: string) => value === "Open" ? label("Open", "Aberto") : value === "Unknown" ? label("Unknown", "Desconhecido") : label("Resolved", "Resolvido");
 
-  return <Paper variant="outlined" sx={{ p: 3 }}>
-    <Stack spacing={2}>
-      <Typography component="h2" variant="h6">{label("Incidents", "Incidentes")}</Typography>
-      <Stack spacing={1}>
+  return <Stack spacing={1}>
+    <Typography component="h2" variant="h6">{label("Incidents", "Incidentes")}</Typography>
+    <HistoryFilters title={label("Incident filters", "Filtros de incidentes")} language={pt ? "pt-BR" : "en"} onClear={clearFilters}>
+      <Stack spacing={2}>
         <PeriodControl value={period} timeZone={timeZone} maxDays={90} language={pt ? "pt-BR" : "en"} onChange={changePeriod} />
         {state === "Active" && <FormControlLabel control={<Checkbox checked={activePeriodEnabled} onChange={event => toggleActivePeriod(event.target.checked)} />}
           label={label("Filter active incidents by period", "Filtrar incidentes ativos por período")} />}
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-          <TextField select label={label("Incident state", "Estado do incidente")} value={state} onChange={event => { setState(event.target.value); reset(); }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
+          <TextField select label={label("Incident state", "Estado do incidente")} value={state} onChange={event => { setState(event.target.value); reset(); }} sx={{ minWidth: 210, flex: 1 }}>
             {["Active", "All", "Resolved"].map(value => <MenuItem key={value} value={value}>{stateLabel(value)}</MenuItem>)}
           </TextField>
-          <TextField select label={label("Incident rule", "Regra do incidente")} value={ruleId} onChange={event => { setRuleId(event.target.value); reset(); }}>
+          <TextField select label={label("Incident rule", "Regra do incidente")} value={ruleId} onChange={event => { setRuleId(event.target.value); reset(); }} sx={{ minWidth: 210, flex: 1 }}>
             <MenuItem value="">{label("All rules", "Todas as regras")}</MenuItem>{rules.map(rule => <MenuItem key={rule.ruleId} value={rule.ruleId}>{rule.name}</MenuItem>)}
           </TextField>
-          <Button onClick={restart}>{label("Refresh", "Atualizar")}</Button>
-          <Typography variant="caption" sx={{ alignSelf: "center" }}>{label("Updated", "Atualizado")}: {updatedAt?.toLocaleTimeString(locale, { timeZone })}</Typography>
         </Stack>
       </Stack>
+    </HistoryFilters>
+    <HistoryResults title={label("Incident results", "Resultados dos incidentes")} onRefresh={restart} refreshLabel={label("Refresh", "Atualizar")}
+      updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${updatedAt.toLocaleTimeString(locale, { timeZone })}` : undefined}
+      footer={<CursorPager previousCount={previous.length} nextCursor={data?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
+        onPrevious={() => { const stack = [...previous]; setCursor(stack.pop() ?? ""); setPrevious(stack); }}
+        onNext={() => { if (!data?.nextCursor) return; setPrevious(stack => [...stack, cursor]); setCursor(data.nextCursor); }} />}>
       {error && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={restart}>{label("Retry", "Tentar novamente")}</Button>}>
         {label("Incident history could not be refreshed.", "Não foi possível atualizar o histórico de incidentes.")} {stale && label("Showing stale results.", "Exibindo resultados desatualizados.")}
       </Alert>}
-      {loading && !data ? <Typography>{label("Loading incidents…", "Carregando incidentes…")}</Typography> : !data ? <Alert severity="error">{label("Incident history is unavailable.", "Histórico de incidentes indisponível.")}</Alert> : <TableContainer sx={{ width: "100%", overflowX: "auto" }}>
-        <Table size="small" aria-label={label("Incidents", "Incidentes")}>
+      {loading && !data ? <Typography role="status">{label("Loading incidents…", "Carregando incidentes…")}</Typography> : !data ? <Alert severity="error">{label("Incident history is unavailable.", "Histórico de incidentes indisponível.")}</Alert> : <TableContainer sx={{ width: "100%", overflowX: "auto" }}>
+        <Table size="small" aria-label={label("Incidents", "Incidentes")} sx={{ minWidth: 850 }}>
           <TableHead><TableRow>{[label("Opened", "Aberto em"), label("Incident rule", "Regra do incidente"), label("Subject", "Assunto"), label("State", "Estado"), label("Last observed", "Última observação"), label("Resolved", "Resolvido em"), label("Safe code", "Código seguro")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead>
-          <TableBody>{data.items.map(item => <TableRow key={item.incidentId}>
-            <TableCell>{displayDate(item.openedAtUtc, locale, timeZone)}</TableCell><TableCell>{item.ruleName}</TableCell><TableCell>{item.subjectKey}</TableCell><TableCell>{displayState(item.state)}</TableCell>
+          <TableBody>{data.items.map(item => <TableRow key={item.incidentId} hover>
+            <TableCell>{displayDate(item.openedAtUtc, locale, timeZone)}</TableCell><TableCell>{item.ruleName}</TableCell><TableCell>{item.subjectKey}</TableCell><TableCell><StatusBadge label={displayState(item.state)} tone={item.state === "Open" ? "warning" : item.state === "Unknown" ? "info" : "success"} /></TableCell>
             <TableCell>{displayDate(item.lastObservedAtUtc, locale, timeZone)}</TableCell><TableCell>{displayDate(item.resolvedAtUtc, locale, timeZone)}</TableCell><TableCell>{item.safeCode ?? "—"}</TableCell>
-          </TableRow>)}{data.items.length === 0 && <TableRow><TableCell colSpan={7}>{label("No incidents found.", "Nenhum incidente encontrado.")}</TableCell></TableRow>}</TableBody>
+          </TableRow>)}{data.items.length === 0 && <TableRow><TableCell colSpan={7}><EmptyState title={label("No incidents found.", "Nenhum incidente encontrado.")} /></TableCell></TableRow>}</TableBody>
         </Table>
       </TableContainer>}
-      <CursorPager previousCount={previous.length} nextCursor={data?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
-        onPrevious={() => { const stack = [...previous]; setCursor(stack.pop() ?? ""); setPrevious(stack); }}
-        onNext={() => { if (!data?.nextCursor) return; setPrevious(stack => [...stack, cursor]); setCursor(data.nextCursor); }} />
-    </Stack>
-  </Paper>;
+    </HistoryResults>
+  </Stack>;
 }

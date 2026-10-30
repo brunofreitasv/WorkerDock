@@ -92,3 +92,26 @@ test("incident dates and pages render in the selected timezone with safe empty s
   expect(screen.getAllByText(/29 de out\. de 2026/)).toHaveLength(2);
   expect(calls.find(call => call.pathname === "/api/alerts/incidents")?.searchParams.get("limit")).toBe("50");
 });
+
+
+test("incident filters and results are separate and clear restores the unbounded active view", async () => {
+  const calls = stubPages();
+  const user = userEvent.setup();
+  render(<IncidentHistoryTable language="en" timeZone="UTC" />);
+  const filters = await screen.findByRole("region", { name: "Incident filters" });
+  const results = screen.getByRole("region", { name: "Incident results" });
+  expect(filters).toContainElement(screen.getByRole("combobox", { name: "Incident state" }));
+  expect(results).toContainElement(screen.getByRole("button", { name: "Refresh" }));
+  expect(filters).not.toContainElement(screen.getByRole("button", { name: "Refresh" }));
+  await user.click(screen.getByRole("checkbox", { name: "Filter active incidents by period" }));
+  await user.click(screen.getByRole("button", { name: "Clear filters" }));
+  await waitFor(() => expect(calls.at(-1)?.searchParams.has("fromUtc")).toBe(false));
+  expect(screen.getByRole("checkbox", { name: "Filter active incidents by period" })).not.toBeChecked();
+  expect(screen.getByText("Worker missed")).toBeVisible();
+});
+
+test("incident empty state remains inside results", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify({ items: [], nextCursor: null }))));
+  render(<IncidentHistoryTable language="pt-BR" timeZone="UTC" />);
+  expect(await screen.findByRole("region", { name: "Resultados dos incidentes" })).toContainElement(screen.getByText("Nenhum incidente encontrado."));
+});

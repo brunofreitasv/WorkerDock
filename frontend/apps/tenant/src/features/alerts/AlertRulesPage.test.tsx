@@ -453,3 +453,22 @@ test("a failed management list request after permission loss does not show a sta
 
   expect(screen.queryByText(translations.en.requestError)).not.toBeInTheDocument();
 }, 15000);
+
+
+test("Manager configuration has distinct rule and destination sections", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname === "/api/alerts/rule-options" || url.pathname.startsWith("/api/alerts/")) return new Response(JSON.stringify({ items: [], nextCursor: null }));
+    if (url.pathname === "/api/alert-rules") return new Response(JSON.stringify([rule]));
+    if (url.pathname === "/api/alert-sinks") return new Response(JSON.stringify([sink]));
+    if (url.pathname === `/api/alert-rules/${rule.id}`) return new Response(JSON.stringify(rule), { headers: { ETag: '"rule"' } });
+    if (url.pathname === `/api/alert-sinks/${sink.id}`) return new Response(JSON.stringify(sink), { headers: { ETag: '"sink"' } });
+    return new Response("{}", { status: 404 });
+  }));
+  render(<AlertRulesPage t={translations.en} canManage />);
+  const administration = await screen.findByRole("region", { name: "Alert administration" });
+  expect(administration).toContainElement(screen.getByRole("region", { name: "Alert rules" }));
+  expect(administration).toContainElement(screen.getByRole("region", { name: "Webhook destinations" }));
+  expect(screen.getByRole("region", { name: "Incident results" })).not.toContainElement(administration);
+  expect(await screen.findByRole("textbox", { name: "Rule name" })).toBeVisible();
+});

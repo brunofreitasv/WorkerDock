@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
-import { Alert, Button, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Button, MenuItem, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { read } from "../../api/client";
+import { EmptyState, StatusBadge } from "@workerdock/ui";
+import { HistoryFilters, HistoryResults } from "../monitoring/HistoryLayout";
 import { CursorPager } from "../monitoring/CursorPager";
 import { PeriodControl } from "../monitoring/PeriodControl";
 import { toUtcRange, type HistoryPeriod } from "../monitoring/historyTime";
@@ -29,41 +31,45 @@ export function DeliveryHistoryTable({ language, timeZone }: { language: string;
   const reset = () => { setCursor(""); setPrevious([]); };
   const changePeriod = (value: HistoryPeriod) => { setPeriod(value); setAnchor(new Date()); reset(); };
   const restart = () => { setAnchor(new Date()); reset(); setRefreshSequence(x => x + 1); };
+  const clearFilters = () => { setPeriod({ kind: "30d" }); setStatus(""); setKind(""); setAnchor(new Date()); reset(); };
   const statuses = ["Pending", "Leased", "Delivered", "Failed", "Cancelled"] as const;
   const kinds = ["Open", "Reminder", "Resolve"] as const;
   const statusLabel = (value: string) => value === "Pending" ? label("Pending", "Pendente") : value === "Leased" ? label("In progress", "Em andamento") : value === "Delivered" ? label("Delivered", "Entregue") : value === "Failed" ? label("Failed", "Falhou") : label("Cancelled", "Cancelada");
   const kindLabel = (value: string) => value === "Open" ? label("Open", "Abertura") : value === "Reminder" ? label("Reminder", "Lembrete") : label("Resolve", "Resolução");
 
-  return <Paper variant="outlined" sx={{ p: 3 }}>
-    <Stack spacing={2}>
-      <Typography component="h2" variant="h6">{label("Deliveries", "Entregas")}</Typography>
-      <PeriodControl value={period} timeZone={timeZone} maxDays={90} language={pt ? "pt-BR" : "en"} onChange={changePeriod} />
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-        <TextField select label={label("Delivery status", "Estado da entrega")} value={status} onChange={event => { setStatus(event.target.value); reset(); }}>
-          <MenuItem value="">{label("All statuses", "Todos os estados")}</MenuItem>{statuses.map(value => <MenuItem key={value} value={value}>{statusLabel(value)}</MenuItem>)}
-        </TextField>
-        <TextField select label={label("Delivery kind", "Tipo de entrega")} value={kind} onChange={event => { setKind(event.target.value); reset(); }}>
-          <MenuItem value="">{label("All kinds", "Todos os tipos")}</MenuItem>{kinds.map(value => <MenuItem key={value} value={value}>{kindLabel(value)}</MenuItem>)}
-        </TextField>
-        <Button onClick={restart}>{label("Refresh", "Atualizar")}</Button>
-        <Typography variant="caption" sx={{ alignSelf: "center" }}>{label("Updated", "Atualizado")}: {updatedAt?.toLocaleTimeString(locale, { timeZone })}</Typography>
+  return <Stack spacing={1}>
+    <Typography component="h2" variant="h6">{label("Deliveries", "Entregas")}</Typography>
+    <HistoryFilters title={label("Delivery filters", "Filtros de entregas")} language={pt ? "pt-BR" : "en"} onClear={clearFilters}>
+      <Stack spacing={2}>
+        <PeriodControl value={period} timeZone={timeZone} maxDays={90} language={pt ? "pt-BR" : "en"} onChange={changePeriod} />
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
+          <TextField select label={label("Delivery status", "Estado da entrega")} value={status} onChange={event => { setStatus(event.target.value); reset(); }} sx={{ minWidth: 210, flex: 1 }}>
+            <MenuItem value="">{label("All statuses", "Todos os estados")}</MenuItem>{statuses.map(value => <MenuItem key={value} value={value}>{statusLabel(value)}</MenuItem>)}
+          </TextField>
+          <TextField select label={label("Delivery kind", "Tipo de entrega")} value={kind} onChange={event => { setKind(event.target.value); reset(); }} sx={{ minWidth: 210, flex: 1 }}>
+            <MenuItem value="">{label("All kinds", "Todos os tipos")}</MenuItem>{kinds.map(value => <MenuItem key={value} value={value}>{kindLabel(value)}</MenuItem>)}
+          </TextField>
+        </Stack>
       </Stack>
+    </HistoryFilters>
+    <HistoryResults title={label("Delivery results", "Resultados das entregas")} onRefresh={restart} refreshLabel={label("Refresh", "Atualizar")}
+      updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${updatedAt.toLocaleTimeString(locale, { timeZone })}` : undefined}
+      footer={<CursorPager previousCount={previous.length} nextCursor={data?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
+        onPrevious={() => { const stack = [...previous]; setCursor(stack.pop() ?? ""); setPrevious(stack); }}
+        onNext={() => { if (!data?.nextCursor) return; setPrevious(stack => [...stack, cursor]); setCursor(data.nextCursor); }} />}>
       {error && <Alert severity="warning" action={<Button color="inherit" size="small" onClick={restart}>{label("Retry", "Tentar novamente")}</Button>}>
         {label("Delivery history could not be refreshed.", "Não foi possível atualizar o histórico de entregas.")} {stale && label("Showing stale results.", "Exibindo resultados desatualizados.")}
       </Alert>}
-      {loading && !data ? <Typography>{label("Loading deliveries…", "Carregando entregas…")}</Typography> : !data ? <Alert severity="error">{label("Delivery history is unavailable.", "Histórico de entregas indisponível.")}</Alert> : <TableContainer sx={{ width: "100%", overflowX: "auto" }}>
-        <Table size="small" aria-label={label("Deliveries", "Entregas")}>
+      {loading && !data ? <Typography role="status">{label("Loading deliveries…", "Carregando entregas…")}</Typography> : !data ? <Alert severity="error">{label("Delivery history is unavailable.", "Histórico de entregas indisponível.")}</Alert> : <TableContainer sx={{ width: "100%", overflowX: "auto" }}>
+        <Table size="small" aria-label={label("Deliveries", "Entregas")} sx={{ minWidth: 850 }}>
           <TableHead><TableRow>{[label("Incident context", "Contexto do incidente"), label("Kind", "Tipo"), label("Status", "Estado"), label("Attempts", "Tentativas"), label("Next attempt", "Próxima tentativa"), label("Completed", "Concluída"), label("Safe code", "Código seguro")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead>
-          <TableBody>{data.items.map(item => <TableRow key={item.deliveryId}>
+          <TableBody>{data.items.map(item => <TableRow key={item.deliveryId} hover>
             <TableCell><Typography>{item.ruleName} · {item.subjectKey}</Typography><Typography variant="caption">{label("Incident", "Incidente")}: {item.incidentId}</Typography></TableCell>
-            <TableCell>{kindLabel(item.kind)}</TableCell><TableCell>{statusLabel(item.status)}</TableCell><TableCell>{item.attemptCount}</TableCell>
+            <TableCell>{kindLabel(item.kind)}</TableCell><TableCell><StatusBadge label={statusLabel(item.status)} tone={item.status === "Failed" ? "error" : item.status === "Delivered" ? "success" : item.status === "Pending" ? "warning" : "info"} /></TableCell><TableCell>{item.attemptCount}</TableCell>
             <TableCell>{displayDate(item.nextAvailableAtUtc, locale, timeZone)}</TableCell><TableCell>{displayDate(item.completedAtUtc, locale, timeZone)}</TableCell><TableCell>{item.safeCode ?? "—"}</TableCell>
-          </TableRow>)}{data.items.length === 0 && <TableRow><TableCell colSpan={7}>{label("No deliveries found.", "Nenhuma entrega encontrada.")}</TableCell></TableRow>}</TableBody>
+          </TableRow>)}{data.items.length === 0 && <TableRow><TableCell colSpan={7}><EmptyState title={label("No deliveries found.", "Nenhuma entrega encontrada.")} /></TableCell></TableRow>}</TableBody>
         </Table>
       </TableContainer>}
-      <CursorPager previousCount={previous.length} nextCursor={data?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
-        onPrevious={() => { const stack = [...previous]; setCursor(stack.pop() ?? ""); setPrevious(stack); }}
-        onNext={() => { if (!data?.nextCursor) return; setPrevious(stack => [...stack, cursor]); setCursor(data.nextCursor); }} />
-    </Stack>
-  </Paper>;
+    </HistoryResults>
+  </Stack>;
 }

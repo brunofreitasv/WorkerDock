@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, FormControlLabel, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { SectionSurface } from "@workerdock/ui";
 import { ApiError, mutate, read } from "../../api/client";
 import type { Labels } from "../../../../../packages/ui/src/preferences";
 import { createRuleDraft, createSinkDraft, rulePayload, sinkPayload, type AlertRule, type AlertSink } from "./alertDrafts";
@@ -178,19 +179,29 @@ export function AlertRulesPage({ t, canManage, language = "en", timeZone = "UTC"
     {saved && <Alert severity="success">{createdSink ? t.alertSinkCreated : t.saved}</Alert>}
     <IncidentHistoryTable language={language} timeZone={timeZone} />
     <DeliveryHistoryTable language={language} timeZone={timeZone} />
-    {canManage && <>
-      <Paper variant="outlined" sx={{ p: 3, maxWidth: 900 }}><Stack spacing={2}>
-        <Typography component="h2" variant="h6">{t.alertRules}</Typography><Typography color="text.secondary">{t.alertDuplicateDeliveryHelp}</Typography>
+    {canManage && <SectionSurface title={pt ? "Administração de alertas" : "Alert administration"}>
+      <Stack spacing={3}>
+      <Paper component="section" aria-label={pt ? "Regras de alerta" : "Alert rules"} variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: 900 }}><Stack spacing={2}>
+        <Typography component="h3" variant="h6">{t.alertRules}</Typography><Typography color="text.secondary">{t.alertDuplicateDeliveryHelp}</Typography>
         <Button variant="outlined" disabled={!sinksLoaded} onClick={() => requestSelection("rule", undefined)}>{t.alertNewRule}</Button>
         {sinksLoaded && !sinks.some(s => s.enabled) && <Typography role="status" color="text.secondary">{t.alertRuleNeedsSink}</Typography>}
         <TextField select label={t.alertRule} value={ruleId} onChange={e => requestSelection("rule", e.target.value)} disabled={!rules.length}>{rules.map(r => <MenuItem key={r.id} value={r.id}>{r.name} · {r.enabled ? t.enabled : t.disabled}</MenuItem>)}</TextField>
         {ruleDraft && <Stack spacing={2}>
-          <TextField label={t.alertRuleName} value={ruleDraft.name} onChange={e => updateRule({ name: e.target.value })} />
-          <TextField select label={t.alertCondition} value={ruleDraft.condition} onChange={e => updateRule({ condition: e.target.value })}>{conditions.map(c => <MenuItem key={c} value={c}>{t[`alertCondition${c}` as keyof Labels]}</MenuItem>)}</TextField>
+          <Typography component="h4" variant="subtitle1">{pt ? "Definição da regra" : "Rule definition"}</Typography>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ "& > *": { flex: 1 } }}>
+            <TextField label={t.alertRuleName} value={ruleDraft.name} onChange={e => updateRule({ name: e.target.value })} />
+            <TextField select label={t.alertCondition} value={ruleDraft.condition} onChange={e => updateRule({ condition: e.target.value })}>{conditions.map(c => <MenuItem key={c} value={c}>{t[`alertCondition${c}` as keyof Labels]}</MenuItem>)}</TextField>
+          </Stack>
+          <Typography component="h4" variant="subtitle1">{pt ? "Limites e intervalos" : "Thresholds and timing"}</Typography>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ "& > *": { flex: 1 } }}>
           <TextField type="number" label={t.alertThreshold} value={ruleDraft.threshold} error={invalid && (!integer(ruleDraft.threshold, 1, 1000) || (["LongRunning", "WorkerUnavailable"].includes(ruleDraft.condition) && ruleDraft.threshold !== 1))} onChange={e => updateRule({ threshold: Number(e.target.value) })} slotProps={{ htmlInput: { min: 1, max: 1000 } }} />
           <TextField type="number" label={t.alertWindowSeconds} value={ruleDraft.windowSeconds} error={invalid && !integer(ruleDraft.windowSeconds, 1, 2592000)} onChange={e => updateRule({ windowSeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 1, max: 2592000 } }} />
+          </Stack>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ "& > *": { flex: 1 } }}>
           <TextField type="number" label={t.alertGraceSeconds} value={ruleDraft.graceSeconds} error={invalid && !integer(ruleDraft.graceSeconds, 0, 2592000)} onChange={e => updateRule({ graceSeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 0, max: 2592000 } }} />
           <TextField type="number" label={t.alertReminderSeconds} value={ruleDraft.reminderSeconds} error={invalid && !integer(ruleDraft.reminderSeconds, 0, 2592000)} onChange={e => updateRule({ reminderSeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 0, max: 2592000 } }} />
+          </Stack>
+          <Typography component="h4" variant="subtitle1">{pt ? "Destino" : "Destination"}</Typography>
           <TextField select label={t.alertSink} value={ruleDraft.sinkId} onChange={e => updateRule({ sinkId: e.target.value })}>{sinks.map(s => <MenuItem key={s.id} value={s.id} disabled={!s.enabled}>{s.name}{s.enabled ? "" : ` · ${t.disabled}`}</MenuItem>)}</TextField>
           {!ruleDraft.enabled && !creatingRule && <Button onClick={enableRule} disabled={busy || !ruleEtag || !ruleValid}>{t.alertEnableRule}</Button>}
           {invalid && !ruleValid && <Typography role="alert" color="error">{t.validation}</Typography>}
@@ -201,25 +212,32 @@ export function AlertRulesPage({ t, canManage, language = "en", timeZone = "UTC"
           {creatingRule ? <Button variant="contained" onClick={createRule} disabled={busy || !sinks.some(s => s.enabled)}>{t.alertCreateRule}</Button> : <Button variant="contained" onClick={saveRule} disabled={busy || !ruleEtag}>{t.save}</Button>}
         </Stack>}
       </Stack></Paper>
-      <Paper variant="outlined" sx={{ p: 3, maxWidth: 900 }}><Stack spacing={2}>
-        <Typography component="h2" variant="h6">{t.alertWebhookSinks}</Typography><Typography color="text.secondary">{t.alertSecretReferenceHelp}</Typography>
+      <Paper component="section" aria-label={pt ? "Destinos de webhook" : "Webhook destinations"} variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: 900 }}><Stack spacing={2}>
+        <Typography component="h3" variant="h6">{t.alertWebhookSinks}</Typography><Typography color="text.secondary">{t.alertSecretReferenceHelp}</Typography>
         <Button variant="outlined" onClick={() => requestSelection("sink", undefined)}>{t.alertNewWebhookSink}</Button>
-        <TextField select label={t.alertSink} value={sinkId} onChange={e => requestSelection("sink", e.target.value)} disabled={!sinks.length}>{sinks.map(s => <MenuItem key={s.id} value={s.id}>{s.name} · {s.enabled ? t.enabled : t.disabled}</MenuItem>)}</TextField>
+        <TextField select label={t.alertSink} value={creatingSink ? "" : sinkId} onChange={e => requestSelection("sink", e.target.value)} disabled={!sinks.length}>{sinks.map(s => <MenuItem key={s.id} value={s.id}>{s.name} · {s.enabled ? t.enabled : t.disabled}</MenuItem>)}</TextField>
         {sinkDraft && <Stack spacing={2}>
+          <Typography component="h4" variant="subtitle1">{pt ? "Destino" : "Destination"}</Typography>
           <TextField label={t.alertSinkName} value={sinkDraft.name} onChange={e => updateSink({ name: e.target.value })} />
           <TextField label={t.alertWebhookUrl} value={sinkDraft.configuration.url} onChange={e => updateSink({ configuration: { ...sinkDraft.configuration, url: e.target.value } })} error={invalid && !validUrl(sinkDraft.configuration.url)} />
           <Typography variant="subtitle2">{t.alertCustomHeaders}</Typography>
           {sinkDraft.configuration.headers.map((h, i) => <Stack key={i} direction={{ xs: "column", sm: "row" }} spacing={1}><TextField label={t.alertHeaderName} value={h.name} onChange={e => updateHeader(i, { name: e.target.value })} error={invalid && (!validHeaderName(h.name) || sinkDraft.configuration.headers.some((other, j) => j !== i && other.name.toLowerCase() === h.name.toLowerCase()))} /><TextField label={t.alertSecretReference} value={h.secretReference} onChange={e => updateHeader(i, { secretReference: e.target.value })} error={invalid && !validSecretReference(h.secretReference)} /><Button onClick={() => updateSink({ configuration: { ...sinkDraft.configuration, headers: sinkDraft.configuration.headers.filter((_, j) => j !== i) } })}>{t.remove}</Button></Stack>)}
           <Button onClick={() => updateSink({ configuration: { ...sinkDraft.configuration, headers: [...sinkDraft.configuration.headers, { name: "", secretReference: "" }] } })} disabled={sinkDraft.configuration.headers.length >= 32}>{t.alertAddHeader}</Button>
+          <Typography component="h4" variant="subtitle1">{pt ? "Tentativas e tempo limite" : "Retries and timeout"}</Typography>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ "& > *": { flex: 1 } }}>
           <TextField type="number" label={t.maxAttempts} value={sinkDraft.maxAttempts} onChange={e => updateSink({ maxAttempts: Number(e.target.value) })} slotProps={{ htmlInput: { min: 1, max: 20 } }} />
           <TextField type="number" label={t.retryBaseDelay} value={sinkDraft.retryBaseDelaySeconds} onChange={e => updateSink({ retryBaseDelaySeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 0, max: 86400 } }} />
+          </Stack>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ "& > *": { flex: 1 } }}>
           <TextField type="number" label={t.retryMaxDelay} value={sinkDraft.retryMaxDelaySeconds} onChange={e => updateSink({ retryMaxDelaySeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 0, max: 86400 } }} />
           <TextField type="number" label={t.timeout} value={sinkDraft.timeoutSeconds} onChange={e => updateSink({ timeoutSeconds: Number(e.target.value) })} slotProps={{ htmlInput: { min: 1, max: 120 } }} />
+          </Stack>
           <FormControlLabel control={<Checkbox checked={sinkDraft.enabled} onChange={e => updateSink({ enabled: e.target.checked })} />} label={t.enabled} />
           {invalid && !sinkValid && <Typography role="alert" color="error">{t.validation}</Typography>}
           <Button variant="contained" onClick={saveSink} disabled={busy || (!creatingSink && !sinkEtag)}>{t.save}</Button>
         </Stack>}
       </Stack></Paper>
-    </>}
+      </Stack>
+    </SectionSurface>}
   </Stack>;
 }

@@ -50,3 +50,23 @@ test("deliveries paginate independently and show safe empty/error states in pt-B
   expect(screen.getByText("Nenhuma entrega encontrada.")).toBeVisible();
   expect(calls[0].searchParams.get("limit")).toBe("50");
 });
+
+
+test("delivery filters and results are separate and clear restores defaults", async () => {
+  const calls: URL[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost"); calls.push(url);
+    return new Response(JSON.stringify({ items: [delivery], nextCursor: null }));
+  }));
+  const user = userEvent.setup();
+  render(<DeliveryHistoryTable language="en" timeZone="UTC" />);
+  const filters = await screen.findByRole("region", { name: "Delivery filters" });
+  const results = screen.getByRole("region", { name: "Delivery results" });
+  expect(filters).toContainElement(screen.getByRole("combobox", { name: "Delivery status" }));
+  expect(results).toContainElement(screen.getByRole("button", { name: "Refresh" }));
+  await user.click(screen.getByRole("combobox", { name: "Delivery status" }));
+  await user.click(await screen.findByRole("option", { name: "Failed" }));
+  await user.click(screen.getByRole("button", { name: "Clear filters" }));
+  await waitFor(() => expect(calls.at(-1)?.searchParams.has("status")).toBe(false));
+  expect(screen.getByText("Worker missed · worker:alpha")).toBeVisible();
+});
