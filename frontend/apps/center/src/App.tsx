@@ -17,6 +17,10 @@ type Copy = {
   title: string;
   subtitle: string;
   manager: string;
+  skip: string;
+  signOut: string;
+  refreshDirectory: string;
+  footer: string;
   refreshFailed: string;
   saveFailed: string;
   removeConfirm: (name: string) => string;
@@ -27,6 +31,10 @@ const copy: Record<Locale, Copy> = {
     title: 'Control Center',
     subtitle: 'A central directory for your WorkerDock tenant instances.',
     manager: 'Manager access',
+    skip: 'Skip to content',
+    signOut: 'Sign out',
+    refreshDirectory: 'Refresh directory',
+    footer: 'WorkerDock Control Center · Tenant access remains protected by each tenant’s own authentication.',
     refreshFailed: 'Could not refresh health. Try again later.',
     saveFailed: 'Could not save the tenant registration.',
     removeConfirm: name => `Remove the link for ${name}? This does not change or stop the tenant.`,
@@ -35,6 +43,10 @@ const copy: Record<Locale, Copy> = {
     title: 'Central de controle',
     subtitle: 'Um diretório central das instâncias de tenant do WorkerDock.',
     manager: 'Acesso de gestor',
+    skip: 'Ir para o conteúdo',
+    signOut: 'Sair',
+    refreshDirectory: 'Atualizar diretório',
+    footer: 'Central de controle WorkerDock · O acesso a cada tenant continua protegido pela própria autenticação.',
     refreshFailed: 'Não foi possível atualizar a saúde. Tente novamente mais tarde.',
     saveFailed: 'Não foi possível salvar o cadastro do tenant.',
     removeConfirm: name => `Remover o link de ${name}? Isso não altera nem interrompe o tenant.`,
@@ -199,14 +211,14 @@ export default function App() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      <Box component="a" href="#main-content" sx={{ position: 'absolute', left: 8, top: -64, zIndex: 2000, bgcolor: 'background.paper', p: 1, '&:focus': { top: 8 } }}>Skip to content</Box>
+      <Box component="a" href="#main-content" sx={{ position: 'absolute', left: 8, top: -64, zIndex: 2000, bgcolor: 'background.paper', p: 1, '&:focus': { top: 8 } }}>{t.skip}</Box>
       <Box component="header" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
         <Container maxWidth="xl" sx={{ py: 2.25 }}>
           <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: 'wrap' }}>
             <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
               <BrandMark size={36} />
               <Typography variant="subtitle1" sx={{ fontWeight: 750 }}>WorkerDock</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>Control Center</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>{t.title}</Typography>
             </Stack>
             <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: 'wrap' }}>
               {canManage && <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', md: 'block' } }}>{t.manager}</Typography>}
@@ -216,16 +228,17 @@ export default function App() {
                   <MenuItem value="pt-BR">Português (Brasil)</MenuItem>
                 </Select>
               </FormControl>
-              <Button onClick={() => void signOut()} color="inherit" size="small">Sign out</Button>
+              <Button onClick={() => void signOut()} color="inherit" size="small">{t.signOut}</Button>
             </Stack>
           </Stack>
         </Container>
       </Box>
       <Container component="main" id="main-content" tabIndex={-1} maxWidth="xl" sx={{ py: { xs: 3, md: 5 } }}>
         <Stack spacing={3.5}>
-          <PageHeader title={t.title} description={t.subtitle} actions={<Button variant="outlined" onClick={() => void load(search)} disabled={loading}>Refresh directory</Button>} />
+          <PageHeader title={t.title} description={t.subtitle} actions={<Button variant="outlined" onClick={() => void load(search)} disabled={loading}>{t.refreshDirectory}</Button>} />
           {error && <Alert severity="error" role="alert">{error}</Alert>}
           <TenantDirectory
+            locale={locale}
             tenants={tenants}
             onSearch={setSearch}
             nextCursor={nextCursor}
@@ -240,11 +253,11 @@ export default function App() {
             onRemove={tenant => void remove(tenant)}
           />
           <Typography component="footer" variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
-            WorkerDock Control Center · Tenant access remains protected by each tenant’s own authentication.
+            {t.footer}
           </Typography>
         </Stack>
       </Container>
-      <RegistrationEditor open={dialogOpen} initialValue={registrationInput} busy={saving} onClose={() => { setDialogOpen(false); setSelected(undefined); }} onSave={save} />
+      <RegistrationEditor locale={locale} open={dialogOpen} initialValue={registrationInput} busy={saving} onClose={() => { setDialogOpen(false); setSelected(undefined); }} onSave={save} />
     </Box>
   );
 }

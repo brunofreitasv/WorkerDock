@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
 import RegistrationEditor, { type TenantRegistrationInput } from "./RegistrationEditor";
 import TenantDirectory, { type TenantEntry } from "./TenantDirectory";
+import App from "./App";
 
 const tenant: TenantEntry = {
   id: "tenant-1",
@@ -92,4 +93,33 @@ test("empty directory guidance is outside the horizontally scrolling table", () 
   const table = screen.getByRole("table", { name: "Registered tenants" });
   const guidance = screen.getByRole("heading", { name: "No tenants registered yet" });
   expect(table).not.toContainElement(guidance);
+});
+
+test("pt-BR session localizes Control Center navigation", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => new Response(JSON.stringify(input.startsWith("/api/session")
+    ? { authenticated: true, canRead: true, canManage: false, mode: "RoleProtected", language: "pt-BR", timeZone: "UTC" }
+    : { items: [], nextCursor: null }), { status: 200, headers: { "Content-Type": "application/json" } })));
+  try {
+    render(<App />);
+    expect(await screen.findByRole("link", { name: "Ir para o conteúdo" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Atualizar diretório" })).toBeVisible();
+  } finally { vi.unstubAllGlobals(); }
+});
+
+test("pt-BR directory localizes search, health, and manager actions", () => {
+  render(<TenantDirectory locale="pt-BR" tenants={[tenant]} canManage loading={false} onRefresh={() => {}} onSearch={() => {}} onLoadMore={() => {}} onAdd={() => {}} onEdit={() => {}} onRemove={() => {}} />);
+  expect(screen.getByRole("region", { name: "Buscar tenants" })).toBeVisible();
+  expect(screen.getByRole("textbox", { name: "Buscar tenants" })).toBeVisible();
+  expect(screen.getByText("Saudável")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Adicionar tenant" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Editar Billing" })).toBeVisible();
+  expect(screen.getByText("Deslize horizontalmente para ver todas as colunas.")).toBeVisible();
+});
+
+test("pt-BR registration form localizes its groups and actions", () => {
+  render(<RegistrationEditor locale="pt-BR" open onClose={() => {}} onSave={async () => {}} />);
+  expect(screen.getByRole("heading", { name: "Identidade do tenant" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Conexão" })).toBeVisible();
+  expect(screen.getByRole("textbox", { name: "Nome do tenant" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Salvar tenant" })).toBeVisible();
 });
