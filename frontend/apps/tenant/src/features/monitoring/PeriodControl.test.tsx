@@ -65,6 +65,18 @@ test("keeps the applied period while custom dates are invalid or exceed the limi
   expect(onChange).not.toHaveBeenCalled();
 });
 
+test("reports native partial date input as invalid without applying it", () => {
+  const onChange = vi.fn();
+  render(<PeriodControl value={{ kind: "7d" }} timeZone="UTC" maxDays={30} language="en" onChange={onChange} />);
+  fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+  const start = screen.getByLabelText("Start date");
+  fireEvent.change(start, { target: { value: "2026-03-08" } });
+  Object.defineProperty(start, "validity", { configurable: true, value: { badInput: true } });
+  fireEvent.change(start, { target: { value: "" } });
+  expect(screen.getByRole("alert")).toHaveTextContent("Enter valid calendar dates");
+  expect(onChange).not.toHaveBeenCalled();
+});
+
 test("shows all period labels in Portuguese", () => {
   render(<PeriodControl value={{ kind: "7d" }} timeZone="UTC" maxDays={30} language="pt-BR" onChange={vi.fn()} />);
   expect(screen.getByRole("group", { name: "Período do histórico" })).toBeInTheDocument();

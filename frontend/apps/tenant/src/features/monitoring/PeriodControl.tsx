@@ -27,9 +27,13 @@ export function PeriodControl({ value, timeZone, maxDays, language, onChange }: 
     }
   }, [value.kind, value.kind === "custom" ? value.startDate : "", value.kind === "custom" ? value.endDate : ""]);
 
-  const changeDate = (field: "startDate" | "endDate", date: string) => {
+  const changeDate = (field: "startDate" | "endDate", date: string, badInput: boolean) => {
     const candidate = { ...draft, [field]: date };
     setDraft(candidate);
+    if (badInput) {
+      setError(text.invalid);
+      return;
+    }
     if (!candidate.startDate || !candidate.endDate) {
       setError(text.incomplete);
       return;
@@ -50,8 +54,8 @@ export function PeriodControl({ value, timeZone, maxDays, language, onChange }: 
       <Button variant={customSelected ? "contained" : "outlined"} aria-pressed={customSelected} onClick={() => setCustomSelected(true)}>{text.custom}</Button>
     </ButtonGroup>
     {customSelected && <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-      <TextField label={text.start} type="date" value={draft.startDate} onChange={event => changeDate("startDate", event.target.value)} slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: draft.endDate || undefined } }} />
-      <TextField label={text.end} type="date" value={draft.endDate} onChange={event => changeDate("endDate", event.target.value)} slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: draft.startDate || undefined } }} />
+      <TextField label={text.start} type="date" value={draft.startDate} onChange={event => changeDate("startDate", event.target.value, event.target.validity.badInput)} slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: draft.endDate || undefined } }} />
+      <TextField label={text.end} type="date" value={draft.endDate} onChange={event => changeDate("endDate", event.target.value, event.target.validity.badInput)} slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: draft.startDate || undefined } }} />
     </Stack>}
     {customSelected && error && <Typography role="alert" color="error" variant="body2">{error}</Typography>}
   </Stack>;

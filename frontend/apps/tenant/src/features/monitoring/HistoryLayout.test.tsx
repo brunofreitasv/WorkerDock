@@ -11,6 +11,13 @@ test("places screen filters and clear action in a labeled surface", () => {
   expect(onClear).toHaveBeenCalledOnce();
 });
 
+test("uses a Portuguese default clear label when the page omits clearLabel", () => {
+  const onClear = vi.fn();
+  render(<HistoryFilters title="Filtros" language="pt-BR" onClear={onClear}><input aria-label="Estado" /></HistoryFilters>);
+  fireEvent.click(screen.getByRole("button", { name: "Limpar filtros" }));
+  expect(onClear).toHaveBeenCalledOnce();
+});
+
 test("places refresh, updated time, rows and pagination in a separate results surface", () => {
   const onRefresh = vi.fn();
   render(<HistoryResults title="Results" updatedAt="Updated: 12:00" refreshLabel="Refresh" onRefresh={onRefresh} footer={<span>Page 1</span>}><span>Row 1</span></HistoryResults>);
