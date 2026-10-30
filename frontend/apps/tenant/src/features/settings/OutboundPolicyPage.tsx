@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Checkbox, FormControlLabel, MenuItem, Paper, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Checkbox, FormControlLabel, MenuItem, Paper, Stack, TextField, Typography } from "@mui/material";
 import { ApiError, mutate, read } from "../../api/client";
 import type { Labels } from "../../../../../packages/ui/src/preferences";
 
@@ -23,19 +23,25 @@ export function OutboundPolicyPage({ t }: { t: Labels }) {
     try { const next = await mutate<Policy>(`/api/settings/egress/${name}`, "PUT", { hosts: hostValues, ports: portValues, privateCidrs: cidrValues, allowHttp }, etag); setPolicy(next); setEtag('"' + next.version + '"'); setSaved(true); setError(""); setInvalid(false); }
     catch (cause) { setError(cause instanceof ApiError && cause.status === 412 ? t.stale : t.requestError); }
   };
-  return <Paper variant="outlined" sx={{ p: 3, maxWidth: 720 }}><Stack spacing={2}>
+  return <Paper component="section" aria-label={t.outboundSettings} variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: 760 }}><Stack spacing={2}>
     <Typography component="h2" variant="h6">{t.outboundSettings}</Typography>
     <Typography color="text.secondary">{t.outboundSettingsHelp}</Typography>
     <TextField select label={t.policyName} value={name} onChange={e => setName(e.target.value)}><MenuItem value="tenant-jobs">tenant-jobs</MenuItem><MenuItem value="tenant-alerts">tenant-alerts</MenuItem></TextField>
     {error && <Alert severity="error" action={<Button color="inherit" onClick={() => load()}>{t.reload}</Button>}>{error}</Alert>}
     {saved && <Alert severity="success">{t.saved}</Alert>}
     {policy && <>
+      <Box component="section" aria-label={t.allowedHosts} sx={{ display: "grid", gap: 2 }}>
+      <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>{t.allowedHosts}</Typography>
       <TextField multiline minRows={2} label={t.allowedHosts} helperText={invalid && !validHosts ? t.validation : t.allowedHostsHelp} error={invalid && !validHosts} value={hosts} onChange={e => setHosts(e.target.value)} />
       <TextField label={t.allowedPorts} helperText={invalid && !validPorts ? t.validation : undefined} error={invalid && !validPorts} value={ports} onChange={e => setPorts(e.target.value)} />
+      </Box>
+      <Box component="section" aria-label={t.privateCidrs} sx={{ display: "grid", gap: 2 }}>
+      <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>{t.privateCidrs}</Typography>
       <TextField multiline minRows={2} label={t.privateCidrs} helperText={invalid && !validCidrs ? t.validation : t.privateCidrsHelp} error={invalid && !validCidrs} value={cidrs} onChange={e => setCidrs(e.target.value)} />
       <FormControlLabel control={<Checkbox checked={allowHttp} onChange={e => setAllowHttp(e.target.checked)} />} label={t.allowHttp} />
       <Typography variant="body2" color="text.secondary">{t.hardDeniedNotice}</Typography>
-      <Button variant="contained" onClick={save} disabled={!etag}>{t.save}</Button>
+      </Box>
+      <Button variant="contained" onClick={save} disabled={!etag} sx={{ alignSelf: { xs: "stretch", sm: "flex-start" } }}>{t.save}</Button>
     </>}
   </Stack></Paper>;
 }

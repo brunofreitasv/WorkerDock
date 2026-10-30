@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Alert, Box, Button, CircularProgress, Paper, Stack, TextField } from "@mui/material";
+import { Alert, Box, Button, CircularProgress, Paper, Stack, TextField, Typography } from "@mui/material";
 import { ApiError, mutate } from "../../api/client";
 import { timeZones, type Labels } from "@workerdock/ui";
 import type { TenantSettings, TenantSettingsSnapshot } from "./useTenantSettings";
@@ -48,7 +48,8 @@ export function TenantSettingsForm({ t, current, loading, error: loadError, relo
   };
 
   return (
-    <Paper variant="outlined" sx={{ p: 3, maxWidth: 620 }}>
+    <Paper component="section" aria-label={t.tenantConfiguration} variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: 760 }}>
+      <Typography component="h2" variant="h6" sx={{ mb: 3 }}>{t.tenantConfiguration}</Typography>
       {(error || (loadError && !current)) && (
         <Alert severity="error" action={<Button color="inherit" onClick={reload}>{t.reload}</Button>} sx={{ mb: 2 }}>
           {error || t.requestError}
@@ -62,7 +63,7 @@ export function TenantSettingsForm({ t, current, loading, error: loadError, relo
             <TextField label={t.displayTimeZone} value={zone} onChange={(e) => setZone(e.target.value)} error={invalid && !timeZones.includes(zone)} helperText={invalid && !timeZones.includes(zone) ? t.invalidZone : undefined} select slotProps={{ select: { native: true } }}>
               {timeZones.map((value) => <option key={value} value={value}>{value}</option>)}
             </TextField>
-            <Button type="submit" variant="contained" disabled={busy || !current.etag} sx={{ alignSelf: "flex-start" }}>{busy ? t.loading : t.save}</Button>
+            <Button type="submit" variant="contained" disabled={busy || !current.etag} sx={{ alignSelf: { xs: "stretch", sm: "flex-start" } }}>{busy ? t.loading : t.save}</Button>
           </Stack>
         </Box>
       )}
