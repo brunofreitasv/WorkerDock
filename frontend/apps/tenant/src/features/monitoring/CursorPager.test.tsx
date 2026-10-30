@@ -17,6 +17,7 @@ test("enables both directions when page history and a next cursor exist", () => 
 test("shows pager labels in English", () => {
   render(<CursorPager previousCount={0} nextCursor="cursor" language="en" onPrevious={vi.fn()} onNext={vi.fn()} />);
   expect(screen.getByRole("navigation", { name: "History pages" })).toBeInTheDocument();
+  expect(screen.getByRole("contentinfo", { name: "History pages" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
   expect(screen.getByText("Page 1")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();

@@ -17,6 +17,11 @@ test("shows all period labels in English", () => {
   expect(screen.getByRole("button", { name: "Last 7 days" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Last 30 days" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Custom" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("Start date")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("End date")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Last 7 days" })).toHaveClass("MuiButton-contained");
+  fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+  expect(screen.getByRole("button", { name: "Custom" })).toHaveClass("MuiButton-contained");
   expect(screen.getByLabelText("Start date")).toBeInTheDocument();
   expect(screen.getByLabelText("End date")).toBeInTheDocument();
 });
@@ -37,6 +42,7 @@ test("allows a custom range to be entered from a preset and emits its UTC range"
   fireEvent.change(start, { target: { value: "2026-03-08" } });
   expect(start).toHaveValue("2026-03-08");
   expect(onChange).not.toHaveBeenCalled();
+  expect(screen.getByRole("alert")).toHaveTextContent("Enter both dates");
 
   fireEvent.change(screen.getByLabelText("End date"), { target: { value: "2026-03-09" } });
   expect(onChange).toHaveBeenLastCalledWith({ kind: "custom", startDate: "2026-03-08", endDate: "2026-03-09" });
@@ -46,6 +52,19 @@ test("allows a custom range to be entered from a preset and emits its UTC range"
   });
 });
 
+test("keeps the applied period while custom dates are invalid or exceed the limit", () => {
+  const onChange = vi.fn();
+  render(<PeriodControl value={{ kind: "7d" }} timeZone="UTC" maxDays={2} language="en" onChange={onChange} />);
+  fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+  fireEvent.change(screen.getByLabelText("Start date"), { target: { value: "2026-03-09" } });
+  fireEvent.change(screen.getByLabelText("End date"), { target: { value: "2026-03-08" } });
+  expect(screen.getByRole("alert")).toHaveTextContent("Start date must not follow end date");
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("End date"), { target: { value: "2026-03-12" } });
+  expect(screen.getByRole("alert")).toHaveTextContent("2 days");
+  expect(onChange).not.toHaveBeenCalled();
+});
+
 test("shows all period labels in Portuguese", () => {
   render(<PeriodControl value={{ kind: "7d" }} timeZone="UTC" maxDays={30} language="pt-BR" onChange={vi.fn()} />);
   expect(screen.getByRole("group", { name: "Período do histórico" })).toBeInTheDocument();
@@ -53,6 +72,9 @@ test("shows all period labels in Portuguese", () => {
   expect(screen.getByRole("button", { name: "Últimos 7 dias" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Últimos 30 dias" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Personalizado" })).toBeInTheDocument();
-  expect(screen.getByLabelText("Data inicial")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Data inicial")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Personalizado" }));
+  fireEvent.change(screen.getByLabelText("Data inicial"), { target: { value: "2026-03-08" } });
+  expect(screen.getByRole("alert")).toHaveTextContent("Informe as duas datas");
   expect(screen.getByLabelText("Data final")).toBeInTheDocument();
 });
