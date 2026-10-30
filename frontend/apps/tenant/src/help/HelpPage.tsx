@@ -36,7 +36,7 @@ function DocumentationRecovery({ language, onNavigate }: { language: Language; o
     noResults: "Nenhum documento corresponde à sua pesquisa.",
   };
   const visibleTopics = query.trim() ? results.map(result => result.topic) : helpTopics;
-  return <Box component="main" sx={{ width: "100%", maxWidth: 1120, mx: "auto", px: { xs: 2, sm: 3 }, pb: 5 }}>
+  return <Box sx={{ width: "100%", maxWidth: 1120, mx: "auto", px: { xs: 2, sm: 3 }, pb: 5 }}>
     <Typography component="h1" variant="h4" sx={{ mb: 1 }}>{labels.title}</Typography>
     <Typography role="alert" color="text.secondary" sx={{ mb: 1 }}>{copy.missing}</Typography>
     <Typography color="text.secondary" sx={{ mb: 3 }}>{copy.description}</Typography>

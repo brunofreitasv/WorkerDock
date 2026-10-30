@@ -33,7 +33,7 @@ export function DocumentationHome({ language, canManage, onNavigate }: Props): R
   );
 
   return (
-    <Box component="main" sx={{ width: "100%", maxWidth: 1120, mx: "auto", px: { xs: 2, sm: 3 }, pb: 5 }}>
+    <Box sx={{ width: "100%", maxWidth: 1120, mx: "auto", px: { xs: 2, sm: 3 }, pb: 5 }}>
       <Box sx={{ maxWidth: 760, mb: 3 }}>
         <Typography component="h1" variant="h3" sx={{ fontSize: { xs: "2rem", sm: "2.5rem" }, fontWeight: 700, mb: 1 }}>{copy.title}</Typography>
         <Typography color="text.secondary" sx={{ fontSize: "1.05rem", lineHeight: 1.65 }}>{copy.intro}</Typography>

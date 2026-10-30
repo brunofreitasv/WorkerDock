@@ -13,7 +13,7 @@ describe("tenant Documentation home", () => {
     render(<HelpPage language={language} canManage onNavigate={navigate} />);
     expect(screen.getByRole("heading", { name: title, level: 1 })).toBeTruthy();
     for (const shortcut of shortcuts) expect(screen.getAllByRole("link", { name: new RegExp(shortcut, "i") }).length).toBeGreaterThan(0);
-    const groupSections = [...document.querySelectorAll('main section[aria-labelledby^="documentation-group-"]')];
+    const groupSections = [...document.querySelectorAll('section[aria-labelledby^="documentation-group-"]')];
     expect(groupSections.map(section => section.querySelector("h2")?.textContent)).toEqual([
       language === "en" ? "Start here" : "Comece aqui",
       language === "en" ? "Operate and monitor" : "Operação e monitoramento",
