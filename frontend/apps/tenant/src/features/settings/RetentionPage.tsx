@@ -108,10 +108,10 @@ export default function RetentionPage() {
   if (loading) return <Box role="status" aria-label="Loading retention settings" sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>;
 
   return (
-    <Box component="main" sx={{ maxWidth: 760, mx: 'auto', p: { xs: 2, md: 4 } }}>
+    <Box component="section" aria-label="Retention and archive" sx={{ maxWidth: 760 }}>
       <Stack spacing={3}>
         <Box>
-          <Typography variant="h4" component="h1">Retention and archive</Typography>
+          <Typography variant="h6" component="h2">Retention and archive</Typography>
           <Typography color="text.secondary" sx={{ mt: 1 }}>Choose how long WorkerDock keeps logs, execution history and audit records.</Typography>
         </Box>
         {error && <Alert severity="error" role="alert">{error}</Alert>}
@@ -119,6 +119,8 @@ export default function RetentionPage() {
         <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
           <Box component="form" onSubmit={save}>
             <Stack spacing={3}>
+              <Box component="section" aria-label="Retention periods" sx={{ display: 'grid', gap: 2 }}>
+                <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>Retention periods</Typography>
               {fields.map(field => (
                 <TextField
                   key={field.key}
@@ -132,7 +134,9 @@ export default function RetentionPage() {
                   slotProps={{ htmlInput: { min: 1, max: 3650, step: 1, 'aria-label': `${field.label} retention in days` } }}
                 />
               ))}
-              <Box>
+              </Box>
+              <Box component="section" aria-label="Archive" sx={{ display: 'grid', gap: 2 }}>
+                <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>Archive</Typography>
                 <FormControlLabel
                   control={<Checkbox checked={policy.archiveBeforeDelete} onChange={event => {
                     setSaved(false);
@@ -143,7 +147,6 @@ export default function RetentionPage() {
                 <Typography variant="body2" color="text.secondary" sx={{ ml: 4.5 }}>
                   This controls new deletions. Archive retention below also applies to archive files already created. The location is administrator-configured and is not available here.
                 </Typography>
-              </Box>
               <TextField
                 type="number"
                 required={policy.archiveBeforeDelete}
@@ -154,8 +157,9 @@ export default function RetentionPage() {
                 onChange={event => updateDays('archiveDays', event.target.value)}
                 slotProps={{ htmlInput: { min: policy.archiveBeforeDelete ? 1 : 0, max: 3650, step: 1, 'aria-label': 'Archive retention in days' } }}
               />
-              <Box>
-                <Button type="submit" variant="contained" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>
+              </Box>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
+                <Button type="submit" variant="contained" disabled={saving} sx={{ width: { xs: '100%', sm: 'auto' } }}>{saving ? 'Saving…' : 'Save changes'}</Button>
               </Box>
             </Stack>
           </Box>
