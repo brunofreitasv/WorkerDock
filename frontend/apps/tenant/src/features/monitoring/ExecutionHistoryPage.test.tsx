@@ -155,3 +155,23 @@ test("keeps days and time in durations over 24 hours", async () => {
   const table = await screen.findByRole("table", { name: "Execution history" });
   expect(within(table).getByText("1d 02:03:04")).toBeVisible();
 });
+
+test("groups filters and results, and Clear restores the default query", async () => {
+  const user = userEvent.setup();
+  const requests: URL[] = [];
+  vi.mocked(read).mockImplementation(async path => { requests.push(requestUrl(path)); return page(); });
+  render(<ExecutionHistoryPage language="en" timeZone="UTC" onExecution={vi.fn()} />);
+  const filters = screen.getByRole("region", { name: "Filters" });
+  const results = screen.getByRole("region", { name: "Results" });
+  expect(within(filters).getByRole("button", { name: "Last 7 days" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(results).getByRole("button", { name: "Refresh" })).toBeVisible();
+  expect(within(results).getByText("Scroll horizontally to view all columns.")).toBeInTheDocument();
+  expect(within(filters).queryByRole("button", { name: "Refresh" })).not.toBeInTheDocument();
+  await user.type(within(filters).getByRole("textbox", { name: "Search executions" }), "Nightly");
+  await user.click(within(filters).getByRole("button", { name: "Last 30 days" }));
+  await user.click(within(filters).getByRole("button", { name: "Clear filters" }));
+  await waitFor(() => expect(requests.at(-1)?.searchParams.get("search")).toBeNull());
+  expect(within(filters).getByRole("textbox", { name: "Search executions" })).toHaveValue("");
+  expect(within(filters).getByRole("button", { name: "Last 7 days" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByText("Page 1")).toBeVisible();
+});

@@ -83,3 +83,20 @@ test("does not crash when the event-type endpoint returns an unexpected object",
   expect(screen.queryByRole("option", { name: "active" })).not.toBeInTheDocument();
   expect(screen.getByText("No audit events match this filter.")).toBeVisible();
 });
+
+test("groups audit filters and results, and Clear restores the default query", async () => {
+  requests.length = 0;
+  const user = userEvent.setup();
+  vi.mocked(read).mockImplementation(async path => response(path));
+  render(<AuditPage language="en" timeZone="UTC" />);
+  const filters = screen.getByRole("region", { name: "Filters" });
+  const results = screen.getByRole("region", { name: "Results" });
+  expect(within(results).getByRole("button", { name: "Refresh" })).toBeVisible();
+  expect(within(results).getByText("Scroll horizontally to view all columns.")).toBeInTheDocument();
+  await user.type(within(filters).getByRole("textbox", { name: "Search audit" }), "actor");
+  await user.click(within(filters).getByRole("button", { name: "Last 30 days" }));
+  await user.click(within(filters).getByRole("button", { name: "Clear filters" }));
+  await waitFor(() => expect(requests.filter(url => url.pathname === "/api/audit").at(-1)?.searchParams.get("search")).toBeNull());
+  expect(within(filters).getByRole("textbox", { name: "Search audit" })).toHaveValue("");
+  expect(within(filters).getByRole("button", { name: "Last 7 days" })).toHaveAttribute("aria-pressed", "true");
+});

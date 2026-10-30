@@ -84,3 +84,21 @@ test("keeps days and time in durations over 24 hours", async () => {
   const table = await screen.findByRole("table", { name: "Job execution history" });
   expect(within(table).getByText("1d 02:03:04")).toBeVisible();
 });
+
+test("groups job filters and results, and Clear restores the default query", async () => {
+  const user = userEvent.setup();
+  const requests: URL[] = [];
+  vi.mocked(read).mockImplementation(async path => { requests.push(url(path)); return response([execution("execution-1", "Succeeded")], null); });
+  render(<JobHistoryTable jobId="job-1" language="en" timeZone="UTC" />);
+  const filters = screen.getByRole("region", { name: "Filters" });
+  const results = screen.getByRole("region", { name: "Results" });
+  expect(within(results).getByRole("button", { name: "Refresh" })).toBeVisible();
+  expect(within(results).getByText("Scroll horizontally to view all columns.")).toBeInTheDocument();
+  expect(await within(results).findByText(/^Updated:/)).toBeVisible();
+  await user.click(within(filters).getByRole("button", { name: "Last 30 days" }));
+  await user.click(within(filters).getByRole("combobox", { name: "Status" }));
+  await user.click(screen.getByRole("option", { name: "Failed" }));
+  await user.click(within(filters).getByRole("button", { name: "Clear filters" }));
+  await waitFor(() => expect(requests.at(-1)?.searchParams.get("state")).toBeNull());
+  expect(within(filters).getByRole("button", { name: "Last 7 days" })).toHaveAttribute("aria-pressed", "true");
+});
