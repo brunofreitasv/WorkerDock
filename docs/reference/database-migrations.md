@@ -1,5 +1,7 @@
 # Database migrations and verification
 
+A migration is a numbered database change. This page explains which changes are in the tenant manifest, how the script checks them, and why a backup is needed before rollback. For commands, use [SQL setup](../how-to/setup-sql-server.md).
+
 Use [Set up SQL Server](../how-to/setup-sql-server.md) for current tenant database
 provisioning, migration, runtime identity, rollback, and SQL integration test
 procedures. The Control Center uses protected files and has no SQL database,
@@ -8,13 +10,15 @@ or import command. See [Control Center](../how-to/configure-control-center.md).
 The [database object reference](database-objects.md) lists current
 tenant migration objects and test-only SQL fixtures.
 
+## Current manifest
+
 Tenant schema history is defined by `database/tenant/manifest.json`, which
 contains the `0001_initial` baseline, `0002_template_catalog_registration`,
-`0003_job_failure_policy`, and `0004_attempt_failure_diagnostics`.
-Apply the manifest through `0004_attempt_failure_diagnostics` to a new
+`0003_job_failure_policy`, `0004_attempt_failure_diagnostics`, and `0005_job_review_hold`.
+Apply the manifest through `0005_job_review_hold` to a new
 tenant database with `scripts/Invoke-TenantMigration.ps1`, or run
 `database/tenant/current-state.sql` against a fresh empty database. The snapshot
-includes all four migrations. Migration `0002` is also safe for a database already
+includes all five migrations. Migration `0002` is also safe for a database already
 at `0001_initial`; it updates the catalog metadata trigger so the Web host can
 register trusted built-in template descriptors. Neither path upgrades schemas
 older than this baseline. In SSMS, run
@@ -23,10 +27,12 @@ the complete rendered snapshot with SQLCMD mode enabled and preserve its
 No tenant
 databases are deployed, so the project provides no upgrade converter.
 
+## Apply with the migration script
+
 The migration script verifies checksums, requires SQL Server 2022 or newer and
 compatibility level 160, records each applied migration in `SchemaHistory`, and binds a
 database to its configured stable instance ID. Supply the target
-`0004_attempt_failure_diagnostics`, existing `-RuntimePrincipal`, separate migration credential,
+`0005_job_review_hold`, existing `-RuntimePrincipal`, separate migration credential,
 database script root, and reviewed Web assembly directory. Use `-InitialSetup`
 to generate a GUID for a fresh database, then save it for `Tenant.InstanceId`;
 for reuse, supply that same GUID with `-InstanceId`. The selected runtime
@@ -39,6 +45,8 @@ The baseline includes dynamic plans and execution snapshots as part of the
 fresh schema. Dynamic values are pinned to job revisions and accepted execution
 context; see [execution guarantees](execution-guarantees.md).
 
+## Rollback and tests
+
 Rollback is available only for an empty fresh-install database and may refuse
 when user data exists. Stop tenant web and runtime processes, take and verify a
 backup, and follow the setup guide. Never bypass the guard.
@@ -49,10 +57,10 @@ databases; target-template tests also require a distinct restricted runtime
 login. The setup guide lists the exact environment variables and test command.
 A missing SQL configuration is reported as
 `SQL_TEST_BLOCKED`; memory tests do not verify SQL persistence, migration
-execution, runtime grants, or cluster behavior.
+execution, runtime grants, or SQL-backed recovery.
 
 The runtime service, direct SQL work model, and operator boundaries are
 described in [architecture](architecture.md) and
 [execution guarantees](execution-guarantees.md).
 
-Migration `0004_attempt_failure_diagnostics` adds bounded, policy-filtered failure diagnostics per attempt. They are archived with the attempt and cascade-delete when execution retention purges that attempt. Existing attempts have no diagnostics. Apply all manifest migrations through `0004_attempt_failure_diagnostics` before starting the updated runtime.
+Migration `0004_attempt_failure_diagnostics` adds bounded, policy-filtered failure diagnostics per attempt. They are archived with the attempt and cascade-delete when execution retention purges that attempt. Existing attempts have no diagnostics. Migration `0005_job_review_hold` adds the job review-hold setting. Apply all manifest migrations through `0005_job_review_hold` before starting the updated runtime.

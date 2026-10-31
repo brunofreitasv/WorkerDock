@@ -1,22 +1,20 @@
 # Release fault and security matrix
 
-This matrix distinguishes the last recorded portable regression coverage from live infrastructure evidence. A passing memory/process test is not SQL, IIS, or Entra certification. See [release evidence](release-evidence.md) for the verification date and commands.
+Use this matrix with the [release checklist](release-checklist.md). For **each candidate**, record a real result and artifact in [release evidence](release-evidence.md). No row is passed merely because a unit test or memory demo passed.
 
-| Acceptance clause | Regression evidence | Last recorded result | Limit / remaining evidence |
-|---|---|---|---|
-| At-least-once recovery, lost publication acknowledgements, stale attempt owners and stop/completion ordering | `PublicationRecoveryTests`, `AttemptLifecycleTests`; `dotnet test WorkerDock.slnx --no-restore -c Release --filter "Store!=Sql"` | PASS in the 384-test non-SQL suite | Persisted Quartz acquisition and process-crash recovery against SQL is NOT RUN. |
-| Worker process containment, lease renewal cutoffs, graceful/infinite stop and saturated capacity | `ExecutionControlTests`, `ContainmentTests` | PASS in the 37-test Windows process suite | Actual OS host suspension, VM pause, and post-resume recovery are NOT RUN. Controlled clocks/signals do not reproduce a suspended host. |
-| Template/capacity policy changes fence stale workers and limit admission | `CapacityPolicyTests` | PASS in the non-SQL suite | `CapacityPolicySqlTests` and SQL lock/transaction races are NOT RUN. |
-| Secret references resolve at use time, rotate between attempts, and remain out of safe output | `SecretBoundaryTests`, `SqlTemplateTests`, `HttpTemplateTests` | PASS with test providers in the non-SQL suite | Production vault identity and live credential rotation are NOT RUN. |
-| HTTP destinations resist non-public addresses, mixed DNS, rebinding, redirects, and TLS mismatch | `HttpTemplateTests` | PASS with controlled resolvers/transport in the non-SQL suite | Production network egress controls remain deployment configuration and must be verified per tenant. |
-| Tenant boundaries protect monitoring and management access | `ControlCenterIsolationTests`, `QuartzTopologyTests`, `AccessPolicyTests` including local OIDC wrong-audience rejection | PASS for the covered in-memory and endpoint policies | Cross-tenant SQL principal/credential permissions and a real Entra token for tenant B against tenant A are NOT RUN. |
-| Archival failure preserves records required for audit and recovery | `ArchiveWriterTests` cover artifact cleanup/integrity; `SqlRetentionService` verifies archive finalization before purge | SQL-backed source-preservation regression NOT RUN | The memory retention adapter does not delete records, so it cannot prove the SQL retention path preserves source rows on archive failure. |
-| Entra ID authentication, role-claim mapping, anonymous mode, and dashboard/management split | `AccessPolicyTests` with local issuer/signing fixtures | PASS for local authentication policy cases | Live Entra discovery, signing-key rollover and tenant registration are NOT RUN. |
-| SQL persistence, transaction rollback, locks, disconnect recovery and schema migration | SQL-marked integration tests and paired migration tests | NOT RUN because no disposable SQL Server 2022+ fixture was configured | Run the `Store=Sql` suite and retain migration/rollback results on the disposable SQL runner. |
-| IIS packaging, service identities, interrupted upgrade, rollback and restore | `tests/DeploymentSmoke.ps1` | PASS for portable script/config/manifest smoke only | Live Windows/IIS/SQL install, interruption, backup/restore and ACL evidence are NOT RUN. |
-| Accessible keyboard flow, visible focus, health without color, responsive layout and en/pt-BR validation | `frontend/e2e/accessibility.spec.ts`; `npm.cmd --prefix frontend run e2e -- accessibility.spec.ts --workers=1` | PASS; 3 browser tests | Automated contrast analysis and assistive-technology review remain outside this focused suite. |
-| Measured multi-tenant SQL-backed workload with safe cleanup and operational evidence | `tests/load/Invoke-Workload.ps1`; `pwsh -NoProfile -File tests/DeploymentSmoke.ps1` parses the runner | Runner committed and syntax checked by CI smoke; workload NOT RUN | Requires a disposable SQL-backed tenant set, configured HTTP workers/fixture, and worker egress rules. See [workload results](workload-results.md). |
+| What can go wrong | Check on the candidate | Evidence to record |
+| --- | --- | --- |
+| A runtime crashes after external work may have started | Run SQL-backed recovery and uncertain-outcome tests; inspect attempt history and review holds. | SQL test output and the observed recovery state. |
+| A child process hangs or ignores stop | Run Windows process tests and a disposable host stop/drain exercise. | Process test output and child-process cleanup observation. |
+| Tenant or job capacity is exceeded | Run capacity tests, then measure bounded concurrent work on a SQL-backed tenant. | Limits configured, observed child count, and queued work. |
+| A secret appears in logs or results | Run secret-boundary tests and test the installed production vault adapter with synthetic credentials. | Redacted output and adapter/identity configuration evidence. |
+| An HTTP job reaches an unapproved address | Run outbound-policy tests and verify deployment egress rules for the tenant. | Denied destinations, allowed hosts, and network-policy evidence. |
+| One tenant gains another tenant's access | Test SQL identities, vault scopes, web roles, and Control Center links across two disposable tenants. | Direct API denials and cross-tenant access results. |
+| Archive storage fails during retention | Fill or deny a disposable archive target and confirm source rows remain. | Before/after SQL counts and archive error state. |
+| Sign-in or management policy is wrong | Run local access-policy tests and a live Entra/IIS role matrix. | Issuer, role, 401/403, callback, and sign-out results. |
+| A migration or restore loses data | Apply the manifest through the current target, test guarded rollback, and restore a verified backup. | Schema history, checksums, backup, and restore results. |
+| A deployment stops halfway | Interrupt a disposable install/upgrade and reconcile or restore it. | Versions, service state, recovery steps, and readiness. |
+| The UI is unusable by keyboard or screen reader | Run browser accessibility checks and a manual assistive-technology review. | Browser output and manual findings. |
+| The target workload overloads a tenant | Run the [workload procedure](workload-results.md) on disposable SQL-backed infrastructure. | Hardware, latency, throughput, failures, and cleanup results. |
 
-## Required live evidence
-
-The following release gates remain open: SQL-backed integration and Quartz recovery; cross-tenant SQL permissions; live host-suspension recovery; Entra sign-in; IIS install/upgrade interruption/restore; and measured workload output. The configured CI workflows are source-controlled, but hosted workflow outcomes are not available from this worktree. Keep these outcomes blocked until the designated disposable environments produce evidence; do not substitute memory tests or parser checks.
+Portable checks can be run with [developer checks](development-checks.md). SQL, Windows/IIS, Entra, restore, and workload rows need their own disposable environments. Mark unavailable checks **NOT RUN**, not **PASS**.

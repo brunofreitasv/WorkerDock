@@ -1,5 +1,7 @@
 # Authentication and access policies
 
+Choose one access mode before deployment: anonymous access for a restricted local environment, signed-in access for everyone in one Entra app, or signed-in access with a manager role. The table shows who can read and who can change settings. For exact keys, use [configuration reference](../reference/configuration.md).
+
 | Deployment configuration | WorkerDock.Read | WorkerDock.Manage |
 | --- | --- | --- |
 | No authentication/role configuration | Anonymous read | Anonymous management |

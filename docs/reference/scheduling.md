@@ -1,5 +1,7 @@
 # Durable schedules and lifecycle
 
+A schedule says when to queue work. The tenant runtime reads due schedules, creates durable executions, and runs them under the saved policy. This page explains the exact timing and recovery rules.
+
 ## Job flow
 
 ```mermaid

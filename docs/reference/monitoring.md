@@ -1,11 +1,21 @@
 # Operator monitoring
 
+Use the dashboard, Jobs, Workers, and execution detail views to see what WorkerDock knows. This page lists the API routes and limits behind those views and explains what an unavailable data source means.
+
+## Views and routes
+
 The operator views read tenant-owned execution, job, schedule, runtime, and audit records. `GET /api/dashboard` and the compatibility alias `GET /api/monitoring` return the dashboard summary. `GET /api/monitoring/jobs` and `GET /api/audit` return keyset-paged summaries; `GET /api/monitoring/executions/{id}` returns an execution, its attempts, and status timeline; `GET /api/monitoring/workers` reports the single tenant runtime status and configured child ceiling. These routes use the normal Read authorization policy. They do not expose configuration JSON, request bodies, connection profiles, secret values, or audit detail payloads.
+
+## Search and page limits
 
 Jobs and audit accept `limit` from 1 through 100 (default 50), an opaque continuation cursor, a UTC range no wider than 90 days, and bounded search filters. Cursor ordering includes a unique ID tie-breaker. Invalid cursors, dates, filters, and page sizes are rejected with HTTP 400. Results are parameterized and server-bounded; worker listings are capped at 200 rows and dashboard summaries at ten recent/upcoming items. These are fixed application bounds. Retention settings are separate and do not change query limits; a shorter retention period can leave fewer historical rows available.
 
 The dashboard distinguishes queued, running, review, success/failure, long-running executions, upcoming schedules, runtime readiness, and child capacity. Execution history displays safe state, timing, certainty, stop flags, allowlisted result codes, and timeline events. Unknown or unavailable stores produce an unavailable response rather than an empty result. The UI refreshes visible views every five seconds, pauses polling while the document is hidden, backs off failed requests, and keeps the last successful timestamp/data marked stale.
 
+## Health endpoints
+
 `GET /health/live` is a minimal liveness response. `GET /health/ready` reports the tenant instance, web/database/schema status, and fresh runtime heartbeat. It returns 503 when readiness is degraded or unavailable. If `Health:CredentialReference` is configured, the endpoint resolves that reference through `ISecretVault` and compares the `X-WorkerDock-Health` header in constant time; without a reference, readiness is unauthenticated. The health credential is endpoint-only and does not create a user session or grant application roles. The web composition currently registers the development vault adapter, which is unavailable unless its development-only environment mapping is explicitly enabled. No production tenant vault integration is included; a live health credential probe is unverified until a trusted provider is integrated and tested. No credential value is stored in application settings.
+
+## Validation boundary
 
 SQL runtime verification requires `WORKERDOCK_TEST_SQL`. When it is unset, database-backed monitoring and live readiness checks remain unverified; a web host without SQL configuration returns unavailable rather than reporting empty or healthy data. A passing memory-mode check does not validate SQL-backed monitoring or deployment readiness.

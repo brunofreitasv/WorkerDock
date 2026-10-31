@@ -1,5 +1,7 @@
 # Configure a tenant and register it in Control Center
 
+Do this after [SQL setup](setup-sql-server.md): give the web app and its one runtime service the **same tenant ID and database**, protect their settings, and start them. Register the tenant in Control Center only if you use one. The sections below list the exact settings.
+
 Each tenant has a fixed instance GUID, one SQL database, a web app, and one runtime service configuration. The configuration examples in `examples/config/` are the authoritative starting point for production JSON files. Protect these files with filesystem ACLs and keep them outside the release package.
 
 ## Tenant settings

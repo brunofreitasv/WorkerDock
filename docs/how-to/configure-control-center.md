@@ -1,5 +1,7 @@
 # Control Center
 
+Use this guide to set up the optional directory of tenants. First choose a protected folder for its state, then configure a stable center ID and approved health-check hosts, then register tenant links. The Control Center does not run jobs or need a SQL database.
+
 The Control Center is an optional ASP.NET Core application with its own React entry point. It keeps tenant links, advisory health observations, and append-only audit metadata in a protected local file journal. It does not create tenants, change tenant configuration, or read tenant jobs. Each link opens the tenant dashboard directly; the tenant's own authentication and authorization still apply.
 
 ## Current setup
@@ -30,9 +32,9 @@ The Control Center uses its own Entra app registration, cookie prefix, data-prot
 
 The current Control Center uses a protected file journal. The repository no
 longer includes the historical SQL schema or an automatic importer. Preserve
-any old database and release backup according to your recovery policy; create
-and configure a current file-backed center separately, then register tenant
-links through its management panel. Tenant SQL migrations and the tenant's two
-Tenant schedules and queued work are managed directly by the tenant runtime service and SQL database.
+any old database and release backup according to your recovery policy. Create
+and configure a file-backed center, then register tenant links through its
+management panel. Tenant schedules and queued work remain in each tenant's
+SQL database and are handled by that tenant's runtime service.
 
 There is no dedicated central Windows service. Host the Control Center web application separately (for example, as its own IIS application); each tenant runtime service continues to operate if the Control Center is unavailable.

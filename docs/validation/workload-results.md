@@ -2,11 +2,25 @@
 
 ## Status
 
-NOT RUN. No disposable multi-tenant SQL Server deployment and workload host were available. The runner uses WorkerDock's create, manual-enable, run, and execution-detail APIs, but SQL-backed execution and monitoring have not been verified here. Do not present repository tests or a memory adapter as real workload measurements.
+**NOT RUN:** No disposable multi-tenant SQL Server deployment and workload host were available. This page is the procedure and evidence form, not a measured result. Repository tests and the memory demo cannot supply workload numbers.
 
-The runner accepts only explicitly disposable deployments, requires anonymous management, and defaults to loopback HTTPS targets. It checks `/api/monitoring` and requires its `InstanceId` to match the configured tenant before creating data. It also requires at least one ready worker advertising `workerdock.http@1.1.0`. Set `AllowRemoteHosts` to `true` only for isolated disposable hosts with trusted TLS. Remote fixture URLs also require an exact `AllowedFixtureHosts` entry; wildcards are rejected. Set `FixtureEgressEnforced` to `true` only after configuring tenant egress restrictions for the exact fixture host and port. The runner's DNS address check is best-effort preflight only: it cannot pin or verify the address later resolved by the Worker/Executor, and it does not prevent DNS rebinding. The worker-side egress policy and network controls are the security boundary. Private/reserved fixture addresses require `AllowPrivateFixtureHost=true` and a fixture host matching the tenant host; link-local and metadata addresses remain unsupported. The read-only fixture preflight requires HTTP 200, does not follow redirects, and does not read the response body. It creates uniquely named `workerdock.http@1.1.0` jobs, with one bounded GET to each configured fixture URL per job. The fixture certificate must be trusted by the Worker/Executor, and the fixture destination must be allowed by the tenant egress policy. It warms exactly one run per tenant, measures one run for each remaining job, and polls terminal state and attempt timestamps. It then disables and archives only jobs created by this invocation. If a create response is ambiguous, it searches for the run-scoped unique job name and records it for cleanup; if it cannot reconcile exactly one job, it fails and reports cleanup as uncertain. On an execution timeout it requests a graceful stop; if the job remains active or stop/status cannot be confirmed after 30 seconds, the job is disabled and left unarchived, and the evidence reports its execution ID for operator review. The runner does not delete executions or tenant data. Each job permits one attempt and sends one GET, so retries are measured but not induced by this workload.
+## Before you run it
 
-This is a fixed-duration HTTP workload. It does not generate mixed job durations, scheduled occurrences, heartbeat delay, or clock-skew measurements. The configured fixture must be a purpose-built bounded endpoint suitable for repeated GET requests. Total concurrent runs across selected tenants are capped at 100. The runner requires PowerShell 7 and a SQL-backed target whose `/api/monitoring/executions/{id}` returns execution details.
+- Use only explicitly disposable SQL-backed tenants. The runner requires anonymous management and PowerShell 7.
+- Prefer loopback HTTPS targets. Use `AllowRemoteHosts=true` only for isolated disposable hosts with trusted TLS.
+- Give each remote fixture an exact `AllowedFixtureHosts` entry; wildcards are rejected. Set `FixtureEgressEnforced=true` only after configuring tenant egress for the exact host and port.
+- The runner's DNS preflight is best effort. Worker/Executor egress rules and network controls must still enforce the destination. Private or reserved fixture addresses require `AllowPrivateFixtureHost=true` and a fixture host matching the tenant host. Link-local and metadata addresses remain unsupported.
+- Use a bounded test endpoint that safely accepts repeated GET requests. Its certificate must be trusted by Worker/Executor. The read-only preflight requires HTTP 200, follows no redirects, and reads no response body.
+- The runner checks each tenant's `/api/monitoring` instance ID and requires a ready worker advertising `workerdock.http@1.1.0` before it creates jobs.
+
+## What the runner does
+
+1. Create uniquely named HTTP jobs for one GET to the configured fixture. Each job allows one attempt.
+2. Warm one run per tenant, then measure one run for each remaining job. Tenant batches respect `ConcurrencyPerTenant`; total concurrent runs across tenants are capped at 100.
+3. Poll execution detail and attempt timestamps. A timeout requests a graceful stop and waits 30 seconds. If work is still active or status cannot be confirmed, leave the job disabled and unarchived and report its execution ID.
+4. Disable and archive only jobs created by this invocation. If a create response is ambiguous, search by the unique run-scoped name. If exactly one job cannot be reconciled, report uncertain cleanup and fail. The runner never deletes execution or tenant data.
+
+This fixed-duration manual-run workload does not induce retries, mixed job durations, scheduled occurrences, heartbeat-delay measurements, or clock-skew measurements. Report those separately. SQL-backed execution and monitoring need actual verification before results can be claimed.
 
 ## Configuration schema
 

@@ -1,6 +1,8 @@
 # Database objects
 
-WorkerDock's only runtime SQL schema is the tenant schema in `database/tenant`. The manifest contains one checksummed fresh-install baseline, `0001_initial`, with a guarded rollback. Apply it to a new tenant database with `scripts/Invoke-TenantMigration.ps1`; do not execute an individual runtime script by hand or edit the baseline. There are no deployed tenant databases and no upgrade converter.
+Use this inventory when you need to find the table or database area that owns a feature. For installing the schema, follow [SQL setup](../how-to/setup-sql-server.md).
+
+WorkerDock's only runtime SQL schema is the tenant schema in `database/tenant`. The manifest contains the checksummed `0001_initial` fresh-install baseline and patches through `0005_job_review_hold`. Apply the full manifest to a new tenant database with `scripts/Invoke-TenantMigration.ps1`; do not execute an individual runtime script by hand or edit the baseline. There are no deployed tenant databases and no upgrade converter.
 
 All tenant-owned objects are under `[workerdock]`. Tenant application connections use the restricted database user that already exists in the target database; setup grants permissions to this selected user. Current Control Center state is held in protected files, not SQL objects, and it has no SQL runtime principal.
 

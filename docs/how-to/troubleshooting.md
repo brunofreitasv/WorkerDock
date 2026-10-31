@@ -1,5 +1,7 @@
 # Troubleshooting
 
+Find the symptom in the table, do the check in the middle column, then use the recovery in the last column. If several things are failing, check `/health/ready`, the runtime service, and SQL Server first.
+
 Start by checking the tenant's `/health/ready` endpoint, Windows service states, application/service logs, SQL connectivity, and system clock synchronization. Do not place credentials, connection strings, SQL text, or request bodies in diagnostic output.
 
 | Symptom | Check | Recovery |

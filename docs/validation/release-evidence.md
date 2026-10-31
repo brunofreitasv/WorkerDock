@@ -1,41 +1,34 @@
-# Release verification evidence
+# Release evidence
 
-Record the exact checkout, tool versions, command, result and artifact location for each candidate. The source and portable checks below are not a live deployment certification.
+**Current status:** No complete release candidate evidence is recorded here. Earlier test runs were for earlier source revisions; they do not certify this checkout. Use the [release checklist](release-checklist.md) and [fault matrix](fault-matrix.md) for each candidate.
 
-## Last recorded verification (2026-10-19)
+## Record one candidate at a time
 
-- Date: 2026-10-19.
-- .NET non-SQL Release tests: `dotnet test WorkerDock.slnx --no-restore -c Release --filter "Store!=Sql"` — PASS; 384 tests (71 unit, 37 Windows process, 276 integration).
-- Frontend unit tests: `npm.cmd --prefix frontend run test -- --run` — PASS; 35 tests.
-- Tenant browser tests: `npm.cmd --prefix frontend run e2e -- --workers=1` — PASS; 20 tests.
-- Control Center browser tests: `npm.cmd --prefix frontend run e2e:center -- --workers=1` — PASS; 2 tests.
-- Focused accessibility browser tests: `npm.cmd --prefix frontend run e2e -- accessibility.spec.ts --workers=1` — PASS; 3 tests covering keyboard flow, visible focus, localized validation, non-color health text and mobile layout.
-- Frontend production build: `npm.cmd --prefix frontend run build` — PASS; tenant and Control Center.
-- Deployment script smoke: `pwsh -File tests/DeploymentSmoke.ps1` — PASS.
-- OSS sample check: `dotnet test tests/WorkerDock.UnitTests/WorkerDock.UnitTests.csproj --no-restore -c Release --filter FullyQualifiedName~SampleTemplateConformanceTests` — PASS; 2 tests. `dotnet build examples/WorkerDock.SampleTemplate/WorkerDock.SampleTemplate.csproj --no-restore -c Release` — PASS.
-- Package attribution: `pwsh -NoProfile -File scripts/Generate-DotNetNotices.ps1` — PASS; 94 locked NuGet packages. `node frontend/scripts/licenses.mjs` — PASS; emits tenant and center production notices. `pwsh -NoProfile -File deploy/Build-Packages.ps1 -Version 0.0.1 -OutputRoot artifacts/packages` — PASS; tenant and center ZIPs built, with attribution files verified in ZIP contents and checksummed manifests. These are disposable verification artifacts, not a release.
-- Patch hygiene: `git diff --check` — PASS; Git reported only line-ending normalization warnings.
-- Fault coverage and evidence boundaries: see [fault matrix](fault-matrix.md); portable test results are separated from SQL/IIS/Entra and host-suspension proofs that remain NOT RUN.
-- SQL-backed tests, disposable IIS installation, Entra sign-in, upgrade interruption, restore, cross-tenant host boundary and measured workload — NOT RUN. A provisioned SQL Server 2022+ fixture and disposable Windows/IIS environment are still required.
-- Production vault integration and secret rotation — NOT RUN; production adapters must first be implemented and installed for the relevant hosts.
-- Hosted GitHub workflows — NOT RUN from this worktree; CI workflow outcomes must be attached to a reviewed revision before release.
+Copy this table for each reviewed candidate. Use **PASS**, **FAIL**, or **NOT RUN** for every check. Include a link or path to the actual output; a command without its result is not evidence.
 
-Current deployments use operator-selected build and deployment tools. Before an explicit tenant migration, record the verified database backup, selected target migration, migration result, released binaries/configuration, readiness checks, and restore evidence. The SQL snapshot path is limited to fresh empty databases; live SQL parity with migrations remains unverified.
+| Item | Record |
+| --- | --- |
+| Source commit and branch | |
+| Build date, operator, and tool versions | |
+| Package names and SHA-256 values | |
+| Tenant migration target and checksums | |
+| Windows, .NET, IIS, SQL Server, and compatibility level | |
+| Frontend tests and build | |
+| .NET unit, process, and integration tests | |
+| Disposable SQL integration and migration tests | |
+| Live tenant and Control Center installation | |
+| Entra sign-in, role enforcement, and anonymous-mode check | |
+| Secret-vault integration and rotation | |
+| Backup, restore, and interrupted-deployment drill | |
+| Fault and security matrix results | |
+| Workload report and hardware | |
+| Open blockers and decision | |
 
-## Candidate evidence to attach
+## What counts as a result
 
-For a release candidate, append the source commit and package checksums, SQL schema version/checksum, supported Windows/IIS/.NET/SQL versions, test runner identity, sanitized logs, backup/restore artifacts, identity-provider test summary, fault-matrix results and workload report. Keep secrets, customer data, and connection strings out of this file and its attachments.
+- For a local code check, record the exact command, exit code, test count, and output artifact.
+- For SQL or IIS, record the disposable environment and observed behavior. Memory-mode or script-parsing results do not count as live SQL or deployment results.
+- For each failure or skipped check, write **FAIL** or **NOT RUN** and why. Keep secrets, customer data, and connection strings out of evidence.
+- For workload measurements, attach the output described in [workload validation](workload-results.md). Do not infer an SLA from a test run.
 
-## Dynamic template values candidate verification (2026-10-20)
-
-- Checkout: `C:\Users\bruno\.codex\worktrees\template-max-properties\WorkerDock 2`, branch `codex/workerdock-final`.
-- `dotnet build WorkerDock.slnx -c Release --no-restore` — PASS; 0 warnings, 0 errors.
-- `dotnet test tests/WorkerDock.UnitTests -c Release --no-build` — PASS; 93 tests.
-- `dotnet test tests/WorkerDock.IntegrationTests -c Release --no-build --filter 'Store!=Sql'` — PASS; 351 tests, including delayed scheduled-date retry, manual override, pre-effect failure and custom schema assertions. A child-process test separately verifies the custom template receives the resolved scalar.
-- `dotnet test tests/WorkerDock.IntegrationTests --no-restore -c Release --filter FullyQualifiedName~DynamicValuesEndToEndTests` — PASS; 3 tests.
-- `dotnet test tests/WorkerDock.ProcessTests -c Release --no-build` — PASS; 48 tests on final run. One initial run timed out waiting for child PIDs; the affected test passed in isolation and the full rerun passed.
-- `npm.cmd --prefix frontend run test -- --run` — PASS; 91 tests.
-- `npm.cmd --prefix frontend run build` — PASS; tenant and Control Center.
-- `npm.cmd --prefix frontend run e2e -- e2e/templates.spec.ts e2e/dynamic-values.spec.ts e2e/job-management.spec.ts e2e/scheduling.spec.ts e2e/accessibility.spec.ts --workers=1` — PASS; 17 tests. Locked frontend dependencies were restored with `npm.cmd --prefix frontend ci` after an incomplete Playwright package tree caused an earlier run to fail; management tests were updated for the Run now confirmation dialog.
-- `git diff --check` — PASS; only line-ending normalization warnings.
-- SQL target fixture test `Dynamic_reference_date_binds_as_sql_date` — NOT RUN. `WORKERDOCK_TEST_SQL`, `WORKERDOCK_TEST_SQL_RUNTIME`, and `WORKERDOCK_TEST_SQL_TARGET_RUNTIME` are unset. SQL-backed validation remains required on a disposable provisioned SQL Server.
+Historical verification notes from October 2026 remain available in Git history. Re-run the checks against the candidate before using them in a release decision.

@@ -1,5 +1,7 @@
 # Configuration reference
 
+Use this page to look up exact setting names and allowed values. For the order to set them up, follow [tenant configuration](../how-to/configure-tenants.md) or [Control Center configuration](../how-to/configure-control-center.md).
+
 Production configuration is normally kept in protected JSON files copied from `examples/config/tenant.example.json`, `worker.example.json` and `center.example.json`. Files are stored under the protected deployment storage and are loaded by the deployment tooling. A .NET environment variable uses double underscore (`__`) for each nested section. Tenant SQL fields are `Tenant:Sql:Host`, `Port`, `Database`, `User` and `PasswordReference`; tenant hosts also require `Tenant:Adapter=Sql` and `Tenant:InstanceId`. The corresponding environment names are `Tenant__Sql__Host`, `Tenant__Sql__Port`, `Tenant__Sql__Database`, `Tenant__Sql__User` and `Tenant__Sql__PasswordReference`.
 
 `WORKERDOCK_DEVELOPMENT_VAULT=1` enables the explicitly mapped environment-backed development secret provider; it is not a production vault integration. The tenant hosts currently register this development provider, which otherwise resolves no secrets. A production deployment must register its own `ISecretVault` adapter in every process that needs one. The Control Center rejects a missing production adapter at startup. See [secret integration](secrets.md).

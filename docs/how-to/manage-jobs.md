@@ -1,16 +1,24 @@
 # Manage jobs
 
+For a first job, follow this path: **Jobs → Create job → choose a template → fill in its settings → review the policy → save a disabled draft → enable → Run now**. Open that job's detail page to see its result and history. The rest of this page explains editing, schedules, SQL/HTTP fields, and what each control does.
+
+## Find and edit a job
+
 Open **Jobs** to see the durable inventory of current jobs. Use the view selector for Enabled, Disabled, or Archived, and search by job name. The selected view, search, and page are encoded in the route, so they remain available after reload and browser navigation. Select a job name to open its stable detail page; **Create job** starts the guided authoring flow.
 
 Job details show the saved definition, schedule, execution policy, and paginated execution history. Choose **Edit** to change the existing definition; saving uses the job's current ETag and leaves its enabled or disabled state unchanged. If another manager has changed the job, the stale edit is retained for review and must be reconciled with the current server state before saving again. Unsaved changes prompt before discard, and a page reload asks the browser to confirm before leaving.
 
 Use **Delete** to move a job to Archived; its configuration and execution history are retained, and already running work continues under its existing lifecycle. **Restore** returns it to Disabled. Review the settings before explicitly enabling it. Restoring an older archived job does not recreate a schedule that was removed before archive support; the old schedule is shown for deliberate reapplication.
 
+## Create and run a job
+
 Managers create a job through six guided stages under **Jobs**: choose a template, configure it, optionally add a schedule, set execution and missed-work policies, review, and explicitly enable. The form is generated from the installed template's validated JSON Schema and built-in UI hints; it does not execute user-supplied scripts, HTML, UI components, or packages. Unsupported schema controls are not rendered as executable content.
 
 The authoring flow saves a disabled draft before activation. Optional schedules are saved against the current job ETag; activation uses the shared server-side validation for the template, configuration, profile, policy, and schedule. A stale ETag keeps the draft visible for correction. **Run now** submits the accepted job command with an idempotency key; a retry after an uncertain response reuses that key. A successful request shows the execution ID and exposes the stop dialog. The timeout policy includes an explicit **No timeout** option rather than assigning that meaning to zero.
 
 Job details provide pause/resume schedule, disable/enable, duplicate, archive, and stop actions to managers. Duplicate creates a disabled copy that must be reviewed before activation. Pause does not replay paused occurrences; manual runs remain available. Disable closes the start gate and releases held retries. Archive prevents future starts and retries while accepted work retains its existing lifecycle. Schedule deletion requires confirmation and leaves the job available for manual execution. The server enforces management permissions and ETags for every command.
+
+## SQL Server and HTTP fields
 
 The SQL Server form accepts a profile ID, catalog, command kind, SQL text, and parameter metadata. In **Procedure** mode, enter only a procedure name such as `dbo.Job`; add its parameters in the separate parameter list. In **Query** mode, enter the complete statement with `@parameter` placeholders, for example `SELECT * FROM dbo.Orders WHERE ReferenceDate = @Dt_Ref;`, and add a matching parameter row. If invoking a procedure from Query mode, include the complete `EXEC` statement and bind its parameters separately. Configure the manager-only profile under **Settings → SQL profiles**.
 
@@ -22,4 +30,4 @@ The HTTP form exposes method, URL, bounded response handling, query/header/param
 
 Example values for UI walkthroughs should remain synthetic, such as catalog `WorkerDockTest`, command `SELECT 1`, and URL `https://api.example.test/health`. These values are not a live SQL or HTTP acceptance test. To execute a job locally, follow the [SQL Server tutorial](../tutorials/run-with-sql-server.md). Set the host-wide ceiling with `Worker:HostCeiling`; set each job's capacity in the **Policy** step or its job details. Only running attempts count against these limits, and templates have no capacity limit. The disposable SQL integration-test databases are a separate test setup. Playwright browser tests require the Chromium version installed by the frontend package; discovery can be run without the browser using `npm.cmd --prefix frontend run e2e -- --list`.
 
-Schema-generated forms cover only the closed subset described in [custom templates](add-custom-template.md#validated-catalog-and-schema-subset). See [scheduling](../reference/scheduling.md) and [monitoring](../reference/monitoring.md) for the current behavior.
+Schema-generated forms cover only the closed subset described in [template authoring details](../reference/template-authoring.md#validated-catalog-and-schema-subset). See [scheduling](../reference/scheduling.md) and [monitoring](../reference/monitoring.md) for the current behavior.

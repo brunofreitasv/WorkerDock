@@ -4,6 +4,7 @@
 TestResults/
 **/test-results/
 .superpowers/
+docs/superpowers/
 *.user
 *.suo
 .env

@@ -1,10 +1,14 @@
 # Deployment model
 
+One tenant has one web app, one SQL database, and one Windows runtime service that starts bounded child processes. This page explains those deployment boundaries; [deploy production](../how-to/deploy-production.md) gives the procedure.
+
 Follow the [production deployment guide](../how-to/deploy-production.md) for
 application, SQL, and upgrade guidance. Use [tenant configuration](../how-to/configure-tenants.md)
 for process settings and Control Center registration, and [SQL setup](../how-to/setup-sql-server.md)
 for migration, snapshot, and existing runtime-user instructions. Operators choose their
 own build, packaging, and process-management tools.
+
+## Processes
 
 A tenant consists of a Web process and one Windows runtime service. The runtime
 polls SQL for schedules and queued work, then starts bounded execution child
@@ -20,6 +24,8 @@ only running attempts count against host and job capacity. Templates have no
 active capacity limit. Creating jobs or changing job capacity does not install
 another service.
 
+## Production prerequisites
+
 Production readiness remains under validation. The repository does not include a
 production `ISecretVault` integration for the Control Center, and its Production
 host fails startup until a trusted adapter is registered. The tenant runtime and
@@ -30,8 +36,10 @@ vault integration is installed and verified. Complete the
 [release checklist](../validation/release-checklist.md) against disposable Windows and SQL
 infrastructure before live use.
 
+## Database and configuration
+
 Use SQL Server 2022 or newer with a separate database per tenant. Apply the
-`0001_initial` baseline before starting applications. The selected runtime
+manifest through `0005_job_review_hold` before starting applications. The selected runtime
 database user must already exist in the tenant database; setup validates and
 grants that user directly. The current Control Center uses
 its host identity for protected file state and its vault adapter;
@@ -40,6 +48,8 @@ Keep configuration, credentials, and Data Protection keys outside release
 packages, protected by the relevant application identities.
 
 Your deployment process should preserve protected configuration and Data Protection keys across releases. The Worker derives its template catalog digest from the trusted descriptors installed in its package; runtime configuration needs a child ceiling from 1 through 1000. Resolve conflicting tenant instance identities before deploying.
+
+## Readiness
 
 Before opening the application to users, start the Web host and runtime service,
 check `/health/ready`, process states and logs, and verify the runtime heartbeat

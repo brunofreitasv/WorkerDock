@@ -1,32 +1,41 @@
-# Contributing
+# Contributing to WorkerDock
 
-Thanks for contributing to WorkerDock. Keep changes focused, preserve tenant isolation and least privilege, and document operator-visible behavior and limitations.
+Want to change WorkerDock? Start with a small change you can see and check. These steps assume Windows and PowerShell in the repository root.
 
-## Development
+## 1. Get ready
 
-- Install the .NET SDK version pinned in `global.json` and a supported Node.js version for frontend work.
-- Use SQL Server 2022 for database integration work. The in-memory adapter is for development and unit tests only.
-- Follow the numbered, checksummed migration workflow in `database.md`; include paired forward and rollback scripts when a migration permits a safe rollback.
-- Keep secrets, customer data, and real deployment configuration out of source control. Use the placeholder examples under `deploy/config/` as templates only.
-- Keep Quartz-owned tables under Quartz lifecycle/API ownership. Do not edit Quartz persistence rows directly.
-
-Run the relevant checks for your change. Common commands are:
+Install the .NET SDK version in [global.json](global.json) and a compatible maintained Node.js release (the frontend uses Node 24.15.0). Then run:
 
 ```powershell
-dotnet test WorkerDock.slnx
-npm.cmd --prefix frontend run test -- --run
-npm.cmd --prefix frontend run build
-pwsh -File .\tests\DeploymentSmoke.ps1
+dotnet restore WorkerDock.slnx --locked-mode
+npm.cmd --prefix frontend ci
 ```
 
-These commands do not replace live Windows/IIS/SQL, identity-provider, upgrade/restore, security, or measured workload validation. Do not report those as passing unless they were run and evidence was recorded.
+To see the app before editing it, follow the [memory demo](docs/tutorials/run-in-memory.md). It needs no SQL Server and cannot execute jobs.
 
-## Templates and deployment
+## 2. Find the right folder
 
-Template packages are trusted executable code, installed through a worker deployment. A job definition cannot install code or create a Windows service. Implement handlers through the public contracts, honor cancellation and execution deadlines, and log only safe structured values. Do not put secrets, full connection strings, SQL text, or request bodies in logs or Quartz job data. Test failure, cancellation, and uncertain external outcomes.
+| What you want to change | Start here |
+| --- | --- |
+| Tenant screens and forms | `frontend/apps/tenant` |
+| Control Center screens | `frontend/apps/center` |
+| Shared UI pieces | `frontend/packages/ui` |
+| Tenant HTTP API | `src/WorkerDock.Web` |
+| Scheduling and execution | `src/WorkerDock.Worker`, `src/WorkerDock.Runtime`, and `src/WorkerDock.Executor` |
+| Built-in SQL or HTTP templates | `src/WorkerDock.Templates.SqlServer` or `src/WorkerDock.Templates.Http` |
+| Tenant database schema | `database/tenant` |
+| Checks | `tests` and frontend test files |
 
-Use the smallest required permissions. Runtime identities must not have schema-change rights; schema changes use the separate migrator identity. Do not broaden schema compatibility windows without upgrade evidence.
+The [architecture map](docs/reference/architecture.md#deployment-map) shows how these pieces connect.
 
-## Pull requests
+## 3. Make and check one change
 
-Describe the user-visible change, affected boundaries, verification performed, and any unresolved limitations. Link relevant design or operational documentation. Keep sample configuration placeholder-only. Do not include generated packages, secrets, customer data, or unreviewed dependency license material.
+Edit the smallest area that solves the problem. Run the checks for that area in [Check your changes](docs/validation/development-checks.md). If people will see different behavior, update its guide or reference page too. In a pull request, say what changed, what you ran, and what remains unverified.
+
+## Rules that protect users
+
+- Keep passwords, tokens, customer data, and real deployment settings out of the repository and logs.
+- Keep each tenant's data and runtime separate. Runtime database identities must not have schema-change rights.
+- Use the checksummed [tenant migration workflow](docs/reference/database-migrations.md) for schema changes. Do not edit a migration that has already been published.
+- Treat template packages as trusted code installed through deployment. The browser cannot upload code. Follow [Add a custom template](docs/how-to/add-custom-template.md) and test failure, cancellation, and uncertain outcomes.
+- A local build or memory test does not prove live SQL Server, Windows/IIS, sign-in, backup/restore, security, or workload readiness. Use the [release checklist](docs/validation/release-checklist.md) for those claims.

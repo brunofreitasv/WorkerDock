@@ -1,6 +1,12 @@
 # Outbound destination policy
 
+Before a tenant sends HTTP traffic, WorkerDock checks the destination against its approved host, port, and address rules. This page explains those rules; configure only destinations you intend the tenant to contact.
+
+## Default rules
+
 All outbound HTTP requests use `IOutboundPolicy` and `ValidatedConnectionFactory`. Policy names are fixed: `tenant-jobs`, `tenant-alerts` and `central-health`. The default rules allow HTTPS to public addresses on port 443; deployments should supply exact host rules and any required port/private-network exceptions for each name. Unknown policy names, schemes or ports fail closed. Host rules support exact IDN-normalized names and explicit `*.example.test` subdomain entries. Hostnames are lowercased, converted to ASCII IDN form and stripped of a terminal dot before comparison.
+
+## Address checks
 
 The policy resolves DNS immediately before connecting. If any answer is denied, the entire answer set is denied. It rejects empty or oversized answer sets, loopback, unspecified, multicast, link-local, metadata, reserved and documentation ranges, and IPv4-mapped IPv6 forms are normalized before checks. RFC1918 and IPv6 ULA addresses require a matching deployment CIDR allowlist; loopback, metadata and link-local ranges remain hard denied even when a private CIDR is configured. The Azure platform metadata address `168.63.129.16` and IPv4/IPv6 translation ranges are hard denied.
 
@@ -9,5 +15,7 @@ The policy resolves DNS immediately before connecting. If any answer is denied, 
 The HTTP template performs policy preflight before resolving secret headers. The configured client repeats policy checks before transport and at each new connection. This is deliberate defense in depth: a rebinding between checks is denied before any socket is opened. Policy denial returns a fixed safe code, permanent failure and `EffectsMayHaveOccurred=false`; it does not expose a URL, address or resolver exception. Transport failure after a request may have been sent remains uncertain and is eligible for retry only if the job policy permits it.
 
 The policy accepts injectable address resolvers for deterministic tests. Controlled local-server tests inject a separate test policy explicitly, allowing a loopback-only fixture while preserving production loopback denial. Never reuse the test policy in Worker or Executor composition. Private-CIDR allowlists are deployment policy only and cannot override metadata, loopback or link-local hard denials.
+
+## Tenant settings
 
 Tenant egress settings are stored as audited, rowversion-checked revisions for the fixed `tenant-jobs` and `tenant-alerts` policy names. Managers can set bounded host, port, and private-CIDR allowlists and opt into HTTP. The executor receives a server-authored nonsecret settings snapshot for each new attempt; changing settings does not revoke an already issued request. Private destinations require both a listed host and an explicit CIDR. The executor applies immutable hard-denial ranges after loading tenant options, so the dashboard cannot enable loopback, metadata, link-local, translation or reserved destinations. Central-health policy remains deployment-owned.

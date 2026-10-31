@@ -2,12 +2,21 @@
 
 WorkerDock tenant databases require SQL Server 2022 or newer with database compatibility level 160. Provision one separate database for each tenant. The Control Center uses protected files and has no SQL Server requirement.
 
+If you only want to explore the UI, use the [memory demo](../tutorials/run-in-memory.md) and skip this page. To run real jobs, you need one empty tenant database and two identities:
+
+| Name in this guide | What it does |
+| --- | --- |
+| Migration credential | Installs the database objects; use it only for setup. |
+| Runtime database user | Lets the web app and runtime use the database day to day; it must already exist and must not have schema-change rights. |
+
+The normal setup path is to apply the numbered migrations with `scripts/Invoke-TenantMigration.ps1`. The `current-state.sql` snapshot is an alternative for a **new, empty** database only. The sections below show the exact commands and limits.
+
 ## Runtime and test databases
 
 ```mermaid
 flowchart LR
     Operator["Operator chooses a preparation path"]
-    Manifest["0001_initial through 0004_attempt_failure_diagnostics"] --> MigrationScript["Explicit target via Invoke-TenantMigration.ps1"]
+    Manifest["0001_initial through 0005_job_review_hold"] --> MigrationScript["Explicit target via Invoke-TenantMigration.ps1"]
     Snapshot["Fresh-only current-state.sql snapshot"]
     Operator --> MigrationScript
     Operator --> Snapshot
@@ -21,7 +30,7 @@ flowchart LR
 ```
 
 For a new tenant database, apply the checksummed manifest through
-`0004_attempt_failure_diagnostics` using `scripts/Invoke-TenantMigration.ps1`, or apply
+`0005_job_review_hold` using `scripts/Invoke-TenantMigration.ps1`, or apply
 `database/tenant/current-state.sql` to a fresh empty database. Both create the
 same final schema. Migration `0002` lets the Web host promote the two built-in
 catalog placeholders to their trusted descriptors. The snapshot already
@@ -31,7 +40,7 @@ fixture objects in generated disposable databases; never apply them to a
 runtime tenant. SQL behavior remains unverified until run against a disposable
 SQL Server 2022+ instance.
 
-Do not execute `database/tenant/0001_initial.up.sql` directly in SSMS: it is a
+Do not execute `database/tenant/migrations/0001_initial.up.sql` directly in SSMS: it is a
 parameterized migration source, and the migration runner supplies `@InstanceId`.
 For manual setup, use the rendered `current-state.sql` snapshot described below.
 
@@ -98,12 +107,12 @@ $assemblyDirectory = (Resolve-Path 'src/WorkerDock.Web/bin/Release/net10.0').Pat
   -Action Apply `
   -SqlHost '<SQL_SERVER_FQDN>' -Port 1433 -Database '<TENANT_DATABASE>' `
   -Credential $credential -RuntimePrincipal '<TENANT_DATABASE_USER>' -InitialSetup `
-  -TargetMigration '0004_attempt_failure_diagnostics' `
+  -TargetMigration '0005_job_review_hold' `
   -ScriptsRoot (Resolve-Path 'database').Path `
   -AssemblyDirectory $assemblyDirectory
 ```
 
-The manifest contains the `0001_initial` baseline and patches through `0004_attempt_failure_diagnostics`. The script verifies every checksum, schema history, server version, compatibility level, existing runtime database user, and stable tenant instance ID. Save the GUID printed after a successful
+The manifest contains the `0001_initial` baseline and patches through `0005_job_review_hold`. The script verifies every checksum, schema history, server version, compatibility level, existing runtime database user, and stable tenant instance ID. Save the GUID printed after a successful
 initial setup and use it for `Tenant:InstanceId` in Web and runtime
 configuration. For an already initialized tenant, supply that same GUID with
 `-InstanceId` instead of `-InitialSetup`. Keep the migration identity separate
@@ -112,7 +121,7 @@ migration.
 
 `WORKERDOCK_DEVELOPMENT_VAULT` and its explicit secret map are for local Development only. Production must follow the organization's approved protected credential process for the migration identity. The script prompts through a PowerShell credential object; do not place credentials in command lines, shell history or source control.
 
-There are no tenant schema upgrades. A future schema change needs a separately reviewed upgrade design before deployment to any existing tenant database.
+The current manifest applies numbered patches through `0005_job_review_hold`. It does not convert schemas older than the `0001_initial` baseline. Review and back up any initialized database before applying remaining patches.
 
 The migration validates and grants the existing `-RuntimePrincipal` directly.
 It does not create a database user, role, or server login. Use the same
@@ -163,4 +172,4 @@ The fixtures own their generated databases and test objects. Their test-only SQL
 
 See [database object reference](../reference/database-objects.md), [Control Center setup](configure-control-center.md), and [deployment model](../reference/deployment-model.md) for object inventories and runtime design details.
 
-Migration `0004_attempt_failure_diagnostics` adds bounded, policy-filtered failure diagnostics per attempt. They are archived with the attempt and cascade-delete when execution retention purges that attempt. Existing attempts have no diagnostics. Apply all manifest migrations through `0004_attempt_failure_diagnostics` before starting the updated runtime.
+Migration `0004_attempt_failure_diagnostics` adds bounded, policy-filtered failure diagnostics per attempt. They are archived with the attempt and cascade-delete when execution retention purges that attempt. Existing attempts have no diagnostics. Migration `0005_job_review_hold` adds the job review-hold setting. Apply all manifest migrations through `0005_job_review_hold` before starting the updated runtime.

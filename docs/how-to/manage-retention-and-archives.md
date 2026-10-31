@@ -1,5 +1,7 @@
 # Retention and archive operations
 
+Use this page when deciding how long to keep logs, executions, and audit records. Set the policy in the tenant UI; configure an archive folder on the runtime host only if you turn on archiving. Archives are exported records, not database backups. Start with the settings below, then check the archive and failure sections before enabling deletion.
+
 WorkerDock keeps safe execution logs, execution history and audit history for independently configurable periods. The initial policy defaults are 30, 90 and 365 days respectively. Each period accepts an integer from 1 through 3650 days. Archive-before-delete is disabled by default. Archive file retention is configured separately and continues to apply to existing archives after new archiving is disabled; set it to zero to retain archive files indefinitely.
 
 ## Settings API

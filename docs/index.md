@@ -1,48 +1,45 @@
-# WorkerDock documentation
+# WorkerDock docs: start here
 
-Choose a path by what you need to do. WorkerDock groups its documentation into tutorials, how-to guides, reference, and validation. This follows the learning, task, and technical-reference distinctions in the [Diátaxis framework](https://diataxis.fr/), with validation evidence collected separately.
+New to WorkerDock? Follow the first row that matches what you want. You do not need to read every page.
 
-For a visual introduction, start with the [deployment map](reference/architecture.md#deployment-map),
-the [job flow](reference/scheduling.md#job-flow), and the
-[runtime/test database map](how-to/setup-sql-server.md#runtime-and-test-databases).
+| Your goal | Follow this path | You will know it worked when… |
+| --- | --- | --- |
+| See the app | [Run the memory demo](tutorials/run-in-memory.md) | The Jobs page opens at `https://localhost:5001/`. |
+| Run a real job | [Prepare SQL Server](how-to/setup-sql-server.md) → [run with SQL Server](tutorials/run-with-sql-server.md) | The tenant UI and runtime service are running. |
+| Change code | [Start with the contributor guide](../CONTRIBUTING.md) → [run developer checks](validation/development-checks.md) | The checks for your changed area pass. |
+| Install WorkerDock | [Deploy to production](how-to/deploy-production.md) → [configure tenants](how-to/configure-tenants.md) | The deployment checks and live release gates pass. |
 
-## Tutorials: learn by running WorkerDock
+## How the pieces fit
 
-- [Run locally without SQL Server](tutorials/run-in-memory.md): start the disposable development instance and see what the memory adapter can do.
-- [Run locally with SQL Server](tutorials/run-with-sql-server.md): use a dedicated local tenant database and the SQL adapter.
+```mermaid
+flowchart LR
+    UI["Tenant web app<br/>make and inspect jobs"] --> DB[("Tenant SQL Server database<br/>keep jobs and history")]
+    Runtime["Tenant Windows runtime service<br/>schedule and run jobs"] <--> DB
+    Runtime --> Target["Approved SQL or HTTP target"]
+    Center["Optional Control Center<br/>links and health"] -.-> UI
+```
 
-## How-to guides: complete a specific task
+A **tenant** is one independent WorkerDock installation. Its **web app** is where people manage jobs. Its **runtime service** does the scheduled work. Its **database** keeps jobs and history. The optional **Control Center** lists tenants; it does not run their jobs. The memory demo starts only disposable web apps, so it cannot prove real execution.
 
-- [Set up SQL Server](how-to/setup-sql-server.md): create tenant runtime databases and apply migrations; provision disposable test databases separately. The Control Center has no SQL setup.
-- [Deploy to production](how-to/deploy-production.md): build packages and install one tenant runtime service plus the optional Control Center.
-- [Configure tenants](how-to/configure-tenants.md): find tenant settings, service configuration, secret references, and Control Center registration.
-- [Upgrade or restore](how-to/upgrade-and-restore.md).
-- [Add a custom template](how-to/add-custom-template.md).
-- [Configure authentication and role access](how-to/configure-authentication.md).
-- [Configure the Control Center](how-to/configure-control-center.md).
-- [Manage jobs](how-to/manage-jobs.md).
-- [Manage retention and archives](how-to/manage-retention-and-archives.md).
-- [Troubleshoot an instance](how-to/troubleshooting.md).
+## Learn one task at a time
 
-## Reference: look up exact behavior and settings
+| To do this | Read this |
+| --- | --- |
+| Create, edit, run, or archive a job | [Manage jobs](how-to/manage-jobs.md) |
+| Add a template as a developer | [Add a custom template](how-to/add-custom-template.md) |
+| Set up sign-in and roles | [Configure authentication](how-to/configure-authentication.md) |
+| Connect tenants to the Control Center | [Configure the Control Center](how-to/configure-control-center.md) |
+| Keep or export old records | [Manage retention and archives](how-to/manage-retention-and-archives.md) |
+| Update or recover an installation | [Upgrade or restore](how-to/upgrade-and-restore.md) |
+| Find why something failed | [Troubleshoot](how-to/troubleshooting.md) |
 
-- [Configuration keys and locations](reference/configuration.md).
-- [Database objects and script ownership](reference/database-objects.md): fresh-install tenant schema and test fixtures.
-- [Database migration and SQL test details](reference/database-migrations.md).
-- [SQL Server template](reference/sql-template.md) and [HTTP template](reference/http-template.md).
-- [Schedules and job lifecycle](reference/scheduling.md) and [execution guarantees](reference/execution-guarantees.md).
-- [Monitoring](reference/monitoring.md), [observability](reference/observability.md), and [alerts](reference/alerts.md).
-- [Outbound destination policy](reference/outbound-policy.md) and [secret facade](reference/secrets.md).
-- [Deployment model](reference/deployment-model.md) and [third-party notices](reference/third-party-notices-dotnet.md).
+## Look up exact details
 
-## Validation: run checks and review evidence
+- **Setup:** [configuration keys](reference/configuration.md), [deployment model](reference/deployment-model.md), [database migrations](reference/database-migrations.md), and [database objects](reference/database-objects.md).
+- **Jobs:** [SQL template](reference/sql-template.md), [HTTP template](reference/http-template.md), [template authoring details](reference/template-authoring.md), [scheduling](reference/scheduling.md), and [execution guarantees](reference/execution-guarantees.md).
+- **Operations:** [monitoring](reference/monitoring.md), [observability](reference/observability.md), [alerts](reference/alerts.md), [outbound policy](reference/outbound-policy.md), and [secrets](reference/secrets.md).
+- **Architecture and licenses:** [architecture](reference/architecture.md) and the generated [.NET license inventory](reference/third-party-notices-dotnet.md).
 
-- [Local development checks](validation/development-checks.md): run the suites and identify which need SQL Server.
-- [Release checklist](validation/release-checklist.md), [recorded evidence](validation/release-evidence.md), [fault matrix](validation/fault-matrix.md), and [workload procedure](validation/workload-results.md).
+## Before a release
 
-## Design and architecture
-
-- [Architecture and component boundaries](reference/architecture.md).
-- [Single-node runtime service](reference/deployment-model.md): tenant process model, child ceiling, and readiness.
-
-Start with a tutorial or task guide for an end-to-end procedure; use reference pages to inspect behavior, contracts, and design. Memory-mode results do not prove SQL persistence or production readiness. The [release checklist](validation/release-checklist.md) identifies validation that still needs a real deployment.
+Use the [release checklist](validation/release-checklist.md), [recorded evidence](validation/release-evidence.md), [fault matrix](validation/fault-matrix.md), and [workload procedure](validation/workload-results.md). The [developer checks](validation/development-checks.md) explain which checks run without SQL Server and which need a disposable SQL Server.

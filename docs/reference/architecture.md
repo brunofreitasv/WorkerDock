@@ -1,5 +1,7 @@
 # Architecture
 
+Use this map when you need to know which process owns a job, where data is stored, or why the optional Control Center stays separate from tenant work. For a first run, start with the [memory tutorial](../tutorials/run-in-memory.md).
+
 WorkerDock is a self-hosted job platform. Its deployment boundary is a tenant: each tenant has a web application, SQL Server database, and one Windows runtime service. The service launches bounded execution child processes. Tenants may share infrastructure, but shared Windows-host and SQL administrators remain trusted across tenants. The optional Control Center stores tenant directory and health observations in a protected file journal; it does not provision tenants, access their databases, or proxy their management sessions.
 
 ## Deployment map
@@ -30,10 +32,9 @@ identity.
 
 - **Tenant web application (IIS):** serves the dashboard and management/read APIs, authentication, configuration, and audit transactions. It does not execute handlers.
 - **Tenant runtime Windows service:** owns schedule materialization, execution dispatch, alert evaluation and delivery, metric aggregation, and retention. A tenant-scoped named mutex rejects a second runtime instance. Bounded polling reads durable work directly from SQL; a local semaphore enforces the child ceiling.
-- **Execution child:** runs one pinned trusted template attempt in a separately contained process tree. The runtime owns the attempt lease, stop handling, result persistence, and uncertain-outcome review.
-- **Execution child:** performs one attempt or diagnostic run, resolves configured secrets, and invokes a built-in or installed trusted template.
+- **Execution child:** runs one pinned trusted template attempt or diagnostic in a separately contained process tree and resolves configured secrets. The runtime owns the attempt lease, stop handling, result persistence, and uncertain-outcome review.
 - **Control Center:** maintains its own file-backed registry and probes an allowlisted tenant health endpoint using a minimal health credential. The Control Center has no central SQL database, connection, or SQL identity requirement.
-- **Tenant SQL preparation:** operators apply the checksummed manifest through `0002_template_catalog_registration` using `scripts/Invoke-TenantMigration.ps1`, or use `database/tenant/current-state.sql` for a fresh empty database. The `0002` patch also supports databases already at `0001_initial`. Runtime startup does not create schema. The Web host registers its trusted built-in template descriptors in `TemplateCatalog` at startup; the catalog page lists only rows with descriptors. No converter is provided for schemas older than this baseline.
+- **Tenant SQL preparation:** operators apply the checksummed manifest through `0005_job_review_hold` using `scripts/Invoke-TenantMigration.ps1`, or use `database/tenant/current-state.sql` for a fresh empty database. The `0002` patch also supports databases already at `0001_initial`. Runtime startup does not create schema. The Web host registers its trusted built-in template descriptors in `TemplateCatalog` at startup; the catalog page lists only rows with descriptors. No converter is provided for schemas older than this baseline.
 
 Each tenant database contains WorkerDock-owned objects in `[workerdock]`. Job commands, schedules, queued executions, attempts, alert deliveries, runtime heartbeat, audit, and retention records are durable SQL state. The web app writes business commands and audit records; the runtime reads and updates those rows directly under bounded transactions. No broker or secondary work store is used.
 

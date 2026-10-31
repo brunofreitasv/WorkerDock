@@ -1,5 +1,7 @@
 # Secret facade and trusted metadata
 
+Jobs and settings store names of secrets, not their values. A trusted vault adapter resolves a value only in the process that needs it. This page explains that boundary and the safe diagnostic rules.
+
 `ISecretVault` is asynchronous and resolve-only. Logical references select only mappings approved by protected deployment configuration. Provider selection, tenant identity, bootstrap authentication and environment-variable names are never selected by job JSON or browser input. Web APIs and worker supervisors do not resolve job secrets. The contained execution child constructs its adapters only after the parent grants execution permission.
 
 ## Environment development adapter
@@ -39,7 +41,8 @@ dotnet test tests/WorkerDock.IntegrationTests -c Release --filter FullyQualified
 dotnet test tests/WorkerDock.ProcessTests -c Release --filter FullyQualifiedName~Provider_failure_and_rotated_attempts
 ```
 
-The synthetic rotation fixtures inspect safe exception projections, child outcomes, diagnostic files and child command arguments. The complete process suite also checks discarded stdout/stderr and JSON-escaped redaction. No real credentials are test fixtures. See `database.md` for separate live SQL catalog, migration and restricted-grant proofs; memory and Windows process success do not establish those properties.
+The synthetic rotation fixtures inspect safe exception projections, child outcomes, diagnostic files and child command arguments. The complete process suite also checks discarded stdout/stderr and JSON-escaped redaction. No real credentials are test fixtures. See [database migrations](database-migrations.md) for separate live SQL catalog, migration and restricted-grant checks; memory and Windows process success do not establish those properties.
+
 ## Failure diagnostic visibility
 
 Executor redacts known resolved secrets and their JSON-escaped forms before failure diagnostics cross IPC. Redaction is best effort: arbitrary private values returned by SQL or HTTP may be unknown. Use **Hide detailed failure output** to suppress messages, stacks and response content before persistence. Existing Read-authorized execution-detail users can read the remaining policy-appropriate fields; changing a job later does not change its pinned historical revision. Diagnostic text is rendered as text, never HTML.

@@ -1,5 +1,9 @@
 # Job command and manual execution guarantees
 
+A run may be tried again after a crash, so an external action can happen more than once. This page explains what WorkerDock saves, when it retries, and when a person must review an uncertain result.
+
+## Save and accept work
+
 Jobs use immutable revisions. New jobs begin disabled with concurrency limit 1; enabling is an explicit management command. A successful edit appends a revision and requires the prior rowversion through `If-Match`. The configuration GET is restricted to managers and returns an opaque quoted `ETag`; safe command receipts contain only command/target IDs and state. The server creates new job IDs, actor identity and correlation IDs. Built-in templates are registered by the installed Worker packages, and accepted executions pin the job, template, and referenced profile revisions.
 
 An accepted manual run commits one queued execution, its revision, audit event, 24-hour actor/session-and-job-scoped request record, and command receipt in one business transaction. Concurrent retries with the same request key return the original receipt during that window. An expired key may create a new run. The current manual command has no caller payload beyond job ID and request key; the stored request hash protects that input and future payload-bearing commands must compare their full canonical input. The execution idempotency key is separate from the request key and stays stable across attempts. The runtime claims queued rows directly from SQL. WorkerDock promises durable intent and bounded redelivery, not exactly-once external effects. Unknown effects require review unless the job policy explicitly permits replay.
@@ -23,7 +27,7 @@ dotnet run --project src/WorkerDock.Web --urls https://localhost:5001
 
 Use a second PowerShell terminal to request a session-bound CSRF token, then send `Origin: https://localhost:5001` and `X-WorkerDock-CSRF: <token>` on POST/PUT requests. `POST /api/jobs` accepts a revision body with `jobId` set to the empty GUID; the server assigns its ID. `GET /api/jobs/{id}/configuration` returns the edit `ETag`; `PUT /api/jobs/{id}` requires that value in `If-Match`. `POST /api/jobs/{id}/runs` accepts `{ "requestKey": "new-client-key" }` once the job is enabled.
 
-For fresh tenant SQL provisioning, restricted identities, integration test prerequisites, and guarded rollback, follow [Set up SQL Server](../how-to/setup-sql-server.md). Apply the `0001_initial` baseline to a new database; the schema is listed in the [database object reference](database-objects.md).
+For fresh tenant SQL provisioning, restricted identities, integration test prerequisites, and guarded rollback, follow [Set up SQL Server](../how-to/setup-sql-server.md). Apply the manifest through `0005_job_review_hold` to a new database; the schema is listed in the [database object reference](database-objects.md).
 
 ## Durable attempts, retries and stop
 
@@ -92,6 +96,7 @@ effects or a lost outcome acknowledgement never become a fabricated success.
 Status events feed the current [execution monitoring](monitoring.md) timeline.
 Real SQL fences, restart, and migration proofs remain pending as described in
 [database verification](database-migrations.md); memory and real-process tests establish separate facts.
+
 ## Per-attempt failure diagnostics
 
 Execution details expose optional diagnostics beneath the matching attempt to existing Read-authorized users. The execution includes its pinned template version and job revision. Older attempts have no retroactive diagnostic. Diagnostics do not change retry, certainty, or effects semantics and do not appear in broad lists, audit summaries, alerts, or generic logs.

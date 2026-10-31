@@ -1,5 +1,7 @@
 # Alerts
 
+In plain words: an alert rule notices a problem, creates an incident, and can send a webhook. This page explains when that happens, what is stored, and what a webhook receiver must do with retries.
+
 WorkerDock evaluates alert rules against tenant SQL Server data and writes incident and durable delivery rows in the same transaction. The tenant runtime polls bounded batches and claims deliveries with SQL leases. There is no broker.
 
 ## Conditions and evaluation

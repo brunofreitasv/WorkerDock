@@ -1,6 +1,10 @@
 # HTTP template
 
+The built-in HTTP template sends one bounded request per attempt. This page lists the supported fields, outbound checks, safe results, and retry classification. To create a job in the UI, start with [manage jobs](../how-to/manage-jobs.md).
+
 `workerdock.http` version `1.1.0` is the sole supported built-in HTTP template. Worker and Executor use the same immutable descriptor. Worker registers it with the catalog; Executor creates the handler through `ValidatedConnectionFactory` and the deployment outbound policy.
+
+## Request fields
 
 The configuration is bounded and uses camelCase properties: `method`, `url`, `query`, `headers`, `secretHeaders`, `parameters`, `contentType`, `body`, `timeoutSeconds`, `successStatuses`, `idempotencyHeader`, `maxResponseBytes` and `responseMode`. Methods are GET, POST, PUT, PATCH, DELETE and HEAD. URL length is at most 2 KiB; body at most 64 KiB; query keys/values, ordinary headers and parameters are bounded; response bodies are limited to 2 MiB. Empty `successStatuses` means 200–299. `SafeSummary` is the default response mode and retains only status, elapsed milliseconds and byte count. `Discard` returns an empty summary. Neither mode stores or returns response text.
 
@@ -8,11 +12,14 @@ An ordinary header value containing CR/LF or another control character is reject
 
 `parameters` is the only substitution map. Placeholders use `{name}` and the stable execution key uses `{execution.idempotencyKey}`. Query and URL values are percent encoded; JSON body placeholders are JSON escaped and validated as JSON before sending. No environment, process, tenant or arbitrary context values can be interpolated. `idempotencyHeader` is opt-in and carries the supervisor-issued stable execution key; the remote service must enforce idempotency itself.
 
+## Timeouts and retries
+
 Null `timeoutSeconds` inherits the outer attempt deadline. A positive value may shorten that deadline. Zero means no handler timeout and is accepted only when the outer attempt has no finite deadline. A negative value is invalid. Connection establishment remains capped at ten seconds, and request/response size bounds remain in force for an unlimited request. The handler sends exactly one request and never retries. It classifies 408, 425, 429 and 5xx as transient, other non-success responses as permanent, and conservatively marks a lost response after send begins as possibly effective. `Retry-After` delta/date is returned as a bounded hint (at most one day); the execution retry policy decides whether and when another attempt is allowed. The handler never sleeps or repeats the request.
 
 The Executor client disables redirects, proxy discovery, cookies and the default finite `HttpClient.Timeout`. Every new socket is opened to an approved IP address directly, with the actual peer checked before TLS starts. The original URI hostname remains in place for certificate validation and SNI. TLS validation failures are permanent and do not claim a remote HTTP effect. Redirect responses are returned to the caller and never forwarded with credentials to a second destination.
 
 Local tests may inject a purpose-built `IOutboundPolicy` that approves a loopback listener. This test seam is passed explicitly and is not part of production policy configuration; the production policy continues to deny loopback, metadata and link-local destinations.
+
 ## Failure response diagnostics
 
 Failed HTTP attempts expose method, status, media type and response byte count when available in execution details. With detailed failure output enabled, bounded decodable text response content is retained; binary/undecodable bodies have metadata only. HTTP status failures without an exception show an unavailable stack. Truncation is explicitly labeled. The pinned **Hide detailed failure output** setting suppresses message, stack and body before persistence.

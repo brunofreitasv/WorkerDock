@@ -6,6 +6,15 @@ disposable run. A fresh persistent Control Center uses
 `Central:Storage:DataDirectory` and needs no central SQL database. Keep all
 hosts bound to localhost.
 
+Follow this order:
+
+1. [Prepare one empty tenant database](../how-to/setup-sql-server.md). A SQL administrator creates it and its restricted runtime user.
+2. Apply the tenant migrations and build the apps below. Replace every `<PLACEHOLDER>` with your own value.
+3. Open separate PowerShell windows for the Tenant UI and runtime service. Each window needs the settings shown below.
+4. Open the UI, [create a job](../how-to/manage-jobs.md), enable it, choose **Run now**, and check its execution history.
+
+The long settings blocks are separate because environment variables set in one PowerShell window do not appear in another.
+
 ## Prerequisites
 
 - Windows, .NET SDK 10.0.402 or a newer patch in the same feature band, Node.js 24.15.0 or a compatible maintained Node
@@ -21,7 +30,7 @@ This tutorial uses placeholders and does not create or grant a database.
 ## Migrate and build
 
 At the repository root, prepare a fresh empty database through
-`0002_template_catalog_registration` or with the
+`0005_job_review_hold` or with the
 `database/tenant/current-state.sql` snapshot. Use a separate operator-supplied
 SQL migration login. Supply its `PSCredential`
 from your approved vault process or retrieve it through the protected PowerShell
@@ -36,7 +45,7 @@ dotnet publish src/WorkerDock.Web -c Release -o artifacts/web
   -Action Apply -SqlHost '127.0.0.1' -Port 1433 `
   -Database '<TENANT_DATABASE>' -Credential $credential `
   -RuntimePrincipal '<TENANT_DATABASE_USER>' -InitialSetup `
-  -TargetMigration '0002_template_catalog_registration' `
+  -TargetMigration '0005_job_review_hold' `
   -ScriptsRoot (Resolve-Path 'database').Path `
   -AssemblyDirectory (Resolve-Path 'artifacts/web').Path
 
@@ -47,7 +56,7 @@ dotnet publish src/WorkerDock.Executor -c Release -r win-x64 --self-contained fa
 dotnet dev-certs https --trust
 ```
 
-The manifest contains the `0001_initial` baseline and `0002_template_catalog_registration`. The second migration allows the Web host to store its trusted built-in descriptors, so the template picker works before the Worker service starts. The sample publishes the Web assembly first because the migration script loads the reviewed migration implementation from that output directory. The script validates and grants the existing runtime database user; it does not create users, roles, or logins. Save the GUID printed after success and use that same value in both runtime configurations. For an initialized tenant, pass the saved GUID with `-InstanceId` instead of `-InitialSetup`.
+The manifest contains the `0001_initial` baseline and patches through `0005_job_review_hold`. Migration `0002` allows the Web host to store its trusted built-in descriptors, so the template picker works before the Worker service starts. The sample publishes the Web assembly first because the migration script loads the reviewed migration implementation from that output directory. The script validates and grants the existing runtime database user; it does not create users, roles, or logins. Save the GUID printed after success and use that same value in both runtime configurations. For an initialized tenant, pass the saved GUID with `-InstanceId` instead of `-InitialSetup`.
 
 Run the migration script with the PowerShell call operator in the same session
 that created `$credential`. A `PSCredential` object cannot be passed through a
@@ -117,7 +126,7 @@ $env:WORKERDOCK_DEVELOPMENT_SECRET_MAP='{"tenant.runtime.sql.password":"TENANT_R
 $env:TENANT_RUNTIME_PASSWORD='<retrieve-from-protected-local-secret-store>'
 $env:Worker__HostCeiling='10'
 $env:Worker__DrainSeconds='40'
-$env:Executor__Path=(Resolve-Path 'src/WorkerDock.Executor/bin/Release/net10.0-windows/win-x64/publish/WorkerDock.Executor.exe').Path
+$env:Executor__Path=(Resolve-Path 'src/WorkerDock.Executor/bin/Release/net10.0-windows/WorkerDock.Executor.exe').Path
 dotnet run --project src/WorkerDock.Worker -c Release
 ```
 

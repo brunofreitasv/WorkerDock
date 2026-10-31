@@ -1,49 +1,61 @@
-# Local development and verification
+# Check your changes
 
-Choose a startup tutorial first: [run without SQL Server](../tutorials/run-in-memory.md) or [run with SQL Server](../tutorials/run-with-sql-server.md). The memory web host is disposable and does not launch the scheduler or workers. The SQL tutorial covers the separate processes and durable state.
+Run commands from the repository root in PowerShell on Windows. Use the .NET SDK in [global.json](../../global.json) and the Node version in [frontend/package.json](../../frontend/package.json). Start with the checks for the code you changed, then run the wider checks before a release.
 
-Use the SDK pinned by global.json and the Node version in frontend/package.json. Run commands from the repository root on Windows.
+## 1. Get dependencies
 
-## Checks that do not need SQL Server
-
-~~~powershell
+```powershell
 dotnet restore WorkerDock.slnx --locked-mode
 npm.cmd --prefix frontend ci
+```
+
+If either command fails, fix that first. Later commands need these dependencies.
+
+## 2. Check the UI
+
+```powershell
 npm.cmd --prefix frontend run test -- --run
 npm.cmd --prefix frontend run build
+```
+
+The first command runs frontend unit tests. The second builds both web apps.
+
+## 3. Check .NET code without SQL Server
+
+```powershell
 dotnet test tests/WorkerDock.UnitTests -c Release
 dotnet test tests/WorkerDock.ProcessTests -c Release
 dotnet test tests/WorkerDock.IntegrationTests -c Release --filter 'Store!=Sql'
-dotnet test tests/WorkerDock.IntegrationTests -c Release --filter FullyQualifiedName~DynamicValuesEndToEndTests
 dotnet build WorkerDock.slnx -c Release
 pwsh -NoProfile -File tests/DeploymentSmoke.ps1
-~~~
+```
 
-The integration filter excludes fixtures marked Store=Sql. Windows process tests exercise contained child processes, while memory Quartz tests exercise only an in-process RAM store. These results do not establish SQL persistence, Quartz clustering, migration behavior, or database permissions.
+These checks cover unit behavior, Windows child-process behavior, SQL-independent integration paths, the solution build, and portable deployment scripts. They do **not** prove SQL Server behavior or a live IIS deployment. For the focused dynamic-value flow, run `dotnet test tests/WorkerDock.IntegrationTests -c Release --filter FullyQualifiedName~DynamicValuesEndToEndTests`.
 
-For browser tests, install the Playwright Chromium version required by the frontend package, then run:
+## 4. Check in a browser
 
-~~~powershell
+Install the Playwright Chromium version required by the frontend package, then run:
+
+```powershell
+& .\frontend\node_modules\.bin\playwright.cmd install chromium
 npm.cmd --prefix frontend run e2e -- --workers=1
-~~~
+```
 
-The browser suite launches its own test hosts. See [release evidence](release-evidence.md) for recorded results and [fault coverage](fault-matrix.md) for what the suites do and do not prove.
+The browser suite starts its own test hosts. A failing test names the page or action to investigate.
 
-## SQL-backed integration tests
+## 5. Check SQL behavior when you have a disposable server
 
-First provision a disposable SQL Server 2022+ instance as described in [Set up SQL Server](../how-to/setup-sql-server.md). Supply three independent connections through a protected local secret source: a provisioner that may create and drop generated test databases, a restricted runtime login, and a restricted SQL-target login. The fixture creates and removes only its generated WorkerDock_Test databases.
+[Set up a disposable SQL Server 2022+ instance](../how-to/setup-sql-server.md). Supply **three separate connections** from a protected local secret source: a database provisioner, a restricted WorkerDock runtime login, and a restricted target login. The tests create and remove only their own `WorkerDock_Test_*` databases.
 
-~~~powershell
+```powershell
 $env:WORKERDOCK_TEST_SQL='<disposable-server-provisioner-connection-string>'
 $env:WORKERDOCK_TEST_SQL_RUNTIME='<same-server-restricted-runtime-login>'
 $env:WORKERDOCK_TEST_SQL_TARGET_RUNTIME='<same-server-restricted-target-login>'
 dotnet test tests/WorkerDock.IntegrationTests -c Release
-~~~
+```
 
-Do not put credentials in source, command arguments, committed configuration or logs. If the connections are absent, SQL fixtures report SQL_TEST_BLOCKED; that is not a passing SQL result. The [database reference](../reference/database-migrations.md) retains focused SQL fixture commands and rollback constraints.
+Do not place passwords in source, command arguments, committed configuration, or logs. If the connections are missing, `SQL_TEST_BLOCKED` means SQL behavior has **not** been checked. The focused dynamic SQL date test is `dotnet test tests/WorkerDock.IntegrationTests -c Release --filter FullyQualifiedName~SqlTemplateTests.Dynamic_reference_date_binds_as_sql_date`.
 
-The dynamic SQL target date-binding check is `dotnet test tests/WorkerDock.IntegrationTests -c Release --filter FullyQualifiedName~SqlTemplateTests.Dynamic_reference_date_binds_as_sql_date`; it requires the three SQL fixture connection variables above. The non-SQL scheduled retry/manual override flow is covered by `DynamicValuesEndToEndTests`.
+## Before a release
 
-## Deployment validation
-
-Portable script checks do not install IIS or exercise Entra ID. Before release, follow the [production deployment guide](../how-to/deploy-production.md) on disposable Windows/SQL infrastructure and record the live outcomes in the [release checklist](release-checklist.md). Production secret-vault adapters are deployment work; the repository's environment-backed adapter is for development.
+Portable checks do not install IIS or exercise an identity provider. Follow the [release checklist](release-checklist.md) on disposable Windows and SQL infrastructure and record actual results in [release evidence](release-evidence.md). The [fault matrix](fault-matrix.md) shows which failures are covered. Production secret-vault adapters must be supplied by the deployment.
