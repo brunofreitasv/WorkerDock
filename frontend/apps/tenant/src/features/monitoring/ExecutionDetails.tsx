@@ -20,7 +20,7 @@ export function ExecutionDetails({ executionId, language, timeZone = getClientTi
     WorkerUnavailable: labels.executionWaitReasonWorkerUnavailable,
     NotDue: labels.executionWaitReasonNotDue,
   };
-  const { data, loading, error, stale, updatedAt } = useVisiblePolling(() => read<ExecutionDetailsDto>(`/api/monitoring/executions/${encodeURIComponent(executionId)}`).then(x => x.data), executionId);
+  const { data, loading, error, stale, updatedAt } = useVisiblePolling(() => read<ExecutionDetailsDto>(`/api/monitoring/executions/${encodeURIComponent(executionId)}`).then(x => x.data), executionId, 15000);
   if (loading && !data) return <Typography>{pt ? "Carregando execução…" : "Loading execution…"}</Typography>;
   if (!data) return <Alert severity="error">{pt ? "Detalhes da execução indisponíveis." : "Execution details are unavailable."}</Alert>;
   return <Stack spacing={2}>

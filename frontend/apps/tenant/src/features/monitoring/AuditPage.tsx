@@ -29,7 +29,7 @@ export function AuditPage({ language, timeZone }: { language: string; timeZone: 
   if (eventType) params.set("eventType", eventType);
   const url = `/api/audit?${params.toString()}`;
   const { data, loading, error, stale, updatedAt } = useVisiblePolling(
-    () => read<MonitoringPage<AuditSummaryDto>>(url).then(result => result.data), `${url}:${refreshSequence}`,
+    () => read<MonitoringPage<AuditSummaryDto>>(url).then(result => result.data), `${url}:${refreshSequence}`, 60000,
   );
   const auditItems = Array.isArray(data?.items) ? data.items : [];
 

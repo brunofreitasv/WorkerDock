@@ -27,7 +27,7 @@ export function DeliveryHistoryTable({ language, timeZone }: { language: string;
   if (status) params.set("status", status); if (kind) params.set("kind", kind); if (cursor) params.set("cursor", cursor);
   const url = `/api/alerts/deliveries?${params.toString()}`;
   const { data, loading, error, stale, updatedAt } = useVisiblePolling(
-    () => read<MonitoringPage<Delivery>>(url).then(x => x.data), `${url}:${refreshSequence}`,
+    () => read<MonitoringPage<Delivery>>(url).then(x => x.data), `${url}:${refreshSequence}`, 30000,
   );
   const reset = () => { setCursor(""); setPrevious([]); };
   const changePeriod = (value: HistoryPeriod) => { setPeriod(value); setAnchor(new Date()); reset(); };

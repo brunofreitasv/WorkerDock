@@ -10,7 +10,7 @@ export function JobsTable({ language, timeZone = getClientTimeZone(), canManage 
   const pt = language === "pt-BR";
   const [search, setSearch] = useState(""); const [state, setState] = useState(""); const [cursor, setCursor] = useState(""); const [stack, setStack] = useState<string[]>([]);
   const url = `/api/monitoring/jobs?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}${state ? `&state=${state}` : ""}`;
-  const { data, loading, error, stale, updatedAt, refresh } = useVisiblePolling(() => read<MonitoringPage<JobSummaryDto>>(url).then(x => x.data), url);
+  const { data, loading, error, stale, updatedAt, refresh } = useVisiblePolling(() => read<MonitoringPage<JobSummaryDto>>(url).then(x => x.data), url, 15000);
   const label = (en: string, br: string) => pt ? br : en;
   return <Stack spacing={2}>
     <FilterPanel title={label("Filters", "Filtros")}><Stack direction={{ xs: "column", sm: "row" }} spacing={2}><TextField label={label("Search jobs", "Buscar tarefas")} value={search} onChange={e => { setSearch(e.target.value); setCursor(""); setStack([]); }} /><TextField select label={label("State", "Estado")} value={state} onChange={e => { setState(e.target.value); setCursor(""); setStack([]); }}><MenuItem value="">{label("All", "Todos")}</MenuItem><MenuItem value="Enabled">{label("Enabled", "Ativos")}</MenuItem><MenuItem value="Disabled">{label("Disabled", "Desativados")}</MenuItem><MenuItem value="Archived">{label("Archived", "Arquivados")}</MenuItem></TextField></Stack></FilterPanel>

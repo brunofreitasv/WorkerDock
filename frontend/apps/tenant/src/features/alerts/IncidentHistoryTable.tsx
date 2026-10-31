@@ -35,7 +35,7 @@ export function IncidentHistoryTable({ language, timeZone }: { language: string;
   if (cursor) params.set("cursor", cursor);
   const url = `/api/alerts/incidents?${params.toString()}`;
   const { data, loading, error, stale, updatedAt } = useVisiblePolling(
-    () => read<MonitoringPage<Incident>>(url).then(x => x.data), `${url}:${refreshSequence}`,
+    () => read<MonitoringPage<Incident>>(url).then(x => x.data), `${url}:${refreshSequence}`, 15000,
   );
   const reset = () => { setCursor(""); setPrevious([]); };
   const changePeriod = (value: HistoryPeriod) => { setPeriod(value); setActivePeriodEnabled(true); setAnchor(new Date()); reset(); };

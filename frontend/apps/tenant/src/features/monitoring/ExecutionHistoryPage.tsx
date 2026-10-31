@@ -31,7 +31,7 @@ export function ExecutionHistoryPage({ language, timeZone, onExecution }: { lang
   if (templateId.trim()) params.set("templateId", templateId.trim());
   const url = `/api/monitoring/executions?${params.toString()}`;
   const { data, loading, error, stale, updatedAt } = useVisiblePolling(
-    () => read<MonitoringPage<ExecutionHistoryItemDto>>(url).then(result => result.data), `${url}:${refreshSequence}`,
+    () => read<MonitoringPage<ExecutionHistoryItemDto>>(url).then(result => result.data), `${url}:${refreshSequence}`, 60000,
   );
   const changePeriod = (value: HistoryPeriod) => {
     setPeriod(value);

@@ -8,7 +8,7 @@ import { formatInstant } from "../../localTime";
 
 export function Dashboard({ language, timeZone, onHistory, onExecution }: { language: string; timeZone: string; onHistory(): void; onExecution(id: string): void }) {
   const pt = language === "pt-BR";
-  const { data, loading, error, stale, updatedAt, refresh } = useVisiblePolling(() => read<DashboardDto>("/api/dashboard").then(x => x.data));
+  const { data, loading, error, stale, updatedAt, refresh } = useVisiblePolling(() => read<DashboardDto>("/api/dashboard").then(x => x.data), undefined, 15000);
   const label = (en: string, br: string) => pt ? br : en;
   if (loading && !data) return <Typography>{label("Loading monitoring data…", "Carregando dados de monitoramento…")}</Typography>;
   return <Stack spacing={2}>
