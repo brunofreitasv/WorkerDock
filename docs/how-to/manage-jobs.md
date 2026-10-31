@@ -1,6 +1,6 @@
 # Manage jobs
 
-For a first job, follow this path: **Jobs → Create job → choose a template → fill in its settings → review the policy → save a disabled draft → enable → Run now**. Open that job's detail page to see its result and history. The rest of this page explains editing, schedules, SQL/HTTP fields, and what each control does.
+For a first job, follow this path: **Jobs → Create job → choose a template → fill in its settings → review the policy → save a disabled draft → enable → Run now**. Open that job's detail page to see its result and history. The rest of this page explains editing, schedules, built-in template fields, and what each control does.
 
 ## Find and edit a job
 
@@ -18,7 +18,11 @@ The authoring flow saves a disabled draft before activation. Optional schedules 
 
 Job details provide pause/resume schedule, disable/enable, duplicate, archive, and stop actions to managers. Duplicate creates a disabled copy that must be reviewed before activation. Pause does not replay paused occurrences; manual runs remain available. Disable closes the start gate and releases held retries. Archive prevents future starts and retries while accepted work retains its existing lifecycle. Schedule deletion requires confirmation and leaves the job available for manual execution. The server enforces management permissions and ETags for every command.
 
-## SQL Server and HTTP fields
+## Choose a template
+
+The catalog includes SQL Server and HTTP templates. It can also list custom templates that your team has reviewed and installed with WorkerDock. The selected template determines the fields shown in the configuration step. A dashboard user can choose an installed template but cannot upload executable code. Developers can follow [Add a custom template](add-custom-template.md) to extend the catalog.
+
+## Built-in SQL Server and HTTP fields
 
 The SQL Server form accepts a profile ID, catalog, command kind, SQL text, and parameter metadata. In **Procedure** mode, enter only a procedure name such as `dbo.Job`; add its parameters in the separate parameter list. In **Query** mode, enter the complete statement with `@parameter` placeholders, for example `SELECT * FROM dbo.Orders WHERE ReferenceDate = @Dt_Ref;`, and add a matching parameter row. If invoking a procedure from Query mode, include the complete `EXEC` statement and bind its parameters separately. Configure the manager-only profile under **Settings → SQL profiles**.
 
