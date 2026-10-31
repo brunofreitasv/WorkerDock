@@ -19,3 +19,9 @@ test("shows one runtime status and host capacity", async () => {
   expect(screen.getByText("4")).toBeVisible();
   expect(screen.queryByText("Worker ID")).not.toBeInTheDocument();
 });
+
+test("formats heartbeat using the supplied client timezone", async () => {
+  vi.mocked(read).mockResolvedValue({ data: { bootId: "boot", ready: true, hostCeiling: 4, lastHeartbeatUtc: "2026-10-30T03:15:00Z" } } as never);
+  render(<WorkersPage language="en" timeZone="America/Sao_Paulo" />);
+  expect(await screen.findByText("10/30/2026, 12:15:00 AM")).toBeVisible();
+});

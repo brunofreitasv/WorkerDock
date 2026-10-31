@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Alert, Button, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { ApiError, read } from "../../api/client";
-import type { Labels } from "@workerdock/ui";
+import type { Language, Labels } from "@workerdock/ui";
 import { SchedulePreview, type SchedulePreviewItemDto } from "./SchedulePreview";
 
 export interface ScheduleEditorInputDto {
@@ -15,15 +15,17 @@ export interface ScheduleEditorInputDto {
 export function ScheduleEditor(props: {
   value: ScheduleEditorInputDto;
   t: Labels;
+  language: Language;
+  clientTimeZone: string;
   onChange(value: ScheduleEditorInputDto): void;
   preview(value: ScheduleEditorInputDto): Promise<SchedulePreviewItemDto[]>;
 }) {
-  const { value, onChange, preview, t } = props;
-  const [zones, setZones] = useState<string[]>(["UTC"]);
+  const { value, onChange, preview, t, language, clientTimeZone } = props;
+  const [zones, setZones] = useState<string[]>([value.zoneId]);
   const [items, setItems] = useState<SchedulePreviewItemDto[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { void read<string[]>("/api/time-zones").then(result => setZones(result.data)).catch(() => setZones(["UTC"])); }, []);
+  useEffect(() => { void read<string[]>("/api/time-zones").then(result => setZones(result.data.includes(value.zoneId) ? result.data : [...result.data, value.zoneId])).catch(() => setZones([value.zoneId])); }, []);
   const change = (patch: Partial<ScheduleEditorInputDto>) => { setItems([]); setError(""); onChange({ ...value, ...patch }); };
   const showPreview = async () => {
     setBusy(true); setError("");
@@ -37,13 +39,13 @@ export function ScheduleEditor(props: {
       <MenuItem value="Cron">{t.recurringSchedule}</MenuItem><MenuItem value="Once">{t.oneTimeSchedule}</MenuItem>
     </TextField>
     {value.kind === "Cron" ? <TextField label={t.cronExpression} value={value.cron ?? ""} onChange={event => change({ cron: event.target.value })} helperText={t.cronFieldsHelp} /> : <>
-      <TextField label={t.localDateTime} type="datetime-local" value={value.localOnce ?? ""} onChange={event => change({ localOnce: event.target.value })} slotProps={{ inputLabel: { shrink: true } }} />
+      <TextField label={t.localDateTime} helperText={value.zoneId} type="datetime-local" value={value.localOnce ?? ""} onChange={event => change({ localOnce: event.target.value })} slotProps={{ inputLabel: { shrink: true } }} />
       <TextField label={t.utcOffset} value={value.selectedOffset ?? ""} onChange={event => change({ selectedOffset: event.target.value })} placeholder="-04:00" helperText={t.offsetHelp} />
       <TextField label={t.resolvedUtc} value={items[0]?.utc ?? ""} slotProps={{ input: { readOnly: true }, htmlInput: { "data-testid": "resolved-utc" } }} />
     </>}
     <TextField select label={t.scheduleTimeZone} value={value.zoneId} onChange={event => change({ zoneId: event.target.value })}>{zones.map(zone => <MenuItem key={zone} value={zone}>{zone}</MenuItem>)}</TextField>
     {error && <Alert severity="error" role="alert" tabIndex={-1}>{error === "Schedule changed. Your draft is preserved." ? t.staleDraftPreserved : t.previewError}</Alert>}
     <Button onClick={() => void showPreview()} disabled={busy || (value.kind === "Once" && (!value.localOnce || !value.selectedOffset))}>{t.previewSchedule}</Button>
-    <SchedulePreview items={items} />
+    <SchedulePreview items={items} clientTimeZone={clientTimeZone} language={language} scheduleTimeZone={value.zoneId} t={t} />
   </Stack>;
 }

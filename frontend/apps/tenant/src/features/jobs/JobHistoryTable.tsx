@@ -6,6 +6,7 @@ import { PeriodControl } from "../monitoring/PeriodControl";
 import { formatDuration, toUtcRange, type HistoryPeriod } from "../monitoring/historyTime";
 import { HistoryFilters, HistoryResults } from "../monitoring/HistoryLayout";
 import { EmptyState, StatusBadge } from "@workerdock/ui";
+import { formatInstant } from "../../localTime";
 
 type Item = { executionId: string; jobName: string; templateId: string; triggerKind: string; state: string; createdAtUtc: string; startedAtUtc: string | null; duration: string | null };
 type Page = { items: Item[]; nextCursor: string | null };
@@ -13,7 +14,6 @@ const states = ["Queued", "Running", "RetryWaiting", "NeedsReview", "Succeeded",
 
 export function JobHistoryTable({ jobId, language, timeZone }: { jobId: string; language: string; timeZone: string }) {
   const pt = language === "pt-BR";
-  const locale = pt ? "pt-BR" : "en";
   const label = (en: string, br: string) => pt ? br : en;
   const [period, setPeriod] = useState<HistoryPeriod>({ kind: "7d" });
   const [rangeAnchor, setRangeAnchor] = useState(() => new Date());
@@ -72,7 +72,7 @@ export function JobHistoryTable({ jobId, language, timeZone }: { jobId: string; 
       </TextField>
     </Stack>
     </HistoryFilters>
-    <HistoryResults title={label("Results", "Resultados")} onRefresh={refresh} refreshLabel={label("Refresh", "Atualizar")} updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${updatedAt.toLocaleTimeString(locale, { timeZone })}` : undefined} footer={<CursorPager previousCount={previous.length} nextCursor={page?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
+    <HistoryResults title={label("Results", "Resultados")} onRefresh={refresh} refreshLabel={label("Refresh", "Atualizar")} updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${formatInstant(updatedAt, language as "en" | "pt-BR", timeZone, "time")}` : undefined} footer={<CursorPager previousCount={previous.length} nextCursor={page?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
       onPrevious={() => { const stack = [...previous]; setCursor(stack.pop() ?? ""); setPrevious(stack); }}
       onNext={() => { if (!page?.nextCursor) return; setPrevious(stack => [...stack, cursor]); setCursor(page.nextCursor); }} />}>
     <Typography variant="caption" color="text.secondary" sx={{ display: { xs: "block", md: "none" }, mb: 1 }}>{label("Scroll horizontally to view all columns.", "Deslize horizontalmente para ver todas as colunas.")}</Typography>
@@ -86,8 +86,8 @@ export function JobHistoryTable({ jobId, language, timeZone }: { jobId: string; 
           {page.items.map(item => <TableRow key={item.executionId}>
             <TableCell><a href={`#/execution:${item.executionId}`}>{item.executionId}</a></TableCell>
             <TableCell>{item.templateId}</TableCell><TableCell><StatusBadge label={statusText(item.state)} tone={statusTone(item.state)} /></TableCell><TableCell>{item.triggerKind}</TableCell>
-            <TableCell>{new Date(item.createdAtUtc).toLocaleString(locale, { timeZone })}</TableCell>
-            <TableCell>{item.startedAtUtc ? new Date(item.startedAtUtc).toLocaleString(locale, { timeZone }) : "—"}</TableCell><TableCell>{duration(item.duration)}</TableCell>
+            <TableCell>{formatInstant(item.createdAtUtc, language as "en" | "pt-BR", timeZone)}</TableCell>
+            <TableCell>{formatInstant(item.startedAtUtc, language as "en" | "pt-BR", timeZone)}</TableCell><TableCell>{duration(item.duration)}</TableCell>
           </TableRow>)}
         </TableBody>
       </Table>

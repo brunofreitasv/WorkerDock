@@ -7,8 +7,10 @@ import { SessionProvider } from "./SessionProvider";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   window.history.replaceState(null, "", "#/dashboard");
   localStorage.removeItem("workerdock.language");
+  localStorage.removeItem("workerdock.timeZone");
 });
 const session = (
   canManage = false,
@@ -152,7 +154,7 @@ test.each(["#/help:unknown", "#/help:", "#/help:bad%ZZslug"])("recovers from mal
   expect(await screen.findByText("Unknown documentation topic")).toBeVisible();
   expect(screen.getAllByRole("link", { name: "Documentation" }).find(link => link.getAttribute("aria-current") === "page")).toBeDefined();
 });
-test("anonymous mode shows management and a translated public-access status", async () => {
+test("anonymous mode shows management and ignores the legacy display time zone", async () => {
   session(true, "Anonymous", false);
   expect(await screen.findByRole("link", { name: "Settings" })).toBeVisible();
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -166,15 +168,22 @@ test("anonymous mode shows management and a translated public-access status", as
   expect(screen.getByRole("status")).toHaveTextContent("Acesso anônimo");
   expect(screen.getByRole("link", { name: "Configurações" })).toBeVisible();
   expect(localStorage.getItem("workerdock.language")).toBe("pt-BR");
-  await userEvent.selectOptions(
-    screen.getByRole("combobox", { name: "Fuso horário" }),
-    "America/Sao_Paulo",
-  );
-  expect(localStorage.getItem("workerdock.timeZone")).toBe("America/Sao_Paulo");
-  expect(Object.keys(localStorage).sort()).toEqual([
-    "workerdock.language",
-    "workerdock.timeZone",
-  ]);
+  expect(screen.queryByRole("combobox", { name: "Fuso horário" })).not.toBeInTheDocument();
+  expect(localStorage.getItem("workerdock.timeZone")).toBeNull();
+  expect(Object.keys(localStorage).sort()).toEqual(["workerdock.language"]);
+});
+
+test("settings show the client zone even when session and legacy storage say UTC", async () => {
+  localStorage.setItem("workerdock.timeZone", "UTC");
+  localStorage.setItem("workerdock.language", "en");
+  const resolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
+  vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockImplementation(function (this: Intl.DateTimeFormat) {
+    return { ...resolvedOptions.call(this), timeZone: "America/Sao_Paulo" };
+  });
+  window.history.replaceState(null, "", "#/settings");
+  session();
+  expect(await screen.findByText(/Time zone: America\/Sao_Paulo/)).toBeVisible();
+  expect(screen.queryByRole("combobox", { name: "Time zone" })).not.toBeInTheDocument();
 });
 test("unauthenticated configured mode offers framework sign-in and hides protected navigation", async () => {
   vi.stubGlobal(
@@ -237,6 +246,7 @@ test("skip navigation moves keyboard focus to main content", async () => {
 });
 
 test("manager edits settings using server version and antiforgery then sees saved result", async () => {
+  let savedPayload: unknown;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -254,6 +264,7 @@ test("manager edits settings using server version and antiforgery then sees save
       if (url === "/api/antiforgery")
         return new Response(JSON.stringify({ requestToken: "server-csrf" }));
       if (url === "/api/settings" && init?.method === "PUT") {
+        savedPayload = JSON.parse(String(init.body));
         const headers = new Headers(init.headers);
         if (
           headers.get("If-Match") !== '"version-1"' ||
@@ -292,6 +303,7 @@ test("manager edits settings using server version and antiforgery then sees save
   await userEvent.type(name, "Equipe");
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(await screen.findByText("Settings saved")).toBeVisible();
+  expect(savedPayload).toEqual({ displayName: "Equipe", displayTimeZone: "UTC" });
 });
 
 test("reader settings are personal and management APIs are not requested", async () => {

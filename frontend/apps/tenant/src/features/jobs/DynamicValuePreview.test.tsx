@@ -35,3 +35,20 @@ test("a null preview request never sends a request", async () => {
   expect(screen.getByRole("button", { name: translations.en.previewDynamicValues })).toBeDisabled();
   expect(fetchMock).not.toHaveBeenCalled();
 });
+
+test("displays the sample instant in client time while sending the UTC instant unchanged", async () => {
+  const sampleAtUtc = "2026-10-30T03:15:00Z";
+  let sentBody: Record<string, unknown> | undefined;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    if (path === "/api/antiforgery") return new Response(JSON.stringify({ requestToken: "test" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    sentBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ issues: [], values: {}, isExample: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+  const request = { templateId: "one", templateVersion: "1", configuration: {}, dynamicValues: { resolverVersion: 1 as const, timeZoneId: "UTC", bindings: [] }, policy: {}, triggerKind: "Manual" as const, scheduledForUtc: null, sampleAtUtc, referenceDateOverride: null, jobTimeout: null };
+  const user = userEvent.setup();
+  render(<DynamicValuePreview request={request} t={translations.en} language="en" clientTimeZone="America/Sao_Paulo" />);
+  await user.click(screen.getByRole("button", { name: translations.en.previewDynamicValues }));
+  expect(await screen.findByText(/10\/30\/2026, 12:15:00 AM/)).toBeVisible();
+  expect(sentBody?.sampleAtUtc).toBe(sampleAtUtc);
+});

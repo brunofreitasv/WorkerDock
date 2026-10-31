@@ -8,12 +8,12 @@ import { useVisiblePolling } from "./useVisiblePolling";
 import { HistoryFilters, HistoryResults } from "./HistoryLayout";
 import { EmptyState, StatusBadge } from "@workerdock/ui";
 import type { ExecutionHistoryItemDto, MonitoringPage } from "./monitoringTypes";
+import { formatInstant } from "../../localTime";
 
 const states = ["Queued", "Running", "RetryWaiting", "NeedsReview", "Succeeded", "Failed", "TimedOut", "Stopped", "Skipped"] as const;
 
 export function ExecutionHistoryPage({ language, timeZone, onExecution }: { language: string; timeZone: string; onExecution(id: string): void }) {
   const pt = language === "pt-BR";
-  const locale = pt ? "pt-BR" : "en";
   const label = (en: string, br: string) => pt ? br : en;
   const [period, setPeriod] = useState<HistoryPeriod>({ kind: "7d" });
   const [rangeAnchor, setRangeAnchor] = useState(() => new Date());
@@ -63,7 +63,7 @@ export function ExecutionHistoryPage({ language, timeZone, onExecution }: { lang
         </TextField>
       </Stack>
     </HistoryFilters>
-    <HistoryResults title={label("Results", "Resultados")} onRefresh={restartBrowse} refreshLabel={label("Refresh", "Atualizar")} updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${updatedAt.toLocaleTimeString(locale, { timeZone })}` : undefined} footer={<CursorPager previousCount={previous.length} nextCursor={data?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
+    <HistoryResults title={label("Results", "Resultados")} onRefresh={restartBrowse} refreshLabel={label("Refresh", "Atualizar")} updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${formatInstant(updatedAt, language as "en" | "pt-BR", timeZone, "time")}` : undefined} footer={<CursorPager previousCount={previous.length} nextCursor={data?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
       onPrevious={() => { const stack = [...previous]; setCursor(stack.pop() ?? ""); setPrevious(stack); }}
       onNext={() => { if (!data?.nextCursor) return; setPrevious(stack => [...stack, cursor]); setCursor(data.nextCursor); }} />}>
     <Typography variant="caption" color="text.secondary" sx={{ display: { xs: "block", md: "none" }, mb: 1 }}>{label("Scroll horizontally to view all columns.", "Deslize horizontalmente para ver todas as colunas.")}</Typography>
@@ -76,8 +76,8 @@ export function ExecutionHistoryPage({ language, timeZone, onExecution }: { lang
         <TableBody>
           {data.items.map(item => <TableRow key={item.executionId}>
             <TableCell>{item.jobName}</TableCell><TableCell>{item.templateId}</TableCell><TableCell><StatusBadge label={statusText(item.state)} tone={statusTone(item.state)} /></TableCell><TableCell>{item.triggerKind}</TableCell>
-            <TableCell>{new Date(item.createdAtUtc).toLocaleString(locale, { timeZone })}</TableCell>
-            <TableCell>{item.startedAtUtc ? new Date(item.startedAtUtc).toLocaleString(locale, { timeZone }) : "—"}</TableCell>
+            <TableCell>{formatInstant(item.createdAtUtc, language as "en" | "pt-BR", timeZone)}</TableCell>
+            <TableCell>{formatInstant(item.startedAtUtc, language as "en" | "pt-BR", timeZone)}</TableCell>
             <TableCell>{duration(item.duration)}</TableCell>
             <TableCell><Button size="small" onClick={() => onExecution(item.executionId)} aria-label={`${label("Open", "Abrir")} ${item.jobName}`}>{label("Open", "Abrir")}</Button></TableCell>
           </TableRow>)}

@@ -4,6 +4,7 @@ import { useVisiblePolling } from "./useVisiblePolling";
 import type { DashboardDto } from "./monitoringTypes";
 import { formatDuration } from "./historyTime";
 import { SectionSurface, StatusBadge } from "@workerdock/ui";
+import { formatInstant } from "../../localTime";
 
 export function Dashboard({ language, timeZone, onHistory, onExecution }: { language: string; timeZone: string; onHistory(): void; onExecution(id: string): void }) {
   const pt = language === "pt-BR";
@@ -14,7 +15,7 @@ export function Dashboard({ language, timeZone, onHistory, onExecution }: { lang
     {error && <Alert severity="warning">{label("Monitoring data is unavailable.", "Dados de monitoramento indisponíveis.")} {stale && label("Showing the last successful refresh.", "Exibindo a última atualização bem-sucedida.")}</Alert>}
     {data && <>
       <SectionSurface title={label("Current health", "Saúde atual")} actions={<Button onClick={refresh}>{label("Refresh", "Atualizar")}</Button>}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ alignItems: { sm: "center" }, justifyContent: "space-between", mb: 2 }}><Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><Typography>{label("Status", "Estado")}:</Typography><StatusBadge label={data.overall} tone={data.overall === "Healthy" ? "success" : "warning"} /></Stack><Typography variant="caption">{label("Updated", "Atualizado")}: {updatedAt?.toLocaleTimeString(pt ? "pt-BR" : "en", { timeZone })}</Typography></Stack>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ alignItems: { sm: "center" }, justifyContent: "space-between", mb: 2 }}><Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><Typography>{label("Status", "Estado")}:</Typography><StatusBadge label={data.overall} tone={data.overall === "Healthy" ? "success" : "warning"} /></Stack><Typography variant="caption">{label("Updated", "Atualizado")}: {updatedAt ? formatInstant(updatedAt, language as "en" | "pt-BR", timeZone, "time") : "—"}</Typography></Stack>
         <Grid container spacing={2}>{[[label("Runtime", "Runtime"), data.runtimeReady ? label("Ready", "Pronto") : label("Unavailable", "Indisponível")], [label("Host capacity", "Capacidade do host"), data.hostCeiling]].map(([title, value]) => <Grid key={String(title)} size={{ xs: 6 }}><Card variant="outlined"><CardContent><Typography color="text.secondary">{title}</Typography><Typography variant="h5">{value}</Typography></CardContent></Card></Grid>)}</Grid>
       </SectionSurface>
       <SectionSurface title={label("Open items", "Itens em aberto")}><Grid container spacing={2}>{[[label("Needs review", "Aguardando revisão"), data.needsReview], [label("Queued", "Na fila"), data.queued], [label("Running", "Em execução"), data.running], [label("Long running", "Longa duração"), data.longRunning]].map(([title, value]) => <Grid key={String(title)} size={{ xs: 6, md: 3 }}><Card variant="outlined"><CardContent><Typography color="text.secondary">{title}</Typography><Typography variant="h5">{value}</Typography></CardContent></Card></Grid>)}</Grid></SectionSurface>
@@ -31,7 +32,7 @@ export function Dashboard({ language, timeZone, onHistory, onExecution }: { lang
                     <TableCell><Link component="button" onClick={() => onExecution(item.executionId)}>{item.jobName}</Link></TableCell>
                     <TableCell>{item.templateId}</TableCell>
                     <TableCell>{item.state}</TableCell>
-                    <TableCell>{new Date(item.createdAtUtc).toLocaleString(pt ? "pt-BR" : "en", { timeZone })}</TableCell>
+                    <TableCell>{formatInstant(item.createdAtUtc, language as "en" | "pt-BR", timeZone)}</TableCell>
                     <TableCell>{formatDuration(item.duration)}</TableCell>
                   </TableRow>
                 ))}
@@ -40,7 +41,7 @@ export function Dashboard({ language, timeZone, onHistory, onExecution }: { lang
             </Table>
           </TableContainer>
       </SectionSurface>
-      <SectionSurface title={label("Upcoming work", "Próximas tarefas")}>{(data.upcomingItems ?? []).length ? data.upcomingItems.map(item => <Typography key={item.jobId} sx={{ py: 1, borderBottom: "1px solid", borderColor: "divider" }}>{item.jobName} · {item.templateId} · {new Date(item.scheduledForUtc).toLocaleString(pt ? "pt-BR" : "en", { timeZone })}</Typography>) : <Typography>{label("No upcoming one-time schedules.", "Nenhum agendamento único próximo.")}</Typography>}</SectionSurface>
+      <SectionSurface title={label("Upcoming work", "Próximas tarefas")}>{(data.upcomingItems ?? []).length ? data.upcomingItems.map(item => <Typography key={item.jobId} sx={{ py: 1, borderBottom: "1px solid", borderColor: "divider" }}>{item.jobName} · {item.templateId} · {formatInstant(item.scheduledForUtc, language as "en" | "pt-BR", timeZone)}</Typography>) : <Typography>{label("No upcoming one-time schedules.", "Nenhum agendamento único próximo.")}</Typography>}</SectionSurface>
     </>}
   </Stack>;
 }

@@ -16,6 +16,17 @@ test("converts inclusive custom dates through the browser timezone including DST
   });
 });
 
+test("converts one-day spring and fall custom dates to 23- and 25-hour ranges", () => {
+  const spring = toUtcRange(custom("2026-03-08", "2026-03-08"), "America/New_York", now);
+  expect(spring).toEqual({ fromUtc: "2026-03-08T05:00:00.000Z", toUtc: "2026-03-09T04:00:00.000Z" });
+  expect(Date.parse(spring.toUtc) - Date.parse(spring.fromUtc)).toBe(23 * 60 * 60 * 1000);
+  const fall = toUtcRange(custom("2026-11-01", "2026-11-01"), "America/New_York", now);
+  expect(fall).toEqual({ fromUtc: "2026-11-01T04:00:00.000Z", toUtc: "2026-11-02T05:00:00.000Z" });
+  expect(Date.parse(fall.toUtc) - Date.parse(fall.fromUtc)).toBe(25 * 60 * 60 * 1000);
+  const rolling = toUtcRange({ kind: "24h" }, "America/New_York", now);
+  expect(Date.parse(rolling.toUtc) - Date.parse(rolling.fromUtc)).toBe(24 * 60 * 60 * 1000);
+});
+
 test("presets are rolling windows ending at now", () => {
   expect(toUtcRange({ kind: "24h" }, "America/Los_Angeles", now)).toEqual({
     fromUtc: "2026-03-09T16:30:00.000Z",

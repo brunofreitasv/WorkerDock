@@ -66,7 +66,7 @@ test("renders translated controls and localizes execution timestamps", async () 
   render(<JobHistoryTable jobId="job-1" language="pt-BR" timeZone="America/Sao_Paulo" />);
   const table = await screen.findByRole("table", { name: "Histórico de execuções da tarefa" });
   expect(screen.getByRole("button", { name: "Últimos 7 dias" })).toBeVisible();
-  expect(within(table).getByText("28/10/2026, 09:00:00")).toBeVisible();
+  expect(within(table).getByText("28/10/2026, 9:00:00")).toBeVisible();
   expect(within(table).getByText("Aguardando revisão")).toBeVisible();
 });
 
@@ -101,4 +101,11 @@ test("groups job filters and results, and Clear restores the default query", asy
   await user.click(within(filters).getByRole("button", { name: "Clear filters" }));
   await waitFor(() => expect(requests.at(-1)?.searchParams.get("state")).toBeNull());
   expect(within(filters).getByRole("button", { name: "Last 7 days" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("formats history instants before local midnight on the prior day", async () => {
+  vi.mocked(read).mockResolvedValue(response([{ ...execution("local-midnight", "Succeeded"), createdAtUtc: "2026-10-30T01:15:00Z", startedAtUtc: "2026-10-30T03:15:00Z" }], null));
+  render(<JobHistoryTable jobId="job-1" language="en" timeZone="America/Sao_Paulo" />);
+  const table = await screen.findByRole("table", { name: "Job execution history" });
+  expect(within(table).getByText("10/29/2026, 10:15:00 PM")).toBeVisible();
 });

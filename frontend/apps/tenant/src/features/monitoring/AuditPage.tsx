@@ -8,10 +8,10 @@ import { useVisiblePolling } from "./useVisiblePolling";
 import { HistoryFilters, HistoryResults } from "./HistoryLayout";
 import { EmptyState, StatusBadge } from "@workerdock/ui";
 import type { AuditSummaryDto, MonitoringPage } from "./monitoringTypes";
+import { formatInstant } from "../../localTime";
 
 export function AuditPage({ language, timeZone }: { language: string; timeZone: string }) {
   const pt = language === "pt-BR";
-  const locale = pt ? "pt-BR" : "en";
   const label = (en: string, br: string) => pt ? br : en;
   const [period, setPeriod] = useState<HistoryPeriod>({ kind: "7d" });
   const [rangeAnchor, setRangeAnchor] = useState(() => new Date());
@@ -68,7 +68,7 @@ export function AuditPage({ language, timeZone }: { language: string; timeZone: 
       </TextField>
     </Stack>
     </HistoryFilters>
-    <HistoryResults title={label("Results", "Resultados")} onRefresh={restartBrowse} refreshLabel={label("Refresh", "Atualizar")} updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${updatedAt.toLocaleTimeString(locale, { timeZone })}` : undefined} footer={<CursorPager previousCount={previous.length} nextCursor={data?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
+    <HistoryResults title={label("Results", "Resultados")} onRefresh={restartBrowse} refreshLabel={label("Refresh", "Atualizar")} updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${formatInstant(updatedAt, pt ? "pt-BR" : "en", timeZone, "time")}` : undefined} footer={<CursorPager previousCount={previous.length} nextCursor={data?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
       onPrevious={() => { const stack = [...previous]; setCursor(stack.pop() ?? ""); setPrevious(stack); }}
       onNext={() => { if (!data?.nextCursor) return; setPrevious(stack => [...stack, cursor]); setCursor(data.nextCursor); }} />}>
     <Typography variant="caption" color="text.secondary" sx={{ display: { xs: "block", md: "none" }, mb: 1 }}>{label("Scroll horizontally to view all columns.", "Deslize horizontalmente para ver todas as colunas.")}</Typography>
@@ -81,7 +81,7 @@ export function AuditPage({ language, timeZone }: { language: string; timeZone: 
         <TableHead><TableRow>{[label("Time", "Horário"), label("Action", "Ação"), label("Actor", "Ator"), label("Mode", "Modo"), label("Correlation", "Correlação")].map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead>
         <TableBody>
           {auditItems.map(item => <TableRow key={item.eventId}>
-            <TableCell>{new Date(item.occurredAtUtc).toLocaleString(locale, { timeZone })}</TableCell>
+            <TableCell>{formatInstant(item.occurredAtUtc, pt ? "pt-BR" : "en", timeZone)}</TableCell>
             <TableCell><StatusBadge label={item.eventType} tone="default" /></TableCell>
             <TableCell>{item.actorSubject}</TableCell>
             <TableCell>{item.authenticationMode}</TableCell>

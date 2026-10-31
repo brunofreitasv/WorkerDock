@@ -12,6 +12,21 @@ test("new jobs default to the newest selectable version of the first template", 
   expect(selectDefaultTemplate([item("1.0.0", true), item("1.1.0", true), item("2.0.0", false)])?.descriptor.version).toBe("1.1.0");
 });
 
+test("a new wizard schedule uses the client zone as its selected schedule zone", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    const body = url.pathname === "/api/templates" ? { items: [{ selectable: true, descriptor: { id: "sample", version: "1", displayName: "Sample", description: "Sample", configurationSchema: { type: "object", properties: {} } } }] } : url.pathname === "/api/time-zones" ? ["America/Sao_Paulo", "UTC"] : {};
+    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+  const user = userEvent.setup();
+  render(<JobWizard t={translations.en} defaultZone="America/Sao_Paulo" />);
+  await user.type(await screen.findByRole("textbox", { name: "Job name" }), "Client zone job");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByLabelText("Use a schedule"));
+  expect(screen.getByRole("combobox", { name: "Time zone" })).toHaveTextContent("America/Sao_Paulo");
+});
+
 test.each([
   ["-05:00", "-05:00:00"],
   ["+05:30", "05:30:00"],

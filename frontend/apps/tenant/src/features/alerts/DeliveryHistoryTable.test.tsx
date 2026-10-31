@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DeliveryHistoryTable } from "./DeliveryHistoryTable";
 
@@ -49,6 +49,16 @@ test("deliveries paginate independently and show safe empty/error states in pt-B
   expect(await screen.findByRole("table", { name: "Entregas" })).toBeVisible();
   expect(screen.getByText("Nenhuma entrega encontrada.")).toBeVisible();
   expect(calls[0].searchParams.get("limit")).toBe("50");
+});
+
+test("delivery timestamps use shared local-time formatting and a safe null placeholder", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ items: [{ ...delivery,
+    nextAvailableAtUtc: "2026-10-30T03:15:00Z", completedAtUtc: null,
+  }], nextCursor: null }))));
+  render(<DeliveryHistoryTable language="en" timeZone="America/Sao_Paulo" />);
+  const table = await screen.findByRole("table", { name: "Deliveries" });
+  expect(within(table).getByText("10/30/2026, 12:15:00 AM")).toBeVisible();
+  expect(within(table).getByText("—")).toBeVisible();
 });
 
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Alert, Box, Button, CircularProgress, Paper, Stack, TextField, Typography } from "@mui/material";
 import { ApiError, mutate } from "../../api/client";
-import { timeZones, type Labels } from "@workerdock/ui";
+import type { Labels } from "@workerdock/ui";
 import type { TenantSettings, TenantSettingsSnapshot } from "./useTenantSettings";
 
 interface Props {
@@ -32,7 +32,7 @@ export function TenantSettingsForm({ t, current, loading, error: loadError, relo
     event.preventDefault();
     setSaved(false);
     setInvalid(true);
-    if (!name.trim() || name.length > 200 || !timeZones.includes(zone) || !current?.etag) return;
+    if (!name.trim() || name.length > 200 || !current?.etag) return;
     setBusy(true);
     setError("");
     try {
@@ -60,9 +60,6 @@ export function TenantSettingsForm({ t, current, loading, error: loadError, relo
         <Box component="form" onSubmit={submit} noValidate>
           <Stack spacing={3}>
             <TextField label={t.displayName} value={name} onChange={(e) => setName(e.target.value)} error={invalid && (!name.trim() || name.length > 200)} helperText={invalid && (!name.trim() || name.length > 200) ? t.requiredName : undefined} required fullWidth />
-            <TextField label={t.displayTimeZone} value={zone} onChange={(e) => setZone(e.target.value)} error={invalid && !timeZones.includes(zone)} helperText={invalid && !timeZones.includes(zone) ? t.invalidZone : undefined} select slotProps={{ select: { native: true } }}>
-              {timeZones.map((value) => <option key={value} value={value}>{value}</option>)}
-            </TextField>
             <Button type="submit" variant="contained" disabled={busy || !current.etag} sx={{ alignSelf: { xs: "stretch", sm: "flex-start" } }}>{busy ? t.loading : t.save}</Button>
           </Stack>
         </Box>

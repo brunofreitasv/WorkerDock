@@ -146,7 +146,7 @@ test("uses Portuguese labels and the selected timezone", async () => {
   const table = await screen.findByRole("table", { name: "Histórico de execuções" });
   expect(screen.getByRole("button", { name: "Últimos 7 dias" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Próxima" })).toBeDisabled();
-  expect(within(table).getByText("20/10/2026, 09:00:00")).toBeVisible();
+  expect(within(table).getByText("20/10/2026, 9:00:00")).toBeVisible();
 });
 
 test("keeps days and time in durations over 24 hours", async () => {
@@ -175,4 +175,11 @@ test("groups filters and results, and Clear restores the default query", async (
   expect(within(filters).getByRole("textbox", { name: "Search executions" })).toHaveValue("");
   expect(within(filters).getByRole("button", { name: "Last 7 days" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByText("Page 1")).toBeVisible();
+});
+
+test("renders a UTC instant on the prior client calendar day", async () => {
+  vi.mocked(read).mockResolvedValue({ data: { items: [{ ...execution, createdAtUtc: "2026-10-30T01:15:00Z", startedAtUtc: null }], nextCursor: null } } as never);
+  render(<ExecutionHistoryPage language="en" timeZone="America/Sao_Paulo" onExecution={vi.fn()} />);
+  const table = await screen.findByRole("table", { name: "Execution history" });
+  expect(within(table).getByText("10/29/2026, 10:15:00 PM")).toBeVisible();
 });

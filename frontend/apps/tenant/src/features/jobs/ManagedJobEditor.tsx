@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, FormControlLabel, Paper, Stack, Switch, TextField, Typography } from "@mui/material";
-import { TemplateForm, type DynamicValuePlan, type Labels, type TemplateDescriptorDto } from "@workerdock/ui";
+import { TemplateForm, type DynamicValuePlan, type Labels, type Language, type TemplateDescriptorDto } from "@workerdock/ui";
 import { ApiError, mutate } from "../../api/client";
 import { changedJobSections, createJobDefinitionDraft, type JobDefinitionDraft } from "./JobDefinitionDraft";
 import { ScheduleEditor, type ScheduleEditorInputDto } from "../schedules/ScheduleEditor";
 import type { SchedulePreviewItemDto } from "../schedules/SchedulePreview";
 
-export function ManagedJobEditor({ jobId, initial, etag, descriptor, t, onSaved, onCancel, onDirtyChange }: { jobId: string; initial: JobDefinitionDraft; etag: string | null; descriptor: TemplateDescriptorDto; t: Labels; onSaved(): void; onCancel(): void; onDirtyChange?(dirty: boolean): void }) {
+export function ManagedJobEditor({ jobId, initial, etag, descriptor, t, language = "en", clientTimeZone = "UTC", onSaved, onCancel, onDirtyChange }: { jobId: string; initial: JobDefinitionDraft; etag: string | null; descriptor: TemplateDescriptorDto; t: Labels; language?: Language; clientTimeZone?: string; onSaved(): void; onCancel(): void; onDirtyChange?(dirty: boolean): void }) {
   const baseline = useMemo(() => createJobDefinitionDraft(initial), [initial]);
   const [draft, setDraft] = useState(() => createJobDefinitionDraft(initial));
   const [error, setError] = useState("");
@@ -50,7 +50,7 @@ export function ManagedJobEditor({ jobId, initial, etag, descriptor, t, onSaved,
     </Box>
     <Box component="section" aria-label={t.jobSectionSchedule} sx={{ display: "grid", gap: 2 }}>
       <Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>{t.jobSectionSchedule}</Typography>
-    {draft.schedule ? <ScheduleEditor value={draft.schedule as unknown as ScheduleEditorInputDto} t={t} onChange={schedule => setDraft({ ...draft, schedule: schedule as unknown as Record<string, unknown> })} preview={async (input): Promise<SchedulePreviewItemDto[]> => mutate("/api/schedules/preview", "POST", { input, afterUtc: new Date().toISOString(), count: 5 })} /> : <Button onClick={() => setDraft({ ...draft, schedule: { kind: "Cron", cron: "0 9 * * 1-5", zoneId: "UTC", localOnce: null, selectedOffset: null } })}>{t.jobAddSchedule}</Button>}
+    {draft.schedule ? <ScheduleEditor value={draft.schedule as unknown as ScheduleEditorInputDto} t={t} language={language} clientTimeZone={clientTimeZone} onChange={schedule => setDraft({ ...draft, schedule: schedule as unknown as Record<string, unknown> })} preview={async (input): Promise<SchedulePreviewItemDto[]> => mutate("/api/schedules/preview", "POST", { input, afterUtc: new Date().toISOString(), count: 5 })} /> : <Button onClick={() => setDraft({ ...draft, schedule: { kind: "Cron", cron: "0 9 * * 1-5", zoneId: clientTimeZone, localOnce: null, selectedOffset: null } })}>{t.jobAddSchedule}</Button>}
     {draft.schedule && <Button onClick={() => setDraft({ ...draft, schedule: null, missedPolicy: null })}>{t.jobRemoveSchedule}</Button>}
     </Box>
     <Box component="section" aria-label={t.jobSectionPolicy} sx={{ display: "grid", gap: 2 }}>

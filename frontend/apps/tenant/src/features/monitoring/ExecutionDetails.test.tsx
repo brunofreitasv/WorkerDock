@@ -5,9 +5,9 @@ import { useVisiblePolling } from "./useVisiblePolling";
 
 vi.mock("./useVisiblePolling", () => ({ useVisiblePolling: vi.fn() }));
 afterEach(cleanup);
-function show(diagnostic: object | null, language = "en", state = "Failed", waitReason: string | null = null, timeline: { eventId: string; attemptId: string | null; state: string; occurredAtUtc: string }[] = []) {
+function show(diagnostic: object | null, language = "en", state = "Failed", waitReason: string | null = null, timeline: { eventId: string; attemptId: string | null; state: string; occurredAtUtc: string }[] = [], timeZone = "UTC") {
   vi.mocked(useVisiblePolling).mockReturnValue({ data: { jobName: "Job", executionId: "execution", templateId: "sql", state, waitReason, createdAtUtc: "2026-10-29T00:00:00Z", attempts: [{ attemptId: "attempt", attemptNumber: 1, state: "Failed", safeCode: "CommandFailed", diagnostic }], timeline }, loading: false, error: null, stale: false, updatedAt: null } as never);
-  return render(<ExecutionDetails executionId="execution" language={language} />);
+  return render(<ExecutionDetails executionId="execution" language={language} timeZone={timeZone} />);
 }
 test("expands bounded diagnostic text and SQL reproduction metadata safely", () => {
   const { container } = show({ kind: "Sql", exceptionType: "SqlException", message: "redacted [REDACTED]", stackTrace: "client stack", responseContent: '<img src=x onerror="alert(1)">', sqlNumber: 51000, sqlState: 1, sqlProcedure: "FailProc", sqlLine: 12, commandKind: "StoredProcedure", truncated: true });
@@ -72,4 +72,10 @@ test("queued Skip explains that review hold will skip the occurrence", () => {
 test("Portuguese queued Skip explains that review hold will skip the occurrence", () => {
   show(null, "pt-BR", "Queued", "ReviewSkip");
   expect(screen.getByText("Motivo atual da espera ou do descarte: Será ignorada enquanto uma execução anterior aguarda revisão")).toBeInTheDocument();
+});
+
+test("formats created and timeline instants in the supplied client timezone", () => {
+  show(null, "en", "Failed", null, [{ eventId: "event", attemptId: null, state: "Queued", occurredAtUtc: "2026-10-30T01:15:00Z" }], "America/Sao_Paulo");
+  expect(screen.getByText(/Created: 10\/28\/2026, 9:00:00 PM/)).toBeVisible();
+  expect(screen.getByText(/10\/29\/2026, 10:15:00 PM · Queued/)).toBeVisible();
 });

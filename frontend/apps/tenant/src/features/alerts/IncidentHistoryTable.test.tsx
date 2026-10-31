@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { IncidentHistoryTable } from "./IncidentHistoryTable";
 
@@ -18,7 +18,9 @@ const openIncident = {
   safeCode: "WorkerUnavailable",
 };
 
-function stubPages(incident = openIncident) {
+type TestIncident = Omit<typeof openIncident, "resolvedAtUtc"> & { resolvedAtUtc: string | null };
+
+function stubPages(incident: TestIncident = openIncident) {
   const calls: URL[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://localhost");
@@ -89,8 +91,25 @@ test("incident dates and pages render in the selected timezone with safe empty s
   const calls = stubPages({ ...openIncident, openedAtUtc: "2026-10-29T10:00:00Z", lastObservedAtUtc: "2026-10-29T10:00:00Z" });
   render(<IncidentHistoryTable language="pt-BR" timeZone="America/Sao_Paulo" />);
   expect(await screen.findByRole("table", { name: "Incidentes" })).toBeVisible();
-  expect(screen.getAllByText(/29 de out\. de 2026/)).toHaveLength(2);
+  expect(screen.getAllByText("29/10/2026, 7:00:00")).toHaveLength(2);
   expect(calls.find(call => call.pathname === "/api/alerts/incidents")?.searchParams.get("limit")).toBe("50");
+});
+
+test("incident opened, observed, and unresolved values use safe local-time formatting", async () => {
+  stubPages({ ...openIncident, openedAtUtc: "2026-10-30T03:15:00Z", lastObservedAtUtc: "bad", resolvedAtUtc: null });
+  render(<IncidentHistoryTable language="en" timeZone="America/Sao_Paulo" />);
+  const table = await screen.findByRole("table", { name: "Incidents" });
+  expect(within(table).getByText("10/30/2026, 12:15:00 AM")).toBeVisible();
+  expect(within(table).getAllByText("—")).toHaveLength(2);
+});
+
+test("incident opened, observed, and resolved instants all display in client time", async () => {
+  stubPages({ ...openIncident, openedAtUtc: "2026-10-30T03:15:00Z", lastObservedAtUtc: "2026-10-30T04:15:00Z", resolvedAtUtc: "2026-10-30T05:15:00Z" });
+  render(<IncidentHistoryTable language="en" timeZone="America/Sao_Paulo" />);
+  const table = await screen.findByRole("table", { name: "Incidents" });
+  expect(within(table).getByText("10/30/2026, 12:15:00 AM")).toBeVisible();
+  expect(within(table).getByText("10/30/2026, 1:15:00 AM")).toBeVisible();
+  expect(within(table).getByText("10/30/2026, 2:15:00 AM")).toBeVisible();
 });
 
 

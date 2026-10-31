@@ -8,12 +8,13 @@ import { PeriodControl } from "../monitoring/PeriodControl";
 import { toUtcRange, type HistoryPeriod } from "../monitoring/historyTime";
 import { useVisiblePolling } from "../monitoring/useVisiblePolling";
 import type { MonitoringPage } from "../monitoring/monitoringTypes";
+import { formatInstant } from "../../localTime";
 
 type Incident = { incidentId: string; ruleId: string; ruleName: string; condition: string; subjectKey: string; state: string; openedAtUtc: string; lastObservedAtUtc: string; resolvedAtUtc: string | null; safeCode: string | null };
 type RuleOption = { ruleId: string; name: string };
 
-function displayDate(value: string | null, locale: string, timeZone: string) {
-  return value ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone }).format(new Date(value)) : "—";
+function displayDate(value: string | null, language: "en" | "pt-BR", timeZone: string) {
+  return formatInstant(value, language, timeZone);
 }
 
 export function IncidentHistoryTable({ language, timeZone }: { language: string; timeZone: string }) {
@@ -62,7 +63,7 @@ export function IncidentHistoryTable({ language, timeZone }: { language: string;
       </Stack>
     </HistoryFilters>
     <HistoryResults title={label("Incident results", "Resultados dos incidentes")} onRefresh={restart} refreshLabel={label("Refresh", "Atualizar")}
-      updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${updatedAt.toLocaleTimeString(locale, { timeZone })}` : undefined}
+      updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${formatInstant(updatedAt, locale, timeZone, "time")}` : undefined}
       footer={<CursorPager previousCount={previous.length} nextCursor={data?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
         onPrevious={() => { const stack = [...previous]; setCursor(stack.pop() ?? ""); setPrevious(stack); }}
         onNext={() => { if (!data?.nextCursor) return; setPrevious(stack => [...stack, cursor]); setCursor(data.nextCursor); }} />}>

@@ -69,8 +69,15 @@ test("uses Portuguese labels and the selected timezone", async () => {
   const table = await screen.findByRole("table", { name: "Auditoria" });
   expect(await screen.findByRole("combobox", { name: "Tipo de evento" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Últimos 7 dias" })).toBeVisible();
-  expect(within(table).getByText("08/03/2026, 09:30:00")).toBeVisible();
+  expect(within(table).getByText("08/03/2026, 9:30:00")).toBeVisible();
   expect(screen.queryByRole("button", { name: /manage|editar|excluir/i })).not.toBeInTheDocument();
+});
+
+test("formats audit occurrences with the shared local-time shape", async () => {
+  vi.mocked(read).mockImplementation(async (path: string) => response(path));
+  render(<AuditPage language="en" timeZone="America/Sao_Paulo" />);
+  const table = await screen.findByRole("table", { name: "Audit" });
+  expect(within(table).getByText("03/08/2026, 9:30:00 AM")).toBeVisible();
 });
 
 test("does not crash when the event-type endpoint returns an unexpected object", async () => {

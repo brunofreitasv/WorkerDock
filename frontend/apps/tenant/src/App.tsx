@@ -39,6 +39,7 @@ import { useTenantSettings } from "./features/settings/useTenantSettings";
 import { TenantSettingsForm } from "./features/settings/TenantSettingsForm";
 import { PersonalSettings } from "./features/settings/PersonalSettings";
 import { SettingsNavigation, type SettingsTab } from "./features/settings/SettingsNavigation";
+import { getClientTimeZone } from "./localTime";
 function routeFromHash(hash: string): string {
   if (!hash.startsWith("#/")) return "dashboard";
   return hash.slice(2) || "dashboard";
@@ -46,7 +47,8 @@ function routeFromHash(hash: string): string {
 
 export default function App() {
   const { session, loading, error, retry } = useSession();
-  const preferences = usePreferences(session?.timeZone);
+  const preferences = usePreferences();
+  const [clientTimeZone] = useState(getClientTimeZone);
   const { t } = preferences;
   const tenantSettings = useTenantSettings(Boolean(session?.canRead));
   const displayName = tenantSettings.current?.data.displayName || "WorkerDock";
@@ -158,7 +160,7 @@ export default function App() {
               {activePage === "help" ? <HelpPage language={preferences.language} slug={helpSlug} canManage={session.canManage} onNavigate={navigate} /> : active === "settings" ? (
                 <>
                   <SettingsNavigation t={t} selected={settingsTab} canManage={session.canManage} onSelect={setSettingsTab} />
-                  {settingsTab === "personal" || !session.canManage ? <PersonalSettings t={t} mode={session.mode} canManage={session.canManage} language={preferences.language} setLanguage={preferences.setLanguage} timeZone={preferences.timeZone} setTimeZone={preferences.setTimeZone} />
+                  {settingsTab === "personal" || !session.canManage ? <PersonalSettings t={t} mode={session.mode} canManage={session.canManage} language={preferences.language} setLanguage={preferences.setLanguage} timeZone={clientTimeZone} />
                     : settingsTab === "general" ? <TenantSettingsForm t={t} current={tenantSettings.current} loading={tenantSettings.loading} error={tenantSettings.error} reload={tenantSettings.reload} acceptSave={tenantSettings.acceptSave} />
                     : settingsTab === "vault" ? <VaultSettingsPage t={t} />
                     : settingsTab === "outbound" ? <OutboundPolicyPage t={t} />
@@ -167,10 +169,10 @@ export default function App() {
                 </>
               ) : (
               active.startsWith("job-history:") ? (
-                  session.canManage ? <JobHistoryTable jobId={active.slice("job-history:".length)} language={preferences.language} timeZone={preferences.timeZone} /> : <Alert severity="error">{t.permission}</Alert>
+                  session.canManage ? <JobHistoryTable jobId={active.slice("job-history:".length)} language={preferences.language} timeZone={clientTimeZone} /> : <Alert severity="error">{t.permission}</Alert>
                 ) : activePage === "jobs" ? (
                   <Box component="section" aria-label={t.jobs} sx={{ display: "grid", gap: 3 }}>
-                    <JobManagementPage t={t} route={active} canManage={session.canManage} defaultZone={preferences.timeZone} onNavigate={navigate} onDirtyChange={setJobsDirty} />
+                    <JobManagementPage language={preferences.language} t={t} route={active} canManage={session.canManage} defaultZone={clientTimeZone} onNavigate={navigate} onDirtyChange={setJobsDirty} />
                   </Box>
                 ) : active === "templates" ? (
                   <Paper variant="outlined" sx={{ p: 3, mb: 3, maxWidth: 900 }}>
@@ -182,19 +184,19 @@ export default function App() {
                   </Paper>
                 ) : (
                 active.startsWith("execution:") ? (
-                  <ExecutionDetails executionId={active.slice("execution:".length)} language={preferences.language} canManage={session.canManage} />
+                  <ExecutionDetails executionId={active.slice("execution:".length)} language={preferences.language} timeZone={clientTimeZone} canManage={session.canManage} />
                 ) : active === "executions" ? (
-                  <ExecutionHistoryPage language={preferences.language} timeZone={preferences.timeZone} onExecution={id => navigate(`execution:${id}`)} />
+                  <ExecutionHistoryPage language={preferences.language} timeZone={clientTimeZone} onExecution={id => navigate(`execution:${id}`)} />
                 ) : active === "monitoring" ? (
-                  <JobsTable language={preferences.language} canManage={session.canManage} onHistory={id => navigate(`job-history:${id}`)} />
+                  <JobsTable language={preferences.language} timeZone={clientTimeZone} canManage={session.canManage} onHistory={id => navigate(`job-history:${id}`)} />
                 ) : active === "workers" ? (
-                  <WorkersPage language={preferences.language} />
+                  <WorkersPage language={preferences.language} timeZone={clientTimeZone} />
                 ) : active === "audit" ? (
-                  <AuditPage language={preferences.language} timeZone={preferences.timeZone} />
+                  <AuditPage language={preferences.language} timeZone={clientTimeZone} />
                 ) : active === "alerts" ? (
-                  <AlertRulesPage t={t} canManage={session.canManage} language={preferences.language} timeZone={preferences.timeZone} />
+                  <AlertRulesPage t={t} canManage={session.canManage} language={preferences.language} timeZone={clientTimeZone} />
                 ) : active === "dashboard" ? (
-                  <Dashboard language={preferences.language} timeZone={preferences.timeZone} onHistory={() => navigate("executions")} onExecution={id => navigate(`execution:${id}`)} />
+                  <Dashboard language={preferences.language} timeZone={clientTimeZone} onHistory={() => navigate("executions")} onExecution={id => navigate(`execution:${id}`)} />
                 ) : (
                 <Paper
                   variant="outlined"

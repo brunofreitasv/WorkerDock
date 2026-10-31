@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Stack, Typography } from "@mui/material";
-import type { Labels } from "@workerdock/ui";
+import type { Language, Labels } from "@workerdock/ui";
+import { formatInstant } from "../../localTime";
 import {
   previewDynamicValues,
   type DynamicValuePreviewRequest,
@@ -10,9 +11,13 @@ import {
 export function DynamicValuePreview({
   request,
   t,
+  language = "en",
+  clientTimeZone = "UTC",
 }: {
   request: DynamicValuePreviewRequest | null;
   t: Labels;
+  language?: Language;
+  clientTimeZone?: string;
 }) {
   const generation = useRef(0);
   const [result, setResult] = useState<DynamicValuePreviewResponse | null>(null);
@@ -50,7 +55,7 @@ export function DynamicValuePreview({
       {result && (
         <Alert severity={result.issues.length ? "warning" : "info"}>
           <Stack spacing={1}>
-            <Typography>{t.previewSampleContext.replace("{sampleAtUtc}", request?.sampleAtUtc ?? "")}</Typography>
+            <Typography>{t.previewSampleContext.replace("{sampleAtUtc}", formatInstant(request?.sampleAtUtc, language, clientTimeZone))}</Typography>
             <Typography>{t.dynamicExampleOnly}</Typography>
             {result.issues.map((issue, index) => (
               <Typography key={`${issue.path}-${issue.code}-${index}`}>

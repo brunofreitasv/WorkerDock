@@ -8,10 +8,11 @@ import { PeriodControl } from "../monitoring/PeriodControl";
 import { toUtcRange, type HistoryPeriod } from "../monitoring/historyTime";
 import { useVisiblePolling } from "../monitoring/useVisiblePolling";
 import type { MonitoringPage } from "../monitoring/monitoringTypes";
+import { formatInstant } from "../../localTime";
 
 type Delivery = { deliveryId: string; incidentId: string; ruleName: string; subjectKey: string; kind: string; status: string; attemptCount: number; nextAvailableAtUtc: string; completedAtUtc: string | null; safeCode: string | null };
-function displayDate(value: string | null, locale: string, timeZone: string) {
-  return value ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone }).format(new Date(value)) : "—";
+function displayDate(value: string | null, language: "en" | "pt-BR", timeZone: string) {
+  return formatInstant(value, language, timeZone);
 }
 
 export function DeliveryHistoryTable({ language, timeZone }: { language: string; timeZone: string }) {
@@ -53,7 +54,7 @@ export function DeliveryHistoryTable({ language, timeZone }: { language: string;
       </Stack>
     </HistoryFilters>
     <HistoryResults title={label("Delivery results", "Resultados das entregas")} onRefresh={restart} refreshLabel={label("Refresh", "Atualizar")}
-      updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${updatedAt.toLocaleTimeString(locale, { timeZone })}` : undefined}
+      updatedAt={updatedAt ? `${label("Updated", "Atualizado")}: ${formatInstant(updatedAt, locale, timeZone, "time")}` : undefined}
       footer={<CursorPager previousCount={previous.length} nextCursor={data?.nextCursor ?? null} language={pt ? "pt-BR" : "en"}
         onPrevious={() => { const stack = [...previous]; setCursor(stack.pop() ?? ""); setPrevious(stack); }}
         onNext={() => { if (!data?.nextCursor) return; setPrevious(stack => [...stack, cursor]); setCursor(data.nextCursor); }} />}>

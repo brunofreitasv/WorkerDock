@@ -68,7 +68,7 @@ test("formats the updated time in the selected timezone", async () => {
   render(<Dashboard language="pt-BR" timeZone="Pacific/Kiritimati" onHistory={vi.fn()} onExecution={vi.fn()} />);
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-  expect(screen.getByText("Atualizado: 02:00:00")).toBeVisible();
+  expect(screen.getByText("Atualizado: 2:00:00")).toBeVisible();
 });
 
 test("keeps days and time in durations over 24 hours", async () => {
@@ -80,4 +80,17 @@ test("keeps days and time in durations over 24 hours", async () => {
   } } as never);
   render(<Dashboard language="en" timeZone="UTC" onHistory={vi.fn()} onExecution={vi.fn()} />);
   expect(await screen.findByText("1d 02:03:04")).toBeVisible();
+});
+
+test("shows UTC instants on the client side of midnight", async () => {
+  vi.mocked(read).mockResolvedValue({ data: {
+    instanceId: "tenant", observedUtc: "2026-10-30T03:15:00Z", overall: "Healthy", queued: 0, running: 0,
+    needsReview: 0, succeeded24h: 0, failed24h: 0, longRunning: 0, upcoming: 1, runtimeReady: true,
+    hostCeiling: 4, runtimeHeartbeatUtc: "2026-10-30T03:15:00Z",
+    upcomingItems: [{ jobId: "next", jobName: "Next job", templateId: "http", scheduledForUtc: "2026-10-30T03:15:00Z" }],
+    recentItems: [{ executionId: "recent", jobId: "job", jobName: "Recent job", state: "Succeeded", createdAtUtc: "2026-10-30T01:15:00Z", correlationId: "corr", templateId: "http", duration: "00:01:00" }],
+  } } as never);
+  render(<Dashboard language="en" timeZone="America/Sao_Paulo" onHistory={vi.fn()} onExecution={vi.fn()} />);
+  expect(await screen.findByText(/Next job · http · 10\/30\/2026, 12:15:00 AM/)).toBeVisible();
+  expect(screen.getByText("10/29/2026, 10:15:00 PM")).toBeVisible();
 });

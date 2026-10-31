@@ -1,7 +1,7 @@
 export { AppShell } from "./AppShell";
 export type { NavigationGroup } from "./AppShell";
 export { BrandMark } from "./BrandMark";
-export { translations, usePreferences, timeZones } from "./preferences";
+export { translations, usePreferences } from "./preferences";
 export type { Language, Labels } from "./preferences";
 export { TemplateForm } from "./forms/TemplateForm";
 export type { TemplateDescriptorDto } from "./forms/TemplateForm";

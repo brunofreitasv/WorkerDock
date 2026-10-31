@@ -1,6 +1,7 @@
 import { Alert, Chip, Paper, Stack, TextField, Typography } from "@mui/material";
-import { timeZones, type Labels, type Language } from "@workerdock/ui";
+import type { Labels, Language } from "@workerdock/ui";
 import type { Session } from "../../auth/SessionProvider";
+import { formatInstant } from "../../localTime";
 
 interface Props {
   t: Labels;
@@ -9,10 +10,9 @@ interface Props {
   language: Language;
   setLanguage: (value: Language) => void;
   timeZone: string;
-  setTimeZone: (value: string) => void;
 }
 
-export function PersonalSettings({ t, mode, canManage, language, setLanguage, timeZone, setTimeZone }: Props) {
+export function PersonalSettings({ t, mode, canManage, language, setLanguage, timeZone }: Props) {
   return (
     <Stack spacing={3}>
       <Paper component="section" aria-label={t.access} variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: 760 }}>
@@ -29,12 +29,10 @@ export function PersonalSettings({ t, mode, canManage, language, setLanguage, ti
           <TextField select label={t.language} value={language} onChange={(e) => setLanguage(e.target.value === "pt-BR" ? "pt-BR" : "en")} slotProps={{ select: { native: true } }} sx={{ minWidth: 180 }}>
             <option value="en">English</option><option value="pt-BR">Português (Brasil)</option>
           </TextField>
-          <TextField select label={t.timeZone} value={timeZone} onChange={(e) => setTimeZone(e.target.value)} slotProps={{ select: { native: true } }} sx={{ minWidth: 200 }}>
-            {timeZones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
-          </TextField>
+          <Typography>{t.timeZone}: {timeZone}</Typography>
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-          {t.updated}: {new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short", timeZone }).format(new Date())}
+          {t.updated}: {formatInstant(new Date(), language, timeZone)}
         </Typography>
       </Paper>
     </Stack>
