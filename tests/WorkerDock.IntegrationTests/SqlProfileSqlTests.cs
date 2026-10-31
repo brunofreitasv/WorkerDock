@@ -41,5 +41,3 @@ public sealed partial class SqlProfileTests
         await f.ExecuteAsync("DROP TRIGGER [workerdock].SqlProfileAuditFailure");
     }
 }
-
-\n

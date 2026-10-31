@@ -142,5 +142,3 @@ public sealed class JobAdmissionTests
     }
 
 }
-
-\n
