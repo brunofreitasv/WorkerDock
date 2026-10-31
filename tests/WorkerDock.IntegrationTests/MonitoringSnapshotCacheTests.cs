@@ -147,10 +147,3 @@ public sealed class MonitoringSnapshotCacheTests
         public ValueTask<TenantHealthDto> HealthAsync(CancellationToken ct) => throw new NotSupportedException();
     }
 }
-
-
-
-
-
-
-
