@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { useVisiblePolling } from "./useVisiblePolling";
 
@@ -103,6 +104,36 @@ test("new reload keys fetch immediately and ignore a superseded response", async
   await act(async () => { resolveOld("old"); await oldRequest; });
   expect(result.current.data).toBe("new");
   expect(vi.getTimerCount()).toBe(1);
+});
+
+test("StrictMode effect replay does not duplicate a pending request for the same view", async () => {
+  vi.useFakeTimers();
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  let resolveRequest!: (value: string) => void;
+  const pending = new Promise<string>(resolve => { resolveRequest = resolve; });
+  const load = vi.fn(() => pending);
+  const { unmount } = renderHook(() => useVisiblePolling(load, "same-view", 15000), { wrapper: StrictMode });
+  expect(load).toHaveBeenCalledTimes(1);
+  unmount();
+  await act(async () => { resolveRequest("done"); await pending; });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test("changing the interval does not duplicate a pending request for the same view", async () => {
+  vi.useFakeTimers();
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  let resolveRequest!: (value: string) => void;
+  const pending = new Promise<string>(resolve => { resolveRequest = resolve; });
+  const load = vi.fn(() => pending);
+  const { rerender, unmount } = renderHook(({ interval }) => useVisiblePolling(load, "same-view", interval), {
+    initialProps: { interval: 15000 },
+  });
+  expect(load).toHaveBeenCalledTimes(1);
+  rerender({ interval: 30000 });
+  expect(load).toHaveBeenCalledTimes(1);
+  unmount();
+  await act(async () => { resolveRequest("done"); await pending; });
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 test("fifty visible views at fifteen seconds make 200 recurring requests per minute", async () => {
