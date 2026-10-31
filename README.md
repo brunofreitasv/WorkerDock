@@ -2,9 +2,15 @@
 
 <img src="frontend/packages/ui/src/brand/workerdock-mark.png" alt="WorkerDock logo" width="64">
 
-WorkerDock is a self-hosted platform for defining, scheduling, executing, and monitoring jobs through trusted, versioned templates. SQL Server and HTTP templates are included; teams can add their own .NET templates for other workflows. Each tenant has a web application, a SQL Server database, and one Windows runtime service. The optional Control Center provides a directory and health view for independently deployed tenants.
+WorkerDock is a self-hosted platform for defining, scheduling, executing, and monitoring jobs through trusted, versioned templates. It includes SQL Server and HTTP templates, and teams can install their own .NET templates for other workflows.
 
-![WorkerDock routes jobs through isolated execution to different destinations](docs/media/workerdock-overview.png)
+Each tenant has a web application, a SQL Server database, and one Windows runtime service. The optional Control Center provides a directory and health view for independently deployed tenants.
+
+## How jobs work
+
+An operator selects an installed template, configures a job, and activates it after review. The tenant runtime picks up manual or scheduled work, runs the selected template in an isolated child process, and records the result in the tenant database. The template defines what the job does.
+
+<img src="docs/media/workerdock-overview.png" alt="A job enters an isolated execution process, which can use SQL Server, HTTP, or a custom template" width="520">
 
 ## Capabilities
 
@@ -18,11 +24,15 @@ WorkerDock is a self-hosted platform for defining, scheduling, executing, and mo
 
 ## Templates
 
-![An extensible catalog of SQL Server, HTTP, and custom template modules](docs/media/workerdock-templates.png)
+Every job selects a specific template version. WorkerDock includes [SQL Server](docs/reference/sql-template.md) and [HTTP](docs/reference/http-template.md) templates. Developers can build a [custom template](docs/how-to/add-custom-template.md) for another approved workflow, then register and deploy it with the Web, Worker, and Executor processes.
 
-Every job selects a specific template version. WorkerDock includes [SQL Server](docs/reference/sql-template.md) and [HTTP](docs/reference/http-template.md) templates. Developers can build a [custom template](docs/how-to/add-custom-template.md) for another approved workflow, then register and deploy it with the Web, Worker, and Executor processes. Operators can select installed templates in the dashboard; the dashboard does not accept executable uploads. The [sample template](examples/WorkerDock.SampleTemplate/SampleTemplate.cs) and [authoring reference](docs/reference/template-authoring.md) show the contract and deployment requirements.
+Operators can select installed templates in the dashboard; the dashboard does not accept executable uploads. The [sample template](examples/WorkerDock.SampleTemplate/SampleTemplate.cs) and [authoring reference](docs/reference/template-authoring.md) show the contract and deployment requirements.
+
+<img src="docs/media/workerdock-templates.png" alt="A catalog with built-in SQL Server and HTTP templates, a custom template, and room for additional templates" width="420">
 
 ## Architecture
+
+The runtime starts bounded child processes to run trusted templates. It reads queued work directly from the tenant database; no external message broker is required. See [architecture](docs/reference/architecture.md) and [execution guarantees](docs/reference/execution-guarantees.md) for details.
 
 ```mermaid
 flowchart LR
@@ -36,8 +46,6 @@ flowchart LR
     Template -. "developer installed" .-> Custom["Custom .NET template"]
     Center["Optional Control Center"] -. "links and health" .-> Web
 ```
-
-The runtime starts bounded child processes to run trusted templates. It reads queued work directly from the tenant database; no external message broker is required. See [architecture](docs/reference/architecture.md) and [execution guarantees](docs/reference/execution-guarantees.md) for details.
 
 ## Get started
 
