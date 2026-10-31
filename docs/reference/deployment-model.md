@@ -26,15 +26,7 @@ another service.
 
 ## Production prerequisites
 
-Production readiness remains under validation. The repository does not include a
-production `ISecretVault` integration for the Control Center, and its Production
-host fails startup until a trusted adapter is registered. The tenant runtime and
-executor use an unavailable vault unless a trusted adapter is integrated; the
-development environment mapping is disabled unless explicitly enabled. Do not
-rely on secret-backed jobs, health probes, or alert sinks until the appropriate
-vault integration is installed and verified. Complete the
-[release checklist](../validation/release-checklist.md) against disposable Windows and SQL
-infrastructure before live use.
+Production deployments must install a trusted `ISecretVault` adapter in each process that resolves secrets. The Control Center refuses Production startup without one; tenant processes otherwise have an unavailable vault for secret-backed jobs, health probes, and alerts. The development environment mapping is not a production provider. Use the [release checklist](../validation/release-checklist.md) to verify the selected Windows, SQL, identity, vault, and restore configuration.
 
 ## Database and configuration
 

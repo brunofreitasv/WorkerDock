@@ -94,8 +94,7 @@ configured bounded interval (`Worker:DrainSeconds`, default 40), then forces loc
 containment. Unknown
 effects or a lost outcome acknowledgement never become a fabricated success.
 Status events feed the current [execution monitoring](monitoring.md) timeline.
-Real SQL fences, restart, and migration proofs remain pending as described in
-[database verification](database-migrations.md); memory and real-process tests establish separate facts.
+Verify SQL fences, restart, and migrations using [database verification](database-migrations.md); memory and real-process tests establish separate facts.
 
 ## Per-attempt failure diagnostics
 

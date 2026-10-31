@@ -4,15 +4,7 @@ Deployment has four parts: prepare one tenant database, package a compatible Web
 
 This guide describes operator-managed deployment for one tenant and, optionally, a separate Control Center. The runtime and Executor require Windows because process containment and IPC use Windows APIs. IIS and Windows Services are optional hosting choices; operators select their build, packaging, and process-management tools. A tenant has a Web process, one runtime service, bounded execution child processes, and one tenant database. The Control Center is separate, stores its state in protected files, and does not host tenant work or provision tenants.
 
-Production readiness is still under validation. The repository does not include
-a production `ISecretVault` integration for the Control Center; its production
-host fails startup until a trusted adapter is registered. The tenant runtime
-currently calls the development vault registration, which returns
-an unavailable provider unless the development-only environment mapping is
-enabled. Install and review your tenant vault adapter before relying on
-secret-backed jobs or alert sinks. These integration steps require code and deployment configuration; the repository does not include an enterprise vault.
-Complete the [release checklist](../validation/release-checklist.md) on disposable
-infrastructure before using this procedure for a live workload.
+A production deployment must provide a trusted `ISecretVault` adapter for the Control Center; its Production host fails startup without one. Tenant processes also need a trusted adapter before secret-backed jobs, health checks, or alerts can use their credentials. The repository's development environment mapping is not a production vault. Install and verify the adapters and complete the [release checklist](../validation/release-checklist.md) for the target environment.
 
 ## Requirements and identities
 

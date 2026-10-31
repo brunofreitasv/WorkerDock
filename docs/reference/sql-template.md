@@ -29,7 +29,7 @@ Diagnostics are durable audited executions, bounded to 32 outstanding diagnostic
 
 ## Mock instance
 
-Development Tenant:Adapter=Memory supports profile CRUD, allowlists, revision pinning and retirement. It does not execute SQL or connectivity diagnostics. Diagnostics return PersistenceUnavailable; UI tests must not label mock acceptance as SQL target success. Database, locking, permission, TLS, transaction and real target claims remain pending until the tests below run against SQL Server.
+Development Tenant:Adapter=Memory supports profile CRUD, allowlists, revision pinning and retirement. It does not execute SQL or connectivity diagnostics. Diagnostics return PersistenceUnavailable; UI tests must not label mock acceptance as SQL target success. Use the SQL Server tests below to verify database, locking, permissions, TLS, transactions, and real target connectivity.
 
 ## SQL verification
 

@@ -4,8 +4,6 @@
 
 WorkerDock is a self-hosted platform for defining, scheduling, executing, and monitoring SQL Server and HTTP jobs. Each tenant has a web application, a SQL Server database, and one Windows runtime service. The optional Control Center provides a directory and health view for independently deployed tenants.
 
-The project is currently in **release validation**. See [release status](#release-status) before planning a production deployment.
-
 ## Capabilities
 
 | Area | What WorkerDock provides |
@@ -40,8 +38,8 @@ The runtime starts bounded child processes to run trusted templates. It reads qu
 
 The [documentation index](docs/index.md) links to task guides and technical references. The tenant SQL schema is defined by the checksummed manifest in [database/tenant](database/tenant); `current-state.sql` is for a new, empty database only.
 
-## Release status
+## Production deployment
 
-WorkerDock is not yet validated for production use. Production secret-vault adapters are deployment-specific and are not included in this repository. Portable builds and tests do not establish readiness for live SQL Server, Windows/IIS, Entra ID, backup and restore, or workload requirements. Review the [release checklist](docs/validation/release-checklist.md) and [release evidence](docs/validation/release-evidence.md) before deployment.
+WorkerDock supports production deployments on Windows with SQL Server 2022 or newer. Install a deployment-specific `ISecretVault` adapter in each process that resolves secrets; the repository does not include one. Follow the [deployment guide](docs/how-to/deploy-production.md) and [release checklist](docs/validation/release-checklist.md) for environment-specific setup and verification. Record candidate results in [release evidence](docs/validation/release-evidence.md).
 
 WorkerDock uses the [MIT License](LICENSE). See [SECURITY.md](SECURITY.md) for security reporting.
