@@ -153,6 +153,7 @@ builder.Services.TryAddSingleton<IMonitoringQueries>(provider =>
         return new SqlMonitoringQueries(provider.GetRequiredService<TenantSqlStartup>().Options, clock);
     return new UnavailableMonitoringQueries(Guid.TryParse(config["Tenant:InstanceId"], out var instanceId) ? instanceId : Guid.Empty, clock);
 });
+builder.Services.AddSingleton<MonitoringSnapshotCache>();
 builder.Services.TryAddSingleton<IExecutionEventQueries>(provider =>
 {
     var config = provider.GetRequiredService<IConfiguration>();

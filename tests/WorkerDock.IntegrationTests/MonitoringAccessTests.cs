@@ -1,10 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WorkerDock.Contracts.Secrets;
+using WorkerDock.Application.Monitoring;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace WorkerDock.IntegrationTests;
 
@@ -52,6 +55,42 @@ public sealed class MonitoringAccessTests
     }
 
     [Fact]
+    public async Task Authorized_snapshot_routes_share_queries_keep_no_store_and_preserve_authorization()
+    {
+        using var issuer = new LocalOidcIssuer("Viewer");
+        var queries = new CountingMonitoringQueries();
+        await using var host = new MonitoringTestHost(issuer, "Manager", queries);
+        using var client = host.Client();
+        await issuer.SignIn(client);
+
+        foreach (var path in new[] { "/api/dashboard", "/api/dashboard", "/api/monitoring/workers", "/api/monitoring/workers" })
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(true, response.Headers.CacheControl?.NoStore);
+        }
+
+        Assert.Equal(1, queries.DashboardCalls);
+        Assert.Equal(1, queries.WorkersCalls);
+        using var anonymous = host.Client();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/dashboard")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/monitoring/workers")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Failed_snapshot_route_keeps_the_existing_503_envelope()
+    {
+        using var issuer = new LocalOidcIssuer("Viewer");
+        var queries = new CountingMonitoringQueries { FailDashboard = true };
+        await using var host = new MonitoringTestHost(issuer, "Manager", queries);
+        using var client = host.Client();
+        await issuer.SignIn(client);
+
+        using var response = await client.GetAsync("/api/dashboard");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Contains("MonitoringUnavailable", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+    [Fact]
     public async Task Health_credential_is_separate_from_user_session_and_only_unlocks_health()
     {
         var reference = "HEALTH_TEST_" + Guid.NewGuid().ToString("N").ToUpperInvariant();
@@ -89,4 +128,67 @@ public sealed class MonitoringAccessTests
             return ValueTask.FromResult(new SecretValue(token));
         }
     }
+}
+
+internal sealed class MonitoringTestHost : WebApplicationFactory<WorkerDock.Web.WebAssemblyMarker>
+{
+    private readonly LocalOidcIssuer _issuer;
+    private readonly string _role;
+    private readonly CountingMonitoringQueries _queries;
+    private readonly string _reference = "TEST_" + Guid.NewGuid().ToString("N").ToUpperInvariant();
+
+    public MonitoringTestHost(LocalOidcIssuer issuer, string role, CountingMonitoringQueries queries)
+    {
+        _issuer = issuer;
+        _role = role;
+        _queries = queries;
+        Environment.SetEnvironmentVariable("WORKERDOCK_BOOTSTRAP_" + _reference, "synthetic-test-credential");
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development").ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Tenant:Adapter"] = "Memory",
+            ["Tenant:InstanceId"] = Guid.NewGuid().ToString(),
+            ["Access:Authority"] = "https://issuer.example",
+            ["Access:ClientId"] = "tenant-client",
+            ["Access:ClientSecretReference"] = _reference,
+            ["Access:RequiredManagementRole"] = _role,
+            ["Access:RoleClaimType"] = "roles"
+        }));
+        builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<IMonitoringQueries>();
+            services.AddSingleton<IMonitoringQueries>(_queries);
+            services.Configure<OpenIdConnectOptions>("oidc", options => options.Backchannel = new HttpClient(_issuer, disposeHandler: false));
+        });
+    }
+
+    public HttpClient Client() => CreateClient(new() { BaseAddress = new("https://localhost"), AllowAutoRedirect = false });
+    protected override void Dispose(bool disposing)
+    {
+        Environment.SetEnvironmentVariable("WORKERDOCK_BOOTSTRAP_" + _reference, null);
+        base.Dispose(disposing);
+    }
+}
+internal sealed class CountingMonitoringQueries : IMonitoringQueries
+{
+    private static DashboardDto DashboardValue() => new(Guid.NewGuid(), DateTimeOffset.UtcNow, "Healthy", 0, 0, 0, 0, 0, 0, 0, true, 4, null, [], []);
+    private static RuntimeStatusDto WorkersValue() => new(Guid.NewGuid(), true, 4, DateTimeOffset.UtcNow);
+    public int DashboardCalls;
+    public int WorkersCalls;
+    public bool FailDashboard { get; set; }
+    public ValueTask<DashboardDto> DashboardAsync(CancellationToken ct)
+    {
+        Interlocked.Increment(ref DashboardCalls);
+        return FailDashboard ? ValueTask.FromException<DashboardDto>(new InvalidOperationException("query failed")) : ValueTask.FromResult(DashboardValue());
+    }
+    public ValueTask<RuntimeStatusDto> WorkersAsync(CancellationToken ct) { Interlocked.Increment(ref WorkersCalls); return ValueTask.FromResult(WorkersValue()); }
+    public ValueTask<Page<JobSummaryDto>> JobsAsync(MonitoringFilter filter, PageRequest page, CancellationToken ct) => throw new NotSupportedException();
+    public ValueTask<Page<ExecutionHistoryItemDto>> ExecutionsAsync(ExecutionHistoryFilter filter, PageRequest page, CancellationToken ct) => throw new NotSupportedException();
+    public ValueTask<ExecutionDetailsDto> ExecutionAsync(Guid executionId, CancellationToken ct) => throw new NotSupportedException();
+    public ValueTask<Page<AuditSummaryDto>> AuditAsync(AuditHistoryFilter filter, PageRequest page, CancellationToken ct) => throw new NotSupportedException();
+    public ValueTask<IReadOnlyList<string>> AuditEventTypesAsync(CancellationToken ct) => throw new NotSupportedException();
+    public ValueTask<TenantHealthDto> HealthAsync(CancellationToken ct) => throw new NotSupportedException();
 }

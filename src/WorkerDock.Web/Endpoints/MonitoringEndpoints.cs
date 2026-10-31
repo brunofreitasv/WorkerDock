@@ -15,9 +15,9 @@ public static class MonitoringEndpoints
             catch { return Results.Problem(statusCode: 503, extensions: new Dictionary<string, object?> { ["code"] = "MonitoringUnavailable" }); }
         }).RequireAuthorization(AccessPolicies.Read);
 
-        endpoints.MapGet("/api/dashboard", async (IMonitoringQueries queries, CancellationToken ct) =>
+        endpoints.MapGet("/api/dashboard", async (MonitoringSnapshotCache snapshots, CancellationToken ct) =>
         {
-            try { return Results.Ok(await queries.DashboardAsync(ct)); }
+            try { return Results.Ok(await snapshots.DashboardAsync(ct)); }
             catch { return Results.Problem(statusCode: 503, extensions: new Dictionary<string, object?> { ["code"] = "MonitoringUnavailable" }); }
         }).RequireAuthorization(AccessPolicies.Read);
 
@@ -52,9 +52,9 @@ public static class MonitoringEndpoints
             catch { return Results.Problem(statusCode: 503, extensions: new Dictionary<string, object?> { ["code"] = "MonitoringUnavailable" }); }
         }).RequireAuthorization(AccessPolicies.Read);
 
-        endpoints.MapGet("/api/monitoring/workers", async (IMonitoringQueries queries, CancellationToken ct) =>
+        endpoints.MapGet("/api/monitoring/workers", async (MonitoringSnapshotCache snapshots, CancellationToken ct) =>
         {
-            try { return Results.Ok(await queries.WorkersAsync(ct)); }
+            try { return Results.Ok(await snapshots.WorkersAsync(ct)); }
             catch { return Results.Problem(statusCode: 503, extensions: new Dictionary<string, object?> { ["code"] = "MonitoringUnavailable" }); }
         }).RequireAuthorization(AccessPolicies.Read);
 
